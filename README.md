@@ -1,0 +1,2 @@
+# RateMe
+Farcaster MiniApp
