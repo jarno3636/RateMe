@@ -1,50 +1,45 @@
-// app/layout.tsx
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'https://fairplay-vault.vercel.app').replace(/\/$/, '')
+const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
+const MINIAPP_DOMAIN = (() => { try { return new URL(SITE).hostname } catch { return 'localhost' } })()
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),
   title: {
-    default: 'FairPlay Vault — Provably-fair USDC pools on Base',
-    template: '%s — FairPlay Vault',
+    default: 'Rate Me — Creator monetization on Base',
+    template: '%s — Rate Me'
   },
-  description: 'Create and join commit–reveal USDC pools on Base. Transparent, no VRF required.',
+  description: 'Subscriptions, paid posts, and custom requests with instant on-chain settlement.',
   openGraph: {
     type: 'website',
     url: SITE,
-    siteName: 'FairPlay Vault',
-    title: 'FairPlay Vault',
-    description: 'Provably-fair USDC pools on Base.',
-    images: [{ url: `${SITE}/miniapp-card.png`, width: 1200, height: 630, alt: 'FairPlay Vault' }],
+    siteName: 'Rate Me',
+    images: [{ url: `${SITE}/miniapp-card.png`, width: 1200, height: 630 }]
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'FairPlay Vault',
-    description: 'Provably-fair USDC pools on Base.',
-    images: [`${SITE}/miniapp-card.png`],
+    images: [`${SITE}/miniapp-card.png`]
   },
-  icons: { icon: [{ url: '/favicon.ico' }] },
-  robots: { index: true, follow: true },
+  // Mini App directory hint (safe to include site-wide too)
+  other: {
+    'fc:miniapp:domain': MINIAPP_DOMAIN
+  }
 }
 
 export const viewport: Viewport = {
   themeColor: '#0b1220',
-  colorScheme: 'dark',
   width: 'device-width',
-  initialScale: 1,
+  initialScale: 1
 }
-
-export const dynamic = 'force-dynamic'
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-slate-950 text-slate-100 antialiased">
-        {/* Header placeholder (add later) */}
-        <main className="min-h-screen">{children}</main>
-        {/* Footer placeholder (add later) */}
+      <body>
+        {/* (Header goes here later) */}
+        {children}
+        {/* (Footer goes here later) */}
       </body>
     </html>
   )
