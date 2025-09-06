@@ -31,12 +31,9 @@ export function useCreatorHub() {
   const pub = usePublicClient()
   const { data: wallet } = useWalletClient()
 
-  /** ------- READS ------- */
-
   const readPlan = useCallback(
     async (id: bigint): Promise<Plan> => {
       if (!pub) throw new Error('Public client unavailable')
-      // Use `as const` to keep functionName literal; cast client to any to avoid viem/wagmi generic friction
       const p = await (pub as any).readContract({
         address: CREATOR_HUB as Address,
         abi: CREATOR_HUB_ABI as const,
@@ -79,8 +76,6 @@ export function useCreatorHub() {
     [pub]
   )
 
-  /** ------- ERC20 allowance helper ------- */
-
   const ensureAllowance = useCallback(
     async (token: Address, owner: Address, spender: Address, needed: bigint) => {
       if (!pub) throw new Error('Public client unavailable')
@@ -106,9 +101,6 @@ export function useCreatorHub() {
     [pub, wallet]
   )
 
-  /** ------- WRITE FLOWS ------- */
-
-  // Subscribe: ETH (value) or ERC20 (approve)
   const subscribe = useCallback(
     async (planId: bigint, periods: number) => {
       if (!address || !wallet) throw new Error('Connect wallet')
@@ -144,7 +136,6 @@ export function useCreatorHub() {
     [address, wallet, pub, readPlan, ensureAllowance]
   )
 
-  // Buy post: ETH (value) or ERC20 (approve)
   const buyPost = useCallback(
     async (postId: bigint) => {
       if (!address || !wallet) throw new Error('Connect wallet')
@@ -178,8 +169,6 @@ export function useCreatorHub() {
     },
     [address, wallet, pub, readPost, ensureAllowance]
   )
-
-  /** ------- Creator helpers ------- */
 
   const createPlan = useCallback(
     async (params: {
@@ -223,12 +212,5 @@ export function useCreatorHub() {
     [pub, wallet]
   )
 
-  return {
-    readPlan,
-    readPost,
-    subscribe,
-    buyPost,
-    createPlan,
-    createPost,
-  }
+  return { readPlan, readPost, subscribe, buyPost, createPlan, createPost }
 }
