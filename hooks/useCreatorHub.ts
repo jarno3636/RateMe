@@ -1,7 +1,7 @@
 // hooks/useCreatorHub.ts
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import type { Address } from 'viem'
-import { erc20Abi, getContract } from 'viem'
+import { erc20Abi } from 'viem'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { CREATOR_HUB, CREATOR_HUB_ABI } from '@/lib/creatorHub'
 
@@ -31,30 +31,15 @@ export function useCreatorHub() {
   const pub = usePublicClient()
   const { data: wallet } = useWalletClient()
 
-  // Strongly typed contracts (read + write)
-  const hubRead = useMemo(() => {
-    if (!pub) return null
-    return getContract({
-      address: CREATOR_HUB,
-      abi: CREATOR_HUB_ABI,
-      client: { public: pub },
-    })
-  }, [pub])
-
-  const hubWrite = useMemo(() => {
-    if (!wallet) return null
-    return getContract({
-      address: CREATOR_HUB,
-      abi: CREATOR_HUB_ABI,
-      client: { wallet },
-    })
-  }, [wallet])
-
   const readPlan = useCallback(
-    async (id: bigint) => {
-      if (!hubRead) throw new Error('Public client unavailable')
-      // returns tuple as defined by ABI
-      const p = await hubRead.read.plans([id])
+    async (id: bigint): Promise<Plan> => {
+      if (!pub) throw new Error('Public client unavailable')
+      const p = await (pub as any).readContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'plans',
+        args: [id],
+      })
       const plan: Plan = {
         creator: p[0],
         token: p[1],
@@ -66,13 +51,18 @@ export function useCreatorHub() {
       }
       return plan
     },
-    [hubRead]
+    [pub]
   )
 
   const readPost = useCallback(
-    async (id: bigint) => {
-      if (!hubRead) throw new Error('Public client unavailable')
-      const p = await hubRead.read.posts([id])
+    async (id: bigint): Promise<Post> => {
+      if (!pub) throw new Error('Public client unavailable')
+      const p = await (pub as any).readContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'posts',
+        args: [id],
+      })
       const post: Post = {
         creator: p[0],
         token: p[1],
@@ -83,25 +73,22 @@ export function useCreatorHub() {
       }
       return post
     },
-    [hubRead]
+    [pub]
   )
 
-  // Approve ERC20 if needed
   const ensureAllowance = useCallback(
     async (token: Address, owner: Address, spender: Address, needed: bigint) => {
       if (!pub) throw new Error('Public client unavailable')
-
-      const allowance = (await pub.readContract({
+      const allowance = (await (pub as any).readContract({
         address: token,
         abi: erc20Abi,
         functionName: 'allowance',
         args: [owner, spender],
       })) as bigint
-
       if (allowance >= needed) return
       if (!wallet) throw new Error('Connect wallet')
 
-      const { request } = await pub.simulateContract({
+      const { request } = await (pub as any).simulateContract({
         address: token,
         abi: erc20Abi,
         functionName: 'approve',
@@ -114,64 +101,75 @@ export function useCreatorHub() {
     [pub, wallet]
   )
 
-  // Subscribe: ETH (value) or ERC20 (approve)
   const subscribe = useCallback(
     async (planId: bigint, periods: number) => {
-      if (!address) throw new Error('Connect wallet')
-      if (!wallet) throw new Error('Connect wallet')
-      if (!hubRead || !hubWrite || !pub) throw new Error('Clients unavailable')
+      if (!address || !wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
 
       const plan = await readPlan(planId)
       const total = plan.pricePerPeriod * BigInt(periods)
 
       if (plan.token === ZERO) {
-        const { request } = await hubRead.simulate.subscribe([planId, periods], {
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'subscribe',
+          args: [planId, periods],
           account: wallet.account!,
           value: total,
         })
-        const hash = await hubWrite.write.subscribe(request)
+        const hash = await wallet.writeContract(request)
         return pub.waitForTransactionReceipt({ hash })
       } else {
-        await ensureAllowance(plan.token, address, CREATOR_HUB, total)
-        const { request } = await hubRead.simulate.subscribe([planId, periods], {
+        await ensureAllowance(plan.token, address, CREATOR_HUB as Address, total)
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'subscribe',
+          args: [planId, periods],
           account: wallet.account!,
         })
-        const hash = await hubWrite.write.subscribe(request)
+        const hash = await wallet.writeContract(request)
         return pub.waitForTransactionReceipt({ hash })
       }
     },
-    [address, ensureAllowance, hubRead, hubWrite, pub, readPlan, wallet]
+    [address, wallet, pub, readPlan, ensureAllowance]
   )
 
-  // Buy post: ETH (value) or ERC20 (approve)
   const buyPost = useCallback(
     async (postId: bigint) => {
-      if (!address) throw new Error('Connect wallet')
-      if (!wallet) throw new Error('Connect wallet')
-      if (!hubRead || !hubWrite || !pub) throw new Error('Clients unavailable')
+      if (!address || !wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
 
       const post = await readPost(postId)
 
       if (post.token === ZERO) {
-        const { request } = await hubRead.simulate.buyPost([postId], {
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'buyPost',
+          args: [postId],
           account: wallet.account!,
           value: post.price,
         })
-        const hash = await hubWrite.write.buyPost(request)
+        const hash = await wallet.writeContract(request)
         return pub.waitForTransactionReceipt({ hash })
       } else {
-        await ensureAllowance(post.token, address, CREATOR_HUB, post.price)
-        const { request } = await hubRead.simulate.buyPost([postId], {
+        await ensureAllowance(post.token, address, CREATOR_HUB as Address, post.price)
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'buyPost',
+          args: [postId],
           account: wallet.account!,
         })
-        const hash = await hubWrite.write.buyPost(request)
+        const hash = await wallet.writeContract(request)
         return pub.waitForTransactionReceipt({ hash })
       }
     },
-    [address, ensureAllowance, hubRead, hubWrite, pub, readPost, wallet]
+    [address, wallet, pub, readPost, ensureAllowance]
   )
 
-  // Creator helpers
   const createPlan = useCallback(
     async (params: {
       token: Address
@@ -181,39 +179,38 @@ export function useCreatorHub() {
       metadataURI: string
     }) => {
       if (!wallet) throw new Error('Connect wallet')
-      if (!hubRead || !hubWrite || !pub) throw new Error('Clients unavailable')
+      if (!pub) throw new Error('Public client unavailable')
 
-      const { request } = await hubRead.simulate.createPlan(
-        [params.token, params.pricePerPeriod, params.periodDays, params.name, params.metadataURI],
-        { account: wallet.account! }
-      )
-      const hash = await hubWrite.write.createPlan(request)
+      const { request } = await (pub as any).simulateContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'createPlan',
+        args: [params.token, params.pricePerPeriod, params.periodDays, params.name, params.metadataURI],
+        account: wallet.account!,
+      })
+      const hash = await wallet.writeContract(request)
       return pub.waitForTransactionReceipt({ hash })
     },
-    [hubRead, hubWrite, pub, wallet]
+    [pub, wallet]
   )
 
   const createPost = useCallback(
     async (params: { token: Address; price: bigint; accessViaSub: boolean; uri: string }) => {
       if (!wallet) throw new Error('Connect wallet')
-      if (!hubRead || !hubWrite || !pub) throw new Error('Clients unavailable')
+      if (!pub) throw new Error('Public client unavailable')
 
-      const { request } = await hubRead.simulate.createPost(
-        [params.token, params.price, params.accessViaSub, params.uri],
-        { account: wallet.account! }
-      )
-      const hash = await hubWrite.write.createPost(request)
+      const { request } = await (pub as any).simulateContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'createPost',
+        args: [params.token, params.price, params.accessViaSub, params.uri],
+        account: wallet.account!,
+      })
+      const hash = await wallet.writeContract(request)
       return pub.waitForTransactionReceipt({ hash })
     },
-    [hubRead, hubWrite, pub, wallet]
+    [pub, wallet]
   )
 
-  return {
-    readPlan,
-    readPost,
-    subscribe,
-    buyPost,
-    createPlan,
-    createPost,
-  }
+  return { readPlan, readPost, subscribe, buyPost, createPlan, createPost }
 }
