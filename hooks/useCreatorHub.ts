@@ -1,6 +1,6 @@
 // hooks/useCreatorHub.ts
 import { useCallback } from 'react'
-import type { Address } from 'viem'
+import type { Address, Abi } from 'viem'
 import { erc20Abi } from 'viem'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
 import { CREATOR_HUB, CREATOR_HUB_ABI } from '@/lib/creatorHub'
@@ -36,7 +36,7 @@ export function useCreatorHub() {
       if (!pub) throw new Error('Public client unavailable')
       const p = await (pub as any).readContract({
         address: CREATOR_HUB as Address,
-        abi: CREATOR_HUB_ABI as const,
+        abi: CREATOR_HUB_ABI as Abi,      // 👈 pass as Abi (no `as const` here)
         functionName: 'plans',
         args: [id],
       })
@@ -59,7 +59,7 @@ export function useCreatorHub() {
       if (!pub) throw new Error('Public client unavailable')
       const p = await (pub as any).readContract({
         address: CREATOR_HUB as Address,
-        abi: CREATOR_HUB_ABI as const,
+        abi: CREATOR_HUB_ABI as Abi,      // 👈 pass as Abi (no `as const`)
         functionName: 'posts',
         args: [id],
       })
@@ -112,7 +112,7 @@ export function useCreatorHub() {
       if (plan.token === ZERO) {
         const { request } = await (pub as any).simulateContract({
           address: CREATOR_HUB as Address,
-          abi: CREATOR_HUB_ABI as const,
+          abi: CREATOR_HUB_ABI as Abi,
           functionName: 'subscribe',
           args: [planId, periods],
           account: wallet.account!,
@@ -124,7 +124,7 @@ export function useCreatorHub() {
         await ensureAllowance(plan.token, address, CREATOR_HUB as Address, total)
         const { request } = await (pub as any).simulateContract({
           address: CREATOR_HUB as Address,
-          abi: CREATOR_HUB_ABI as const,
+          abi: CREATOR_HUB_ABI as Abi,
           functionName: 'subscribe',
           args: [planId, periods],
           account: wallet.account!,
@@ -146,7 +146,7 @@ export function useCreatorHub() {
       if (post.token === ZERO) {
         const { request } = await (pub as any).simulateContract({
           address: CREATOR_HUB as Address,
-          abi: CREATOR_HUB_ABI as const,
+          abi: CREATOR_HUB_ABI as Abi,
           functionName: 'buyPost',
           args: [postId],
           account: wallet.account!,
@@ -158,7 +158,7 @@ export function useCreatorHub() {
         await ensureAllowance(post.token, address, CREATOR_HUB as Address, post.price)
         const { request } = await (pub as any).simulateContract({
           address: CREATOR_HUB as Address,
-          abi: CREATOR_HUB_ABI as const,
+          abi: CREATOR_HUB_ABI as Abi,
           functionName: 'buyPost',
           args: [postId],
           account: wallet.account!,
@@ -183,7 +183,7 @@ export function useCreatorHub() {
 
       const { request } = await (pub as any).simulateContract({
         address: CREATOR_HUB as Address,
-        abi: CREATOR_HUB_ABI as const,
+        abi: CREATOR_HUB_ABI as Abi,
         functionName: 'createPlan',
         args: [params.token, params.pricePerPeriod, params.periodDays, params.name, params.metadataURI],
         account: wallet.account!,
@@ -201,7 +201,7 @@ export function useCreatorHub() {
 
       const { request } = await (pub as any).simulateContract({
         address: CREATOR_HUB as Address,
-        abi: CREATOR_HUB_ABI as const,
+        abi: CREATOR_HUB_ABI as Abi,
         functionName: 'createPost',
         args: [params.token, params.price, params.accessViaSub, params.uri],
         account: wallet.account!,
