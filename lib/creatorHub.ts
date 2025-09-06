@@ -1,69 +1,234 @@
-// lib/creatorHub.ts
-import type { Address } from 'viem';
+// hooks/useCreatorHub.ts
+import { useCallback } from 'react'
+import type { Address } from 'viem'
+import { erc20Abi } from 'viem'
+import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
+import { CREATOR_HUB, CREATOR_HUB_ABI } from '@/lib/creatorHub'
 
-export const CREATOR_HUB: Address = '0x49b9a469d8867e29a4e6810aed4dad724317f606'; // Base
+type Plan = {
+  creator: Address
+  token: Address
+  pricePerPeriod: bigint
+  periodDays: number
+  active: boolean
+  name: string
+  metadataURI: string
+}
 
-export const CREATOR_HUB_ABI = [
-  { "type":"function","stateMutability":"view","name":"feeBps","inputs":[],"outputs":[{"type":"uint96"}] },
-  { "type":"function","stateMutability":"view","name":"feeRecipient","inputs":[],"outputs":[{"type":"address"}] },
-  { "type":"function","stateMutability":"view","name":"paused","inputs":[],"outputs":[{"type":"bool"}] },
+type Post = {
+  creator: Address
+  token: Address
+  price: bigint
+  active: boolean
+  accessViaSub: boolean
+  uri: string
+}
 
-  { "type":"function","stateMutability":"view","name":"plans","inputs":[{"type":"uint256"}],"outputs":[
-    {"type":"address","name":"creator"},
-    {"type":"address","name":"token"},
-    {"type":"uint128","name":"pricePerPeriod"},
-    {"type":"uint32","name":"periodDays"},
-    {"type":"bool","name":"active"},
-    {"type":"string","name":"name"},
-    {"type":"string","name":"metadataURI"}
-  ]},
-  { "type":"function","stateMutability":"view","name":"posts","inputs":[{"type":"uint256"}],"outputs":[
-    {"type":"address","name":"creator"},
-    {"type":"address","name":"token"},
-    {"type":"uint128","name":"price"},
-    {"type":"bool","name":"active"},
-    {"type":"bool","name":"accessViaSub"},
-    {"type":"string","name":"uri"}
-  ]},
-  { "type":"function","stateMutability":"view","name":"isActive","inputs":[{"type":"address","name":"user"},{"type":"address","name":"creator"}],"outputs":[{"type":"bool"}] },
-  { "type":"function","stateMutability":"view","name":"hasPostAccess","inputs":[{"type":"address","name":"user"},{"type":"uint256","name":"postId"}],"outputs":[{"type":"bool"}] },
+const ZERO: Address = '0x0000000000000000000000000000000000000000'
 
-  { "type":"function","stateMutability":"nonpayable","name":"createPlan","inputs":[
-    {"type":"address","name":"token"},
-    {"type":"uint128","name":"pricePerPeriod"},
-    {"type":"uint32","name":"periodDays"},
-    {"type":"string","name":"name"},
-    {"type":"string","name":"metadataURI"}
-  ],"outputs":[{"type":"uint256","name":"id"}] },
-  { "type":"function","stateMutability":"nonpayable","name":"updatePlan","inputs":[
-    {"type":"uint256","name":"id"},
-    {"type":"string","name":"name"},
-    {"type":"string","name":"metadataURI"},
-    {"type":"uint128","name":"pricePerPeriod"},
-    {"type":"uint32","name":"periodDays"},
-    {"type":"bool","name":"active"}
-  ],"outputs":[] },
+export function useCreatorHub() {
+  const { address } = useAccount()
+  const pub = usePublicClient()
+  const { data: wallet } = useWalletClient()
 
-  { "type":"function","stateMutability":"nonpayable","name":"createPost","inputs":[
-    {"type":"address","name":"token"},
-    {"type":"uint128","name":"price"},
-    {"type":"bool","name":"accessViaSub"},
-    {"type":"string","name":"uri"}
-  ],"outputs":[{"type":"uint256","name":"id"}] },
-  { "type":"function","stateMutability":"nonpayable","name":"updatePost","inputs":[
-    {"type":"uint256","name":"id"},
-    {"type":"address","name":"token"},
-    {"type":"uint128","name":"price"},
-    {"type":"bool","name":"active"},
-    {"type":"bool","name":"accessViaSub"},
-    {"type":"string","name":"uri"}
-  ],"outputs":[] },
+  /** ------- READS ------- */
 
-  { "type":"function","stateMutability":"payable","name":"subscribe","inputs":[
-    {"type":"uint256","name":"id"},
-    {"type":"uint32","name":"periods"}
-  ],"outputs":[] },
-  { "type":"function","stateMutability":"payable","name":"buyPost","inputs":[
-    {"type":"uint256","name":"id"}
-  ],"outputs":[] },
-] as const;
+  const readPlan = useCallback(
+    async (id: bigint): Promise<Plan> => {
+      if (!pub) throw new Error('Public client unavailable')
+      // Use `as const` to keep functionName literal; cast client to any to avoid viem/wagmi generic friction
+      const p = await (pub as any).readContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'plans',
+        args: [id],
+      })
+      const plan: Plan = {
+        creator: p[0],
+        token: p[1],
+        pricePerPeriod: p[2],
+        periodDays: Number(p[3]),
+        active: p[4],
+        name: p[5],
+        metadataURI: p[6],
+      }
+      return plan
+    },
+    [pub]
+  )
+
+  const readPost = useCallback(
+    async (id: bigint): Promise<Post> => {
+      if (!pub) throw new Error('Public client unavailable')
+      const p = await (pub as any).readContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'posts',
+        args: [id],
+      })
+      const post: Post = {
+        creator: p[0],
+        token: p[1],
+        price: p[2],
+        active: p[3],
+        accessViaSub: p[4],
+        uri: p[5],
+      }
+      return post
+    },
+    [pub]
+  )
+
+  /** ------- ERC20 allowance helper ------- */
+
+  const ensureAllowance = useCallback(
+    async (token: Address, owner: Address, spender: Address, needed: bigint) => {
+      if (!pub) throw new Error('Public client unavailable')
+      const allowance = (await (pub as any).readContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'allowance',
+        args: [owner, spender],
+      })) as bigint
+      if (allowance >= needed) return
+      if (!wallet) throw new Error('Connect wallet')
+
+      const { request } = await (pub as any).simulateContract({
+        address: token,
+        abi: erc20Abi,
+        functionName: 'approve',
+        args: [spender, needed],
+        account: wallet.account!,
+      })
+      const hash = await wallet.writeContract(request)
+      await pub.waitForTransactionReceipt({ hash })
+    },
+    [pub, wallet]
+  )
+
+  /** ------- WRITE FLOWS ------- */
+
+  // Subscribe: ETH (value) or ERC20 (approve)
+  const subscribe = useCallback(
+    async (planId: bigint, periods: number) => {
+      if (!address || !wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
+
+      const plan = await readPlan(planId)
+      const total = plan.pricePerPeriod * BigInt(periods)
+
+      if (plan.token === ZERO) {
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'subscribe',
+          args: [planId, periods],
+          account: wallet.account!,
+          value: total,
+        })
+        const hash = await wallet.writeContract(request)
+        return pub.waitForTransactionReceipt({ hash })
+      } else {
+        await ensureAllowance(plan.token, address, CREATOR_HUB as Address, total)
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'subscribe',
+          args: [planId, periods],
+          account: wallet.account!,
+        })
+        const hash = await wallet.writeContract(request)
+        return pub.waitForTransactionReceipt({ hash })
+      }
+    },
+    [address, wallet, pub, readPlan, ensureAllowance]
+  )
+
+  // Buy post: ETH (value) or ERC20 (approve)
+  const buyPost = useCallback(
+    async (postId: bigint) => {
+      if (!address || !wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
+
+      const post = await readPost(postId)
+
+      if (post.token === ZERO) {
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'buyPost',
+          args: [postId],
+          account: wallet.account!,
+          value: post.price,
+        })
+        const hash = await wallet.writeContract(request)
+        return pub.waitForTransactionReceipt({ hash })
+      } else {
+        await ensureAllowance(post.token, address, CREATOR_HUB as Address, post.price)
+        const { request } = await (pub as any).simulateContract({
+          address: CREATOR_HUB as Address,
+          abi: CREATOR_HUB_ABI as const,
+          functionName: 'buyPost',
+          args: [postId],
+          account: wallet.account!,
+        })
+        const hash = await wallet.writeContract(request)
+        return pub.waitForTransactionReceipt({ hash })
+      }
+    },
+    [address, wallet, pub, readPost, ensureAllowance]
+  )
+
+  /** ------- Creator helpers ------- */
+
+  const createPlan = useCallback(
+    async (params: {
+      token: Address
+      pricePerPeriod: bigint
+      periodDays: number
+      name: string
+      metadataURI: string
+    }) => {
+      if (!wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
+
+      const { request } = await (pub as any).simulateContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'createPlan',
+        args: [params.token, params.pricePerPeriod, params.periodDays, params.name, params.metadataURI],
+        account: wallet.account!,
+      })
+      const hash = await wallet.writeContract(request)
+      return pub.waitForTransactionReceipt({ hash })
+    },
+    [pub, wallet]
+  )
+
+  const createPost = useCallback(
+    async (params: { token: Address; price: bigint; accessViaSub: boolean; uri: string }) => {
+      if (!wallet) throw new Error('Connect wallet')
+      if (!pub) throw new Error('Public client unavailable')
+
+      const { request } = await (pub as any).simulateContract({
+        address: CREATOR_HUB as Address,
+        abi: CREATOR_HUB_ABI as const,
+        functionName: 'createPost',
+        args: [params.token, params.price, params.accessViaSub, params.uri],
+        account: wallet.account!,
+      })
+      const hash = await wallet.writeContract(request)
+      return pub.waitForTransactionReceipt({ hash })
+    },
+    [pub, wallet]
+  )
+
+  return {
+    readPlan,
+    readPost,
+    subscribe,
+    buyPost,
+    createPlan,
+    createPost,
+  }
+}
