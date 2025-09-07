@@ -1,5 +1,5 @@
 // lib/kv.ts
-import crypto from 'crypto'
+// Edge-safe KV helper with a tiny, non-crypto hash (no Node 'crypto' import)
 
 type KVLike = {
   lpush: (key: string, value: string) => Promise<void>
@@ -12,7 +12,7 @@ const hasUpstash =
 let kv: KVLike | null = null
 
 if (hasUpstash) {
-  // Upstash REST client (lightweight – no extra dep)
+  // Upstash REST client (Edge-friendly)
   const base = process.env.KV_REST_API_URL!
   const token = process.env.KV_REST_API_TOKEN!
   const call = async (path: string, body: any[]) => {
@@ -23,27 +23,21 @@ if (hasUpstash) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-      // Edge-friendly
       cache: 'no-store',
     })
     if (!res.ok) throw new Error(`KV error ${res.status}`)
     return res.json()
   }
   kv = {
-    lpush: async (key, value) => {
-      await call('lpush', [key, value])
-    },
+    lpush: async (key, value) => { await call('lpush', [key, value]) },
     lrange: async (key, start, stop) => {
       const out = await call('lrange', [key, start, stop])
       return out.result as string[]
     },
   }
-} else if (process.env.REDIS_URL) {
-  // (Optional) Redis protocol URL if you prefer a serverful Redis — you can extend this.
-  console.warn('REDIS_URL provided but not wired. Prefer Upstash KV for serverless.')
 }
 
-// Fallback in-memory (dev only, not persistent on serverless lambdas)
+// Dev fallback (not persistent on serverless)
 const memory: Record<string, string[]> = {}
 const memKV: KVLike = {
   async lpush(key, value) {
@@ -59,5 +53,12 @@ const memKV: KVLike = {
 
 export const store: KVLike = kv ?? memKV
 
-export const ipHash = (ip: string | null | undefined) =>
-  crypto.createHash('sha256').update(ip || 'null').digest('hex').slice(0, 16)
+// Small djb2-based hash for anonymizing IPs (Edge-safe, deterministic)
+export const ipHash = (ip: string | null | undefined) => {
+  const s = ip || 'null'
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) + s.charCodeAt(i)
+  // return 16 chars hex
+  const n = (h >>> 0).toString(16).padStart(8, '0')
+  return (n + n).slice(0, 16)
+}
