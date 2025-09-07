@@ -35,7 +35,7 @@ const RATING_RECENT = (creatorId: string) =>
 
 /** --------- Creators --------- */
 export async function createCreatorUnique(c: Creator) {
-  // 1) enforce unique handle via SETNX with a long-ish TTL (renewable by updates)
+  // 1) enforce unique handle via SETNX with a long-ish TTL
   const ok = await kv.set(HANDLE_KEY(c.handle), c.id, {
     nx: true,
     ex: 60 * 60 * 24 * 365, // 1 year
@@ -45,7 +45,7 @@ export async function createCreatorUnique(c: Creator) {
   // 2) store creator hash
   await kv.hset(CREATOR_KEY(c.id), c)
 
-  // 3) index in recency zset (score = createdAt, so we can fetch newest first)
+  // 3) index in recency zset (score = createdAt)
   await kv.zadd(CREATOR_LIST, { member: c.id, score: c.createdAt })
 
   return c
@@ -62,15 +62,15 @@ export async function getCreatorByHandle(handle: string) {
 }
 
 export async function listCreators(limit = 12): Promise<Creator[]> {
-  // newest first: use ZRANGE with REV flag
-  const ids = await kv.zrange<string>(CREATOR_LIST, 0, Math.max(0, limit - 1), {
+  // newest first: use ZRANGE with REV flag (no generic on zrange)
+  const ids = await kv.zrange(CREATOR_LIST, 0, Math.max(0, limit - 1), {
     rev: true,
   })
   if (!ids?.length) return []
 
   // batch fetch profiles
   const pipe = kv.pipeline()
-  ids.forEach((id) => pipe.hgetall<Creator>(CREATOR_KEY(id)))
+  ids.forEach((id: string) => pipe.hgetall<Creator>(CREATOR_KEY(id)))
   const rows = (await pipe.exec()) as (Creator | null | undefined)[]
 
   return (rows || []).filter((x): x is Creator => !!x && Object.keys(x).length > 0)
@@ -84,7 +84,7 @@ export async function putRating(r: Rating, raterKey: string) {
   })
   if (!wrote) return false
 
-  // update summary atomically-ish (KV doesn’t do Lua; this is adequate here)
+  // update summary
   const summaryKey = RATING_SUMMARY(r.creatorId)
   const current =
     (await kv.hgetall<{ count?: number; sum?: number }>(summaryKey)) || {}
@@ -111,13 +111,13 @@ export async function getRatingSummary(creatorId: string) {
 }
 
 export async function getRecentRatings(creatorId: string, limit = 10) {
-  // NOTE: generic must be <string>, not <string[]>
-  const items = await kv.lrange<string>(
+  // lrange returns string[]; no generic needed
+  const items = await kv.lrange(
     RATING_RECENT(creatorId),
     0,
     Math.max(0, limit - 1)
   )
-  return (items || []).map((x) => JSON.parse(x) as Rating)
+  return (items || []).map((x: string) => JSON.parse(x) as Rating)
 }
 
 /** Optional alias so older code `import { store } from '@/lib/kv'` keeps working */
