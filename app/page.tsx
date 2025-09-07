@@ -4,28 +4,56 @@ import Link from 'next/link'
 import { Sparkles, Shield, Ticket, Timer, Users, Star, ArrowRight } from 'lucide-react'
 import CreatorGrid from '@/components/CreatorGrid'
 
-export const dynamic = 'force-dynamic'
+// Try to use centralized Farcaster config (recommended).
+// If it's not there yet, the fallback block below will compute the same values.
+let SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
+let MINIAPP_DOMAIN = (() => { try { return new URL(SITE).hostname } catch { return 'localhost' } })()
+let fcMiniApp: { version: string; imageUrl: string; button: any }
 
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
-const MINIAPP_DOMAIN = (() => { try { return new URL(SITE).hostname } catch { return 'localhost' } })()
-
-/** Farcaster Mini App meta (JSON string) */
-const fcMiniApp = {
-  version: '1',
-  imageUrl: `${SITE}/miniapp-card.png`,
-  button: {
-    title: 'Rate Me',
-    action: {
-      type: 'launch_frame',
-      name: 'Rate Me',
-      url: `${SITE}/mini`,
-      splashImageUrl: `${SITE}/icon-192.png`,
-      splashBackgroundColor: '#0b1220',
+try {
+  // Optional import — if you already have lib/farcaster.ts it will be used.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const far = require('@/lib/farcaster')
+  SITE = (far.SITE as string) || SITE
+  MINIAPP_DOMAIN = (far.MINIAPP_DOMAIN as string) || MINIAPP_DOMAIN
+  fcMiniApp = far.fcMiniApp || {
+    version: '1',
+    imageUrl: `${SITE}/miniapp-card.png`,
+    button: {
+      title: 'Rate Me',
+      action: {
+        type: 'launch_frame',
+        name: 'Rate Me',
+        url: `${SITE}/mini`,
+        splashImageUrl: `${SITE}/icon-192.png`,
+        splashBackgroundColor: '#0b1220',
+      },
     },
-  },
+  }
+} catch {
+  // Fallback (works even if lib/farcaster.ts doesn’t exist yet)
+  fcMiniApp = {
+    version: '1',
+    imageUrl: `${SITE}/miniapp-card.png`,
+    button: {
+      title: 'Rate Me',
+      action: {
+        type: 'launch_frame',
+        name: 'Rate Me',
+        url: `${SITE}/mini`,
+        splashImageUrl: `${SITE}/icon-192.png`,
+        splashBackgroundColor: '#0b1220',
+      },
+    },
+  }
 }
 
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
+  title: 'Rate Me — Creator subscriptions & paid posts on Base',
+  description:
+    'Launch subscriptions, paid posts, and custom requests with instant on-chain settlement.',
   openGraph: {
     title: 'Rate Me — Creator subscriptions & paid posts on Base',
     description:
@@ -35,7 +63,7 @@ export const metadata: Metadata = {
   },
   twitter: { card: 'summary_large_image', images: [`${SITE}/miniapp-card.png`] },
   other: {
-    // Frame vNext (explicit)
+    // Farcaster Frames vNext
     'fc:frame': 'vNext',
     'fc:frame:image': `${SITE}/miniapp-card.png`,
     'fc:frame:post_url': `${SITE}/api/frame?screen=home`,
@@ -45,7 +73,8 @@ export const metadata: Metadata = {
     'fc:frame:button:2:action': 'post',
     'fc:frame:button:3': 'How it Works',
     'fc:frame:button:3:action': 'post',
-    // Mini App
+
+    // Farcaster Mini App
     'fc:miniapp': JSON.stringify(fcMiniApp),
     'fc:miniapp:domain': MINIAPP_DOMAIN,
   },
@@ -59,18 +88,20 @@ export default function Home() {
         aria-labelledby="hero-title"
         className="relative overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(1200px_600px_at_20%_-10%,rgba(168,85,247,0.18),transparent),radial-gradient(1000px_500px_at_120%_10%,rgba(56,189,248,0.18),transparent)] from-slate-900 to-slate-950 p-8 shadow-xl md:p-14"
       >
-        {/* subtle gradient ring */}
         <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-white/10" />
         <div className="relative text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200">
+          <div
+            aria-label="Base network"
+            className="inline-flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs text-cyan-200"
+          >
             on @base
           </div>
 
-          <h1
-            id="hero-title"
-            className="mt-5 text-4xl font-black tracking-tight sm:text-6xl"
-          >
-            Rate&nbsp;<span className="text-transparent bg-gradient-to-r from-cyan-300 to-violet-300 bg-clip-text">Me</span>
+          <h1 id="hero-title" className="mt-5 text-4xl font-black tracking-tight sm:text-6xl">
+            Rate&nbsp;
+            <span className="text-transparent bg-gradient-to-r from-cyan-300 to-violet-300 bg-clip-text">
+              Me
+            </span>
           </h1>
 
           <p className="mx-auto mt-4 max-w-2xl text-lg leading-relaxed text-slate-300">
@@ -79,18 +110,19 @@ export default function Home() {
           </p>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
-            <Link href="/creator" className="btn">
+            <Link href="/creator" className="btn" aria-label="Become a Creator">
               <Sparkles className="mr-2 h-4 w-4" aria-hidden="true" />
               Become a Creator
             </Link>
-            <Link href="/#creators" className="btn-secondary">
+            <Link href="/#creators" className="btn-secondary" aria-label="Browse creators section">
               Browse Creators
             </Link>
             <Link
               href="/mini"
               className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-4 py-2 text-sm hover:bg-white/10"
+              aria-label="Open Mini App"
             >
-              Open Mini App <ArrowRight className="h-4 w-4" />
+              Open Mini App <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
           </div>
 
@@ -116,15 +148,16 @@ export default function Home() {
       </section>
 
       {/* TOP / RECENT CREATORS */}
-      <section id="creators" className="space-y-5">
+      <section id="creators" className="space-y-5" aria-labelledby="creators-title">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="flex items-center gap-2 text-xl font-semibold">
+          <h2 id="creators-title" className="flex items-center gap-2 text-xl font-semibold">
             <Users className="h-5 w-5" aria-hidden="true" />
             Top &amp; Recent Creators
           </h2>
           <Link
             href="/discover"
             className="text-sm text-cyan-300 underline decoration-cyan-300/40 underline-offset-2 hover:text-cyan-200"
+            aria-label="Discover more creators"
           >
             Discover more →
           </Link>
@@ -133,10 +166,7 @@ export default function Home() {
       </section>
 
       {/* VALUE STRIP */}
-      <section
-        aria-label="Highlights"
-        className="grid gap-4 md:grid-cols-3"
-      >
+      <section aria-label="Highlights" className="grid gap-4 md:grid-cols-3">
         <BadgeCard
           icon={<Star className="h-4 w-4" aria-hidden="true" />}
           title="Beautiful creator pages"
