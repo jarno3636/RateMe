@@ -1,22 +1,23 @@
 // app/layout.tsx
-import type { Metadata, Viewport } from 'next';
-import './globals.css';
-import Providers from './providers';
-import Header from '@/components/Header';
+import type { Metadata, Viewport } from 'next'
+import './globals.css'
+import Providers from './providers'
+import Header from '@/components/Header'
+import Footer from '@/components/Footer'
 
-export const dynamic = 'force-dynamic';
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'Rate Me',
   description: 'Rate Me — creator monetization mini app',
-};
+}
 
 export const viewport: Viewport = {
   themeColor: '#0b1220',
   width: 'device-width',
   initialScale: 1,
   colorScheme: 'dark',
-};
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -35,8 +36,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <main id="main" className="mx-auto max-w-6xl px-4 py-8">
             {children}
           </main>
+          <Footer />
         </Providers>
       </body>
     </html>
-  );
+  )
 }
