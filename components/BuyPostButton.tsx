@@ -1,25 +1,28 @@
 // components/BuyPostButton.tsx
 'use client';
-import { useState } from 'react';
 import toast from 'react-hot-toast';
+import { useState } from 'react';
 import { useCreatorHub } from '@/hooks/useCreatorHub';
 
 export default function BuyPostButton({ postId }: { postId: bigint }) {
   const { buyPost } = useCreatorHub();
   const [busy, setBusy] = useState(false);
 
+  async function run() {
+    setBusy(true);
+    try {
+      await buyPost(postId);
+      toast.success('Unlocked!');
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
-    <button
-      className="btn-secondary"
-      disabled={busy}
-      onClick={async () => {
-        setBusy(true);
-        try { await buyPost(postId); toast.success('Purchased'); }
-        catch (e: any) { toast.error(e?.shortMessage || e?.message || 'Purchase failed'); }
-        finally { setBusy(false); }
-      }}
-    >
-      Buy Post
+    <button onClick={run} disabled={busy} className="btn">
+      {busy ? 'Purchasing…' : 'Buy Post'}
     </button>
   );
 }
