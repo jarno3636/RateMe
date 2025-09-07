@@ -3,7 +3,7 @@ import { useCallback } from 'react'
 import type { Address, Abi } from 'viem'
 import { erc20Abi } from 'viem'
 import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
-import { CREATOR_HUB, CREATOR_HUB_ABI } from '@/lib/creatorHub'
+import { CREATOR_HUB_ADDR, CREATOR_HUB_ABI } from '@/lib/creatorHub'
 
 /* ---------------------------------- Types --------------------------------- */
 
@@ -28,7 +28,7 @@ export type Post = {
 
 /* --------------------------------- Consts --------------------------------- */
 
-const HUB_ADDR = CREATOR_HUB as Address
+const HUB_ADDR = CREATOR_HUB_ADDR as Address
 const HUB_ABI = CREATOR_HUB_ABI as Abi
 const ZERO: Address = '0x0000000000000000000000000000000000000000'
 
@@ -225,7 +225,7 @@ export function useCreatorHub() {
   /** Subscribe to a plan for N periods (ETH or ERC20) */
   const subscribe = useCallback(
     async (planId: bigint, periods: number) => {
-      const _pub = assertPub()
+      assertPub()
       assertWallet()
       if (!address) throw new Error('Connect wallet')
 
@@ -241,13 +241,13 @@ export function useCreatorHub() {
         return send('subscribe', [planId, periods])
       }
     },
-    [address, ensureAllowance, readPlan, send, pub, wallet]
+    [address, ensureAllowance, readPlan, send]
   )
 
   /** Buy a single paid post (ETH or ERC20) */
   const buyPost = useCallback(
     async (postId: bigint) => {
-      const _pub = assertPub()
+      assertPub()
       assertWallet()
       if (!address) throw new Error('Connect wallet')
 
@@ -260,7 +260,7 @@ export function useCreatorHub() {
         return send('buyPost', [postId])
       }
     },
-    [address, ensureAllowance, readPost, send, pub, wallet]
+    [address, ensureAllowance, readPost, send]
   )
 
   /** Creator: create a subscription plan */
@@ -296,7 +296,7 @@ export function useCreatorHub() {
     [send]
   )
 
-  /** Optional extras you might want in UI */
+  /** Optional: allow users to cancel subs if your contract supports it */
   const cancelSubscription = useCallback(async (creator: Address) => {
     return send('cancelSubscription', [creator])
   }, [send])
