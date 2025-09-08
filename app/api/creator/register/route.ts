@@ -1,38 +1,75 @@
 // app/api/creator/register/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { createCreatorUnique, getCreatorByHandle } from '@/lib/kv';
-import { fetchNeynarUserByHandle } from '@/lib/neynar';
+import { NextRequest, NextResponse } from 'next/server'
+import { createCreatorUnique } from '@/lib/kv'
+import { fetchNeynarUserByHandle, fetchNeynarUserByFid } from '@/lib/neynar'
 
-export const runtime = 'edge';
+export const runtime = 'edge'
+export const dynamic = 'force-dynamic'
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const handleRaw: string = (body?.handle || '').trim().replace(/^@/, '');
-    if (!handleRaw) return NextResponse.json({ error: 'Missing handle' }, { status: 400 });
+    const body = await req.json().catch(() => ({}))
 
-    // already registered?
-    const exists = await getCreatorByHandle(handleRaw);
-    if (exists) return NextResponse.json({ error: 'Handle already registered' }, { status: 409 });
+    // Normalize handle: strip @, lowercase for id
+    const handleRaw = String(body?.handle ?? '').trim().replace(/^@/, '')
+    if (!handleRaw) {
+      return NextResponse.json({ error: 'Missing handle' }, { status: 400 })
+    }
 
-    // fetch neynar profile
-    const neynar = await fetchNeynarUserByHandle(handleRaw);
-    if (!neynar) return NextResponse.json({ error: 'Neynar lookup failed' }, { status: 422 });
+    const id = handleRaw.toLowerCase()
+    const address = (body?.address ?? null) as `0x${string}` | null
+    const fidInput = typeof body?.fid === 'number' ? (body.fid as number) : undefined
 
-    const id = handleRaw.toLowerCase(); // primary id
+    // Try Neynar enrichment (don’t fail the whole request if it errors)
+    let displayName: string | undefined
+    let avatarUrl: string | undefined
+    let bio: string | undefined
+    let fid: number | undefined = fidInput
+
+    try {
+      if (fidInput) {
+        const u = await fetchNeynarUserByFid(fidInput)
+        if (u) {
+          fid = u.fid
+          displayName = u.display_name || undefined
+          avatarUrl = u.pfp_url || undefined
+          bio = u.bio?.text || undefined
+        }
+      } else {
+        const u = await fetchNeynarUserByHandle(handleRaw)
+        if (u) {
+          fid = u.fid
+          displayName = u.display_name || undefined
+          avatarUrl = u.pfp_url || undefined
+          bio = u.bio?.text || undefined
+        }
+      }
+    } catch {
+      // swallow enrichment errors; we still create the record
+    }
+
+    // Create atomically; KV setnx inside createCreatorUnique guarantees uniqueness.
     const creator = await createCreatorUnique({
       id,
-      handle: handleRaw,
-      address: null,
-      fid: neynar.fid,
-      displayName: neynar.display_name || handleRaw,
-      avatarUrl: neynar.pfp_url,
-      bio: neynar.bio?.text,
+      handle: handleRaw,         // keep original case for display
+      address,
+      fid,
+      displayName: displayName ?? handleRaw,
+      avatarUrl,
+      bio,
       createdAt: Date.now(),
-    });
+    })
 
-    return NextResponse.json({ ok: true, creator });
+    return NextResponse.json({ ok: true, creator }, { status: 201 })
   } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'failed' }, { status: 500 });
+    const msg = String(e?.message || e)
+
+    // Map our KV uniqueness failure to 409
+    if (msg.includes('Handle is taken') || msg.includes('already exists')) {
+      return NextResponse.json({ error: 'Handle already registered' }, { status: 409 })
+    }
+
+    console.error('creator/register failed:', e)
+    return NextResponse.json({ error: 'Server error' }, { status: 500 })
   }
 }
