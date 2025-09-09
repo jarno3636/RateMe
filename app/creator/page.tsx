@@ -4,14 +4,22 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
-import { isValidHandle, normalizeHandle } from '@/lib/neynar';
+import { useProfileRegistry } from '@/hooks/useProfileRegistry';
+
+function normalizeHandle(s: string) {
+  return s.trim().replace(/^@/, '').toLowerCase();
+}
+function isValidHandle(h: string) {
+  if (h.length < 3 || h.length > 32) return false;
+  return /^[a-z0-9._-]+$/.test(h);
+}
 
 export default function CreatorOnboard() {
   const router = useRouter();
   const [raw, setRaw] = useState('');
   const [busy, setBusy] = useState(false);
+  const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
-  // strip leading @ and lowercase as the user types (but keep what they typed visually)
   const handle = useMemo(() => normalizeHandle(raw), [raw]);
   const ok = useMemo(() => isValidHandle(handle), [handle]);
 
@@ -22,23 +30,39 @@ export default function CreatorOnboard() {
 
       setBusy(true);
       try {
+        // fast pre-checks
+        if (await handleTaken(handle)) {
+          toast.error('Handle already registered on-chain');
+          setBusy(false);
+          return;
+        }
+
+        const fee = await feeUnits();
+        toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
+
+        // 1) On-chain create
+        const { id, txHash } = await createProfile({ handle });
+
+        // 2) KV register (server-side Neynar hydration)
         const res = await fetch('/api/creator/register', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ handle }),
         });
         const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || 'Failed to create');
+        if (!res.ok) throw new Error(j?.error || 'Failed to register');
 
         toast.success('Creator page created');
-        router.push(`/creator/${encodeURIComponent(j.creator.id)}`);
+        // prefer on-chain id if present; KV also returns j.creator.id (handle lowercased)
+        const routeId = j?.creator?.id || String(id);
+        router.push(`/creator/${encodeURIComponent(routeId)}`);
       } catch (err: any) {
         toast.error(err?.message || 'Something went wrong');
       } finally {
         setBusy(false);
       }
     },
-    [ok, handle, busy, router]
+    [ok, handle, busy, router, createProfile, feeUnits, handleTaken]
   );
 
   return (
@@ -67,9 +91,6 @@ export default function CreatorOnboard() {
             placeholder="your-handle"
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit(e);
-            }}
           />
         </label>
 
@@ -100,14 +121,8 @@ export default function CreatorOnboard() {
 
         <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs text-slate-400">
           By creating a page you agree to the{' '}
-          <a href="/terms" className="underline hover:text-slate-200">
-            Terms
-          </a>{' '}
-          and{' '}
-          <a href="/privacy" className="underline hover:text-slate-200">
-            Privacy Policy
-          </a>
-          .
+          <a href="/terms" className="underline hover:text-slate-200">Terms</a> and{' '}
+          <a href="/privacy" className="underline hover:text-slate-200">Privacy Policy</a>.
         </div>
       </form>
     </div>
