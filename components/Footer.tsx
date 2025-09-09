@@ -1,9 +1,11 @@
 // components/Footer.tsx
 import Link from 'next/link'
 
-const CONTRACT_ADDR =
+const PROFILE_REGISTRY =
   process.env.NEXT_PUBLIC_PROFILE_REGISTRY ||
   '0x4769667dc49a8E05018729108fD98521F4eBc53A';
+
+const BASE_USDC = '0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913';
 
 export default function Footer() {
   return (
@@ -18,12 +20,20 @@ export default function Footer() {
             Terms
           </Link>
           <a
-            href={`https://basescan.org/address/${CONTRACT_ADDR}`}
+            href={`https://basescan.org/address/${PROFILE_REGISTRY}`}
             target="_blank"
             rel="noreferrer"
             className="hover:text-slate-200"
           >
-            Contract
+            Profile Registry
+          </a>
+          <a
+            href={`https://basescan.org/address/${BASE_USDC}`}
+            target="_blank"
+            rel="noreferrer"
+            className="hover:text-slate-200"
+          >
+            Base USDC
           </a>
         </nav>
       </div>
