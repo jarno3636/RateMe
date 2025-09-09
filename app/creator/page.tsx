@@ -137,16 +137,19 @@ export default function CreatorOnboard() {
         const { id } = await createProfile({ handle });
 
         // 2) KV registration (server-side Neynar hydration + uniqueness)
-        const j = await registerCreator({ handle });
+        const reg = await registerCreator({ handle });
+        if (!reg.ok) {
+          throw new Error(reg.error || 'Failed to register');
+        }
 
         // Compute share links for toast
-        const routeId = j?.creator?.id || String(id);
+        const routeId = reg.creator.id || String(id);
         const { cast, tweet, url } = creatorShareLinks(routeId, `Check out @${routeId} on Rate Me`);
 
         // Success + share toast
         toast.success('Creator page created');
         toast.custom(
-          (t) => (
+          () => (
             <div className="rounded-xl border border-white/10 bg-[#0b1220] p-4 text-slate-100 shadow-lg">
               <div className="text-sm font-medium">Share your new page</div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -280,7 +283,7 @@ export default function CreatorOnboard() {
             {busy ? 'Creating…' : 'Create my page'}
           </button>
 
-          <a
+        <a
             href="https://warpcast.com/~/settings/username"
             target="_blank"
             rel="noreferrer"
