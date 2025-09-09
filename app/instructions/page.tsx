@@ -6,27 +6,25 @@ export default function InstructionsPage() {
 
       <ol className="list-decimal list-inside space-y-6 text-lg">
         <li>
-          <strong>Pick your handle.</strong>  
+          <strong>Pick your handle.</strong>{' '}
           Choose a name (letters, numbers, dots, underscores, hyphens) — keep it 🔥.
         </li>
         <li>
-          <strong>Pay the toll.</strong>  
-          It’s just <span className="text-cyan-400">$0.50 USDC</span> to register.  
+          <strong>Pay the toll.</strong>{' '}
+          It’s just <span className="text-cyan-400">$0.50 USDC</span> to register. 
           (That’s cheaper than a cup of coffee ☕.)
         </li>
         <li>
-          <strong>Lock it in forever.</strong>  
-          Once your handle is on-chain, it’s yours.  
-          No take-backs, no imposters.
+          <strong>Lock it in forever.</strong>{' '}
+          Once your handle is on-chain, it’s yours. No take-backs, no imposters.
         </li>
         <li>
-          <strong>Flex your profile.</strong>  
-          Add a display name, avatar, and bio.  
-          Make it serious, silly, or a full-on meme.
+          <strong>Flex your profile.</strong>{' '}
+          Add a display name, avatar, and bio. Make it serious, silly, or a full-on meme.
         </li>
         <li>
-          <strong>Enjoy the clout.</strong>  
-          Share your profile, collect vibes, and let your friends rate you.  
+          <strong>Enjoy the clout.</strong>{' '}
+          Share your profile, collect vibes, and let your friends rate you. 
           Remember: on Base, it’s all for fun. 💫
         </li>
       </ol>
