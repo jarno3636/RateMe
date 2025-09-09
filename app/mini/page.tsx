@@ -1,7 +1,7 @@
 // app/mini/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Users, Sparkles, ExternalLink, Copy, Loader2 } from 'lucide-react';
@@ -14,46 +14,32 @@ type CreatorRow = {
   bio?: string;
 };
 
+type ApiCreatorsResp = {
+  creators: CreatorRow[];
+  nextCursor: number | null;
+};
+
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 export default function Mini() {
   const search = useSearchParams();
   const hintedCreator = search.get('creator'); // ?creator=alice
+
   const [inWarpcast, setInWarpcast] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [moreLoading, setMoreLoading] = useState(false);
   const [creators, setCreators] = useState<CreatorRow[]>([]);
+  const [cursor, setCursor] = useState<number | null>(0);
+  const [hasMore, setHasMore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     // Very light “in mini app” detection — works in Warpcast iframe & mobile webview
     const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
     const iframe = typeof window !== 'undefined' && window.self !== window.top;
     setInWarpcast(/Warpcast/i.test(ua) || iframe);
-  }, []);
-
-  // Fetch newest creators (served by your /api/creators)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
-        const res = await fetch('/api/creators?limit=12', { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as CreatorRow[];
-        if (!alive) return;
-        setCreators(data || []);
-      } catch (e: any) {
-        if (!alive) return;
-        setErr(e?.message || 'Failed to load creators');
-        setCreators([]);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
   }, []);
 
   const openInWarpcastHref = useMemo(() => {
@@ -68,6 +54,49 @@ export default function Mini() {
     await navigator.clipboard.writeText(url);
     alert('Mini App link copied');
   };
+
+  async function fetchPage(pageCursor: number | null, isLoadMore = false) {
+    abortRef.current?.abort();
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+
+    try {
+      isLoadMore ? setMoreLoading(true) : setLoading(true);
+      setErr(null);
+
+      const qs = new URLSearchParams();
+      qs.set('limit', '12');
+      if (pageCursor && pageCursor > 0) qs.set('cursor', String(pageCursor));
+
+      const res = await fetch(`/api/creators?${qs.toString()}`, {
+        cache: 'no-store',
+        signal: ctl.signal,
+        headers: { accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as ApiCreatorsResp;
+
+      setCreators((prev) => (isLoadMore ? [...prev, ...data.creators] : data.creators));
+      setCursor(data.nextCursor ?? null);
+      setHasMore(!!data.nextCursor);
+    } catch (e: any) {
+      if (e?.name === 'AbortError') return;
+      setErr(e?.message || 'Failed to load creators');
+      if (!isLoadMore) {
+        setCreators([]);
+        setCursor(null);
+        setHasMore(false);
+      }
+    } finally {
+      isLoadMore ? setMoreLoading(false) : setLoading(false);
+    }
+  }
+
+  // initial load
+  useEffect(() => {
+    fetchPage(0, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <main
@@ -124,14 +153,22 @@ export default function Mini() {
         </h2>
 
         {loading && (
-          <div className="mt-4 flex items-center gap-2 text-slate-400">
+          <div className="mt-4 flex items-center gap-2 text-slate-400" role="status" aria-live="polite">
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             Loading…
           </div>
         )}
 
         {err && !loading && (
-          <p className="mt-3 text-sm text-rose-300">Error: {err}</p>
+          <div className="mt-3 space-y-2">
+            <p className="text-sm text-rose-300">Error: {err}</p>
+            <button
+              onClick={() => fetchPage(0, false)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+            >
+              Retry
+            </button>
+          </div>
         )}
 
         {!loading && !err && creators.length === 0 && (
@@ -139,47 +176,79 @@ export default function Mini() {
         )}
 
         {!loading && !err && creators.length > 0 && (
-          <ul className="mt-4 space-y-3">
-            {creators.map((c) => {
-              const url = `/creator/${encodeURIComponent(c.id)}`;
-              return (
-                <li
-                  key={c.id}
-                  className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3"
+          <>
+            <ul className="mt-4 space-y-3">
+              {creators.map((c) => {
+                const url = `/creator/${encodeURIComponent(c.id)}`;
+                const shareHref = `https://warpcast.com/~/compose?text=${encodeURIComponent(
+                  `Check out @${c.handle} on Rate Me`
+                )}&embeds[]=${encodeURIComponent(`${SITE}${url}`)}`;
+
+                return (
+                  <li
+                    key={c.id}
+                    className="flex items-center justify-between rounded-xl border border-white/10 bg-white/5 p-3"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full ring-1 ring-white/15">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={c.avatarUrl || '/icon-192.png'}
+                          alt={`${c.handle} avatar`}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate font-medium">@{c.handle}</div>
+                        {c.displayName && (
+                          <div className="truncate text-xs text-slate-400">{c.displayName}</div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="ml-3 flex shrink-0 gap-2">
+                      <Link href={url} className="btn-secondary" aria-label={`Open @${c.handle}`}>
+                        Open
+                      </Link>
+                      <a
+                        href={shareHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-xl border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
+                        aria-label={`Share @${c.handle} on Warpcast`}
+                      >
+                        Share
+                      </a>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {/* pagination */}
+            <div className="mt-4 flex justify-center">
+              {hasMore ? (
+                <button
+                  onClick={() => fetchPage(cursor, true)}
+                  disabled={moreLoading}
+                  className="btn disabled:cursor-not-allowed disabled:opacity-60"
+                  aria-disabled={moreLoading}
                 >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full ring-1 ring-white/15">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={c.avatarUrl || '/icon-192.png'}
-                        alt={`${c.handle} avatar`}
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="truncate font-medium">@{c.handle}</div>
-                      {c.displayName && (
-                        <div className="truncate text-xs text-slate-400">{c.displayName}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div className="ml-3 flex shrink-0 gap-2">
-                    <Link href={url} className="btn-secondary">Open</Link>
-                    <a
-                      href={`https://warpcast.com/~/compose?text=${encodeURIComponent(
-                        `Check out @${c.handle} on Rate Me`
-                      )}&embeds[]=${encodeURIComponent(`${SITE}${url}`)}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="rounded-xl border border-white/15 px-3 py-2 text-sm hover:bg-white/5"
-                    >
-                      Share
-                    </a>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                  {moreLoading ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      Loading…
+                    </span>
+                  ) : (
+                    'Load more'
+                  )}
+                </button>
+              ) : creators.length > 0 ? (
+                <span className="text-xs text-slate-400">You’ve reached the end.</span>
+              ) : null}
+            </div>
+          </>
         )}
       </section>
     </main>
