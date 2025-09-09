@@ -1,65 +1,76 @@
 // hooks/useCreatorHub.ts
-import { useCallback } from 'react'
-import type { Address, Abi } from 'viem'
-import { erc20Abi } from 'viem'
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi'
-import { CREATOR_HUB_ADDR, CREATOR_HUB_ABI } from '@/lib/creatorHub'
+'use client';
 
-/* ---------------------------------- Types --------------------------------- */
+import { useCallback } from 'react';
+import type { Address, Abi } from 'viem';
+import { erc20Abi } from 'viem';
+import {
+  useAccount,
+  usePublicClient,
+  useWalletClient,
+  useSwitchChain,
+} from 'wagmi';
+import { CREATOR_HUB_ADDR, CREATOR_HUB_ABI, BASE_CHAIN_ID } from '@/lib/creatorHub';
 
 export type Plan = {
-  creator: Address
-  token: Address
-  pricePerPeriod: bigint
-  periodDays: number
-  active: boolean
-  name: string
-  metadataURI: string
-}
+  creator: Address;
+  token: Address;
+  pricePerPeriod: bigint;
+  periodDays: number;
+  active: boolean;
+  name: string;
+  metadataURI: string;
+};
 
 export type Post = {
-  creator: Address
-  token: Address
-  price: bigint
-  active: boolean
-  accessViaSub: boolean
-  uri: string
+  creator: Address;
+  token: Address;
+  price: bigint;
+  active: boolean;
+  accessViaSub: boolean;
+  uri: string;
+};
+
+const HUB_ADDR = CREATOR_HUB_ADDR as Address;
+const HUB_ABI = CREATOR_HUB_ABI as Abi;
+const ZERO: Address = '0x0000000000000000000000000000000000000000';
+
+function req<T>(v: T | undefined, msg: string): T {
+  if (v === undefined || v === null) throw new Error(msg);
+  return v as T;
 }
 
-/* --------------------------------- Consts --------------------------------- */
-
-const HUB_ADDR = CREATOR_HUB_ADDR as Address
-const HUB_ABI = CREATOR_HUB_ABI as Abi
-const ZERO: Address = '0x0000000000000000000000000000000000000000'
-
-/* --------------------------------- Hook ----------------------------------- */
-
 export function useCreatorHub() {
-  const { address } = useAccount()
-  const pub = usePublicClient()
-  const { data: wallet } = useWalletClient()
+  const { address, chainId } = useAccount();
+  const pub = usePublicClient();
+  const { data: wallet } = useWalletClient();
+  const { switchChainAsync } = useSwitchChain();
 
-  /* --------------------------- Small safety guards -------------------------- */
+  // ---------- guards ----------
+  const assertPub = () => req(pub, 'Public client unavailable');
+  const assertWallet = () => req(wallet, 'Connect wallet');
+  const assertHubAddr = () => {
+    if (!HUB_ADDR || HUB_ADDR === ZERO) throw new Error('CreatorHub address not configured');
+  };
 
-  const assertPub = () => {
-    if (!pub) throw new Error('Public client unavailable')
-    return pub
-  }
+  const ensureBase = useCallback(async () => {
+    assertWallet();
+    if (chainId !== BASE_CHAIN_ID) {
+      await switchChainAsync?.({ chainId: BASE_CHAIN_ID });
+    }
+  }, [chainId, switchChainAsync, wallet]);
 
-  const assertWallet = () => {
-    if (!wallet || !wallet.account) throw new Error('Connect wallet')
-    return wallet
-  }
-
-  /** Common simulate → write → wait flow */
+  // Generic simulate → write → wait
   const send = useCallback(
     async <TArgs extends unknown[]>(
-      fn: string,
+      fn: keyof any,
       args: TArgs,
       opts?: { value?: bigint }
     ) => {
-      const _pub = assertPub()
-      const _wal = assertWallet()
+      assertHubAddr();
+      await ensureBase();
+      const _pub = assertPub();
+      const _wal = assertWallet();
       const { request } = await _pub.simulateContract({
         address: HUB_ADDR,
         abi: HUB_ABI,
@@ -67,239 +78,196 @@ export function useCreatorHub() {
         args: args as any,
         account: _wal.account,
         value: opts?.value,
-      })
-      const hash = await _wal.writeContract(request)
-      return _pub.waitForTransactionReceipt({ hash })
+        chain: _pub.chain,
+      });
+      const hash = await _wal.writeContract(request);
+      return _pub.waitForTransactionReceipt({ hash });
     },
-    [pub, wallet]
-  )
+    [pub, wallet, ensureBase]
+  );
 
-  /* --------------------------------- Reads --------------------------------- */
+  // ---------- Reads ----------
+  const readPlan = useCallback(async (id: bigint): Promise<Plan> => {
+    assertHubAddr();
+    const _pub = assertPub();
+    const p = (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'plans',
+      args: [id],
+    })) as unknown as [Address, Address, bigint, bigint, boolean, string, string];
 
-  const readPlan = useCallback(
-    async (id: bigint): Promise<Plan> => {
-      const _pub = assertPub()
-      const p = (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'plans',
-        args: [id],
-      })) as unknown as [
-        Address, // creator
-        Address, // token
-        bigint,  // pricePerPeriod
-        bigint,  // periodDays
-        boolean, // active
-        string,  // name
-        string   // metadataURI
-      ]
+    return {
+      creator: p[0],
+      token: p[1],
+      pricePerPeriod: p[2],
+      periodDays: Number(p[3]),
+      active: p[4],
+      name: p[5],
+      metadataURI: p[6],
+    };
+  }, [pub]);
 
-      return {
-        creator: p[0],
-        token: p[1],
-        pricePerPeriod: p[2],
-        periodDays: Number(p[3]),
-        active: p[4],
-        name: p[5],
-        metadataURI: p[6],
-      }
-    },
-    [pub]
-  )
+  const readPost = useCallback(async (id: bigint): Promise<Post> => {
+    assertHubAddr();
+    const _pub = assertPub();
+    const p = (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'posts',
+      args: [id],
+    })) as unknown as [Address, Address, bigint, boolean, boolean, string];
 
-  const readPost = useCallback(
-    async (id: bigint): Promise<Post> => {
-      const _pub = assertPub()
-      const p = (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'posts',
-        args: [id],
-      })) as unknown as [
-        Address, // creator
-        Address, // token
-        bigint,  // price
-        boolean, // active
-        boolean, // accessViaSub
-        string   // uri
-      ]
+    return {
+      creator: p[0],
+      token: p[1],
+      price: p[2],
+      active: p[3],
+      accessViaSub: p[4],
+      uri: p[5],
+    };
+  }, [pub]);
 
-      return {
-        creator: p[0],
-        token: p[1],
-        price: p[2],
-        active: p[3],
-        accessViaSub: p[4],
-        uri: p[5],
-      }
-    },
-    [pub]
-  )
+  const hasPostAccess = useCallback(async (user: Address, postId: bigint) => {
+    assertHubAddr();
+    const _pub = assertPub();
+    return (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'hasPostAccess',
+      args: [user, postId],
+    })) as boolean;
+  }, [pub]);
 
-  /** Check if a user has post access (paid or via active sub) */
-  const hasPostAccess = useCallback(
-    async (user: Address, postId: bigint): Promise<boolean> => {
-      const _pub = assertPub()
-      const ok = (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'hasPostAccess',
-        args: [user, postId],
-      })) as boolean
-      return ok
-    },
-    [pub]
-  )
+  const isActive = useCallback(async (user: Address, creator: Address) => {
+    assertHubAddr();
+    const _pub = assertPub();
+    return (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'isActive',
+      args: [user, creator],
+    })) as boolean;
+  }, [pub]);
 
-  /** Is a user’s subscription to creator currently active? */
-  const isActive = useCallback(
-    async (user: Address, creator: Address): Promise<boolean> => {
-      const _pub = assertPub()
-      const ok = (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'isActive',
-        args: [user, creator],
-      })) as boolean
-      return ok
-    },
-    [pub]
-  )
+  const getCreatorPlanIds = useCallback(async (creator: Address) => {
+    assertHubAddr();
+    const _pub = assertPub();
+    return (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'getCreatorPlanIds',
+      args: [creator],
+    })) as bigint[];
+  }, [pub]);
 
-  /** Indexes for UI */
-  const getCreatorPlanIds = useCallback(
-    async (creator: Address): Promise<bigint[]> => {
-      const _pub = assertPub()
-      return (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'getCreatorPlanIds',
-        args: [creator],
-      })) as bigint[]
-    },
-    [pub]
-  )
+  const getCreatorPostIds = useCallback(async (creator: Address) => {
+    assertHubAddr();
+    const _pub = assertPub();
+    return (await _pub.readContract({
+      address: HUB_ADDR,
+      abi: HUB_ABI,
+      functionName: 'getCreatorPostIds',
+      args: [creator],
+    })) as bigint[];
+  }, [pub]);
 
-  const getCreatorPostIds = useCallback(
-    async (creator: Address): Promise<bigint[]> => {
-      const _pub = assertPub()
-      return (await _pub.readContract({
-        address: HUB_ADDR,
-        abi: HUB_ABI,
-        functionName: 'getCreatorPostIds',
-        args: [creator],
-      })) as bigint[]
-    },
-    [pub]
-  )
-
-  /* ------------------------------ ERC20 helper ----------------------------- */
-
+  // ---------- ERC20 helper ----------
   const ensureAllowance = useCallback(
-    async (token: Address, owner: Address, spender: Address, needed: bigint) => {
-      const _pub = assertPub()
-      const _wal = assertWallet()
+    async (token: Address, owner: Address, spender: Address, needed: bigint, opts?: { infinite?: boolean }) => {
+      const _pub = assertPub();
+      const _wal = assertWallet();
       const current = (await _pub.readContract({
         address: token,
         abi: erc20Abi,
         functionName: 'allowance',
         args: [owner, spender],
-      })) as bigint
-      if (current >= needed) return
+      })) as bigint;
+      if (current >= needed) return;
+
+      const amount = opts?.infinite ? (2n ** 256n - 1n) : needed;
 
       const { request } = await _pub.simulateContract({
         address: token,
         abi: erc20Abi,
         functionName: 'approve',
-        args: [spender, needed],
+        args: [spender, amount],
         account: _wal.account,
-      })
-      const hash = await _wal.writeContract(request)
-      await _pub.waitForTransactionReceipt({ hash })
+        chain: _pub.chain,
+      });
+      const hash = await _wal.writeContract(request);
+      await _pub.waitForTransactionReceipt({ hash });
     },
     [pub, wallet]
-  )
+  );
 
-  /* -------------------------------- Writes -------------------------------- */
-
-  /** Subscribe to a plan for N periods (ETH or ERC20) */
+  // ---------- Writes ----------
   const subscribe = useCallback(
     async (planId: bigint, periods: number) => {
-      assertPub()
-      assertWallet()
-      if (!address) throw new Error('Connect wallet')
-
-      const plan = await readPlan(planId)
-      const total = plan.pricePerPeriod * BigInt(periods)
+      assertHubAddr();
+      const _addr = req(address, 'Connect wallet');
+      const plan = await readPlan(planId);
+      const n = Math.max(1, Math.floor(Number(periods || 1)));
+      const total = plan.pricePerPeriod * BigInt(n);
 
       if (plan.token === ZERO) {
-        // native (ETH on Base)
-        return send('subscribe', [planId, periods], { value: total })
+        return send('subscribe', [planId, n], { value: total });
       } else {
-        // ERC20
-        await ensureAllowance(plan.token, address, HUB_ADDR, total)
-        return send('subscribe', [planId, periods])
+        await ensureAllowance(plan.token, _addr, HUB_ADDR, total, { infinite: true });
+        return send('subscribe', [planId, n]);
       }
     },
-    [address, ensureAllowance, readPlan, send]
-  )
+    [address, readPlan, ensureAllowance, send]
+  );
 
-  /** Buy a single paid post (ETH or ERC20) */
   const buyPost = useCallback(
     async (postId: bigint) => {
-      assertPub()
-      assertWallet()
-      if (!address) throw new Error('Connect wallet')
-
-      const post = await readPost(postId)
+      assertHubAddr();
+      const _addr = req(address, 'Connect wallet');
+      const post = await readPost(postId);
 
       if (post.token === ZERO) {
-        return send('buyPost', [postId], { value: post.price })
+        return send('buyPost', [postId], { value: post.price });
       } else {
-        await ensureAllowance(post.token, address, HUB_ADDR, post.price)
-        return send('buyPost', [postId])
+        await ensureAllowance(post.token, _addr, HUB_ADDR, post.price, { infinite: true });
+        return send('buyPost', [postId]);
       }
     },
-    [address, ensureAllowance, readPost, send]
-  )
+    [address, readPost, ensureAllowance, send]
+  );
 
-  /** Creator: create a subscription plan */
   const createPlan = useCallback(
-    async (params: {
-      token: Address
-      pricePerPeriod: bigint
-      periodDays: number
-      name: string
-      metadataURI: string
-    }) => {
-      return send('createPlan', [
-        params.token,
-        params.pricePerPeriod,
-        params.periodDays,
-        params.name,
-        params.metadataURI,
-      ])
-    },
+    async (p: {
+      token: Address;
+      pricePerPeriod: bigint;
+      periodDays: number;
+      name: string;
+      metadataURI: string;
+    }) => send('createPlan', [p.token, p.pricePerPeriod, p.periodDays, p.name, p.metadataURI]),
     [send]
-  )
+  );
 
-  /** Creator: create a paid post */
   const createPost = useCallback(
-    async (params: { token: Address; price: bigint; accessViaSub: boolean; uri: string }) => {
-      return send('createPost', [
-        params.token,
-        params.price,
-        params.accessViaSub,
-        params.uri,
-      ])
-    },
+    async (p: { token: Address; price: bigint; accessViaSub: boolean; uri: string }) =>
+      send('createPost', [p.token, p.price, p.accessViaSub, p.uri]),
     [send]
-  )
+  );
 
-  /** Optional: allow users to cancel subs if your contract supports it */
   const cancelSubscription = useCallback(async (creator: Address) => {
-    return send('cancelSubscription', [creator])
-  }, [send])
+    return send('cancelSubscription', [creator]);
+  }, [send]);
+
+  // ---------- Optional UI helpers ----------
+  const previewSubscribeTotal = useCallback(async (planId: bigint, periods: number) => {
+    const plan = await readPlan(planId);
+    const n = Math.max(1, Math.floor(Number(periods || 1)));
+    return { token: plan.token, total: plan.pricePerPeriod * BigInt(n) };
+  }, [readPlan]);
+
+  const previewBuyPost = useCallback(async (postId: bigint) => {
+    const post = await readPost(postId);
+    return { token: post.token, total: post.price };
+  }, [readPost]);
 
   return {
     // reads
@@ -315,5 +283,8 @@ export function useCreatorHub() {
     createPlan,
     createPost,
     cancelSubscription,
-  }
+    // helpers
+    previewSubscribeTotal,
+    previewBuyPost,
+  };
 }
