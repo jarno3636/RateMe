@@ -1,7 +1,9 @@
 // components/Footer.tsx
 import Link from 'next/link'
 
-const CONTRACT_ADDR = process.env.NEXT_PUBLIC_CREATOR_HUB_ADDR || '0x0000000000000000000000000000000000000000'
+const CONTRACT_ADDR =
+  process.env.NEXT_PUBLIC_PROFILE_REGISTRY ||
+  '0x4769667dc49a8E05018729108fD98521F4eBc53A';
 
 export default function Footer() {
   return (
