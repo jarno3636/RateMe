@@ -1,10 +1,12 @@
 // app/creator/page.tsx
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useProfileRegistry } from '@/hooks/useProfileRegistry';
+import { checkHandleAvailability, registerCreator } from '@/lib/api/creator';
+import { useDebouncedValue } from '@/lib/useDebouncedValue';
 
 function normalizeHandle(s: string) {
   return s.trim().replace(/^@/, '').toLowerCase();
@@ -14,14 +16,73 @@ function isValidHandle(h: string) {
   return /^[a-z0-9._-]+$/.test(h);
 }
 
+type Avail =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available' }
+  | { state: 'invalid' }
+  | { state: 'taken'; where: 'kv' | 'onchain' }
+
 export default function CreatorOnboard() {
   const router = useRouter();
   const [raw, setRaw] = useState('');
   const [busy, setBusy] = useState(false);
+  const [feeView, setFeeView] = useState<string>('');
+  const [avail, setAvail] = useState<Avail>({ state: 'idle' });
+
   const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
   const handle = useMemo(() => normalizeHandle(raw), [raw]);
   const ok = useMemo(() => isValidHandle(handle), [handle]);
+  const debouncedHandle = useDebouncedValue(handle, 350);
+
+  // preview fee from the registry (USDC, 6dp)
+  useEffect(() => {
+    (async () => {
+      try {
+        const fee = await feeUnits();
+        setFeeView((Number(fee) / 1e6).toFixed(2));
+      } catch {
+        setFeeView('');
+      }
+    })();
+  }, [feeUnits]);
+
+  // live availability check against our GET endpoint
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!debouncedHandle) { setAvail({ state: 'idle' }); return; }
+      if (!isValidHandle(debouncedHandle)) { setAvail({ state: 'invalid' }); return; }
+
+      setAvail({ state: 'checking' });
+      try {
+        const res = await checkHandleAvailability(debouncedHandle);
+        if (cancelled) return;
+
+        if (!res.ok) {
+          // If the API misbehaves, fall back to simple local validation
+          setAvail({ state: 'invalid' });
+          return;
+        }
+
+        if (res.available) {
+          setAvail({ state: 'available' });
+        } else if (res.reason === 'taken_kv') {
+          setAvail({ state: 'taken', where: 'kv' });
+        } else if (res.reason === 'taken_onchain') {
+          setAvail({ state: 'taken', where: 'onchain' });
+        } else {
+          setAvail({ state: 'invalid' });
+        }
+      } catch {
+        if (!cancelled) setAvail({ state: 'invalid' });
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [debouncedHandle]);
 
   const submit = useCallback(
     async (e?: React.FormEvent) => {
@@ -30,30 +91,29 @@ export default function CreatorOnboard() {
 
       setBusy(true);
       try {
-        // fast pre-checks
+        // final pre-check: on-chain taken?
         if (await handleTaken(handle)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
           return;
         }
 
-        const fee = await feeUnits();
-        toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
+        // show fee hint
+        const fee = await feeUnits().catch(() => 0n);
+        if (fee && fee > 0n) {
+          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
+        } else {
+          toast('Creating profile…', { icon: '⛓️' });
+        }
 
         // 1) On-chain create
-        const { id, txHash } = await createProfile({ handle });
+        const { id } = await createProfile({ handle });
 
-        // 2) KV register (server-side Neynar hydration)
-        const res = await fetch('/api/creator/register', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ handle }),
-        });
-        const j = await res.json();
-        if (!res.ok) throw new Error(j?.error || 'Failed to register');
+        // 2) KV register (server-side Neynar hydration + uniqueness)
+        const j = await registerCreator({ handle });
 
         toast.success('Creator page created');
-        // prefer on-chain id if present; KV also returns j.creator.id (handle lowercased)
+        // prefer KV id (lowercased handle), fallback to on-chain numeric id if present
         const routeId = j?.creator?.id || String(id);
         router.push(`/creator/${encodeURIComponent(routeId)}`);
       } catch (err: any) {
@@ -91,20 +151,47 @@ export default function CreatorOnboard() {
             placeholder="your-handle"
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
+            aria-describedby="handle-help"
           />
         </label>
 
-        {!ok && raw.length > 0 && (
-          <p className="text-xs text-rose-300">
-            Handles can include letters, numbers, underscores, dots or hyphens (max 32).
+        {/* inline guidance + availability */}
+        <div className="flex items-center justify-between text-xs">
+          <p id="handle-help" className="text-slate-400">
+            Letters, numbers, underscores, dots, or hyphens (3–32).
           </p>
+          <div className="text-right">
+            {avail.state === 'idle' && raw.length === 0 ? null : null}
+            {avail.state === 'invalid' && (
+              <span className="text-rose-300">Invalid handle</span>
+            )}
+            {avail.state === 'checking' && (
+              <span className="text-slate-300">Checking…</span>
+            )}
+            {avail.state === 'available' && (
+              <span className="text-emerald-300">Available ✓</span>
+            )}
+            {avail.state === 'taken' && (
+              <span className="text-amber-300">
+                Taken {avail.where === 'onchain' ? '(on-chain)' : '(in app)'}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* fee preview */}
+        {!!feeView && (
+          <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+            Current creation fee: <span className="text-slate-100">{feeView} USDC</span>
+          </div>
         )}
 
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={!ok || busy}
+            disabled={!ok || busy || avail.state === 'invalid' || avail.state === 'taken'}
             className="btn disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-disabled={!ok || busy || avail.state === 'invalid' || avail.state === 'taken'}
           >
             {busy ? 'Creating…' : 'Create my page'}
           </button>
