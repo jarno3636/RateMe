@@ -7,9 +7,10 @@ import {
 } from '@/lib/kv'
 
 export const runtime = 'edge'
-export const alt = 'Rate Me — Creator'
-export const size = { width: 1200, height: 630 }
-export const contentType = 'image/png'
+
+// If you want a different size, just change these and the styles below.
+const WIDTH = 1200
+const HEIGHT = 630
 
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
@@ -36,7 +37,6 @@ async function getCreator(idOrHandle: string) {
   }
 }
 
-/** Fallback avatar: gradient with first letter */
 function letterAvatar(letter: string) {
   const ch = (letter || 'U').slice(0, 1).toUpperCase()
   return (
@@ -85,8 +85,8 @@ export async function GET(req: NextRequest) {
     (
       <div
         style={{
-          width: '1200px',
-          height: '630px',
+          width: `${WIDTH}px`,
+          height: `${HEIGHT}px`,
           display: 'flex',
           background: 'linear-gradient(135deg,#0b1220 0%,#0f172a 50%,#0b1220 100%)',
           color: '#e5e7eb',
@@ -163,8 +163,11 @@ export async function GET(req: NextRequest) {
       </div>
     ),
     {
-      ...size,
+      width: WIDTH,
+      height: HEIGHT,
+      // Set headers here (instead of using invalid route exports)
       headers: {
+        'Content-Type': 'image/png',
         'Cache-Control': 'public, s-maxage=60, max-age=60, stale-while-revalidate=30',
       },
     }
