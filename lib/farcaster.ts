@@ -1,7 +1,19 @@
 // lib/farcaster.ts
-const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
-export const MINIAPP_DOMAIN = (() => { try { return new URL(SITE).hostname } catch { return 'localhost' } })()
+const rawSite = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000'
+const SITE = rawSite.replace(/\/$/, '').replace(/^http:/, 'https:')
 
+export const MINIAPP_DOMAIN = (() => {
+  try {
+    return new URL(SITE).hostname
+  } catch {
+    return 'localhost'
+  }
+})()
+
+/**
+ * Farcaster Miniapp manifest object
+ * You can extend this to add more buttons later.
+ */
 export const fcMiniApp = {
   version: '1',
   imageUrl: `${SITE}/miniapp-card.png`,
@@ -18,10 +30,15 @@ export const fcMiniApp = {
 }
 
 /** Build a Warpcast cast intent URL with prefilled text and optional link preview */
-export function warpcastShare({ text, url }: { text: string; url?: string }) {
+export function warpcastShare({
+  text,
+  url,
+  channelId,
+}: { text: string; url?: string; channelId?: string }) {
   const params = new URLSearchParams()
   params.set('text', text)
   if (url) params.set('embeds[]', url)
+  if (channelId) params.set('channelKey', channelId)
   return `https://warpcast.com/~/compose?${params.toString()}`
 }
 
@@ -41,6 +58,7 @@ export function creatorShareLinks(handleOrId: string, title?: string) {
     cast: warpcastShare({ text, url }),
     tweet: twitterShare({ text, url }),
     url,
+    previewImage: `${SITE}/miniapp-card.png`,
   }
 }
 
