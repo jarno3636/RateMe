@@ -5,8 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { useProfileRegistry } from '@/hooks/useProfileRegistry';
-import { checkHandleAvailability, registerCreator } from '@/lib/api/creator';
+import { checkHandleAvailability, registerCreator, type Availability } from '@/lib/api/creator';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
+import { creatorShareLinks } from '@/lib/farcaster';
 
 function normalizeHandle(s: string) {
   return s.trim().replace(/^@/, '').toLowerCase();
@@ -16,89 +17,115 @@ function isValidHandle(h: string) {
   return /^[a-z0-9._-]+$/.test(h);
 }
 
-type Avail =
-  | { state: 'idle' }
-  | { state: 'checking' }
-  | { state: 'available' }
-  | { state: 'invalid' }
-  | { state: 'taken'; where: 'kv' | 'onchain' }
-
 export default function CreatorOnboard() {
   const router = useRouter();
+
+  // form state
   const [raw, setRaw] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [feeView, setFeeView] = useState<string>('');
-  const [avail, setAvail] = useState<Avail>({ state: 'idle' });
-
-  const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
-
   const handle = useMemo(() => normalizeHandle(raw), [raw]);
-  const ok = useMemo(() => isValidHandle(handle), [handle]);
+  const okFormat = useMemo(() => isValidHandle(handle), [handle]);
+
+  // availability state
+  const [checking, setChecking] = useState(false);
+  const [avail, setAvail] = useState<Availability | null>(null);
   const debouncedHandle = useDebouncedValue(handle, 350);
 
-  // preview fee from the registry (USDC, 6dp)
+  // on-chain flow
+  const [busy, setBusy] = useState(false);
+  const [feeView, setFeeView] = useState<string>('');
+  const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
+
+  // preview creation fee (USDC, 6dp)
   useEffect(() => {
+    let alive = true;
     (async () => {
       try {
         const fee = await feeUnits();
+        if (!alive) return;
         setFeeView((Number(fee) / 1e6).toFixed(2));
       } catch {
+        if (!alive) return;
         setFeeView('');
       }
     })();
+    return () => {
+      alive = false;
+    };
   }, [feeUnits]);
 
-  // live availability check against our GET endpoint
+  // live availability check
   useEffect(() => {
-    let cancelled = false;
+    let canceled = false;
 
     (async () => {
-      if (!debouncedHandle) { setAvail({ state: 'idle' }); return; }
-      if (!isValidHandle(debouncedHandle)) { setAvail({ state: 'invalid' }); return; }
+      if (!debouncedHandle) {
+        setAvail(null);
+        return;
+      }
+      if (!isValidHandle(debouncedHandle)) {
+        setAvail({
+          ok: true,
+          valid: false,
+          existsKV: false,
+          onchainTaken: false,
+          available: false,
+        });
+        return;
+      }
 
-      setAvail({ state: 'checking' });
+      setChecking(true);
       try {
         const res = await checkHandleAvailability(debouncedHandle);
-        if (cancelled) return;
-
-        if (!res.ok) {
-          // If the API misbehaves, fall back to simple local validation
-          setAvail({ state: 'invalid' });
-          return;
-        }
-
-        if (res.available) {
-          setAvail({ state: 'available' });
-        } else if (res.reason === 'taken_kv') {
-          setAvail({ state: 'taken', where: 'kv' });
-        } else if (res.reason === 'taken_onchain') {
-          setAvail({ state: 'taken', where: 'onchain' });
-        } else {
-          setAvail({ state: 'invalid' });
-        }
+        if (canceled) return;
+        setAvail(res);
       } catch {
-        if (!cancelled) setAvail({ state: 'invalid' });
+        if (canceled) return;
+        setAvail({
+          ok: false,
+          valid: okFormat,
+          existsKV: false,
+          onchainTaken: false,
+          available: false,
+          error: 'network error',
+        });
+      } finally {
+        if (!canceled) setChecking(false);
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [debouncedHandle]);
+    return () => {
+      canceled = true;
+    };
+  }, [debouncedHandle, okFormat]);
 
   const submit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (!ok || !handle || busy) return;
+      if (!okFormat || !handle || busy) return;
+
+      // if we have an availability result, only allow when available
+      if (avail && (!avail.ok || !avail.available)) {
+        toast.error(
+          avail?.error
+            ? `Unavailable: ${avail.error}`
+            : avail?.onchainTaken
+            ? 'Handle already registered on-chain'
+            : avail?.existsKV
+            ? 'Handle already taken in app'
+            : 'Handle not available'
+        );
+        return;
+      }
 
       setBusy(true);
       try {
-        // final pre-check: on-chain taken?
+        // final on-chain guard (cheap read)
         if (await handleTaken(handle)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
           return;
         }
 
-        // show fee hint
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
           toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
@@ -109,12 +136,56 @@ export default function CreatorOnboard() {
         // 1) On-chain create
         const { id } = await createProfile({ handle });
 
-        // 2) KV register (server-side Neynar hydration + uniqueness)
+        // 2) KV registration (server-side Neynar hydration + uniqueness)
         const j = await registerCreator({ handle });
 
-        toast.success('Creator page created');
-        // prefer KV id (lowercased handle), fallback to on-chain numeric id if present
+        // Compute share links for toast
         const routeId = j?.creator?.id || String(id);
+        const { cast, tweet, url } = creatorShareLinks(routeId, `Check out @${routeId} on Rate Me`);
+
+        // Success + share toast
+        toast.success('Creator page created');
+        toast.custom(
+          (t) => (
+            <div className="rounded-xl border border-white/10 bg-[#0b1220] p-4 text-slate-100 shadow-lg">
+              <div className="text-sm font-medium">Share your new page</div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <a
+                  href={cast}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-cyan-400/40 bg-cyan-400/10 px-3 py-1.5 text-xs text-cyan-200 hover:bg-cyan-400/20"
+                >
+                  Cast on Warpcast
+                </a>
+                <a
+                  href={tweet}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-sky-400/40 bg-sky-400/10 px-3 py-1.5 text-xs text-sky-200 hover:bg-sky-400/20"
+                >
+                  Tweet it
+                </a>
+                <button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(url);
+                      toast.success('Link copied');
+                    } catch {
+                      toast.error('Copy failed');
+                    }
+                  }}
+                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
+                >
+                  Copy link
+                </button>
+              </div>
+            </div>
+          ),
+          { duration: 6000 }
+        );
+
+        // Navigate to the new page
         router.push(`/creator/${encodeURIComponent(routeId)}`);
       } catch (err: any) {
         toast.error(err?.message || 'Something went wrong');
@@ -122,8 +193,39 @@ export default function CreatorOnboard() {
         setBusy(false);
       }
     },
-    [ok, handle, busy, router, createProfile, feeUnits, handleTaken]
+    [okFormat, handle, busy, router, createProfile, feeUnits, handleTaken, avail]
   );
+
+  // UI helpers based on unified availability
+  const helpRight = useMemo(() => {
+    if (!raw) return null;
+    if (!okFormat) return <span className="text-rose-300">Invalid handle</span>;
+    if (checking) return <span className="text-slate-300">Checking…</span>;
+    if (!avail) return null;
+
+    if (!avail.ok) {
+      return <span className="text-rose-300">Error{avail.error ? `: ${avail.error}` : ''}</span>;
+    }
+    if (!avail.valid) {
+      return <span className="text-rose-300">Invalid handle</span>;
+    }
+    if (avail.available) {
+      return <span className="text-emerald-300">Available ✓</span>;
+    }
+    if (avail.onchainTaken) {
+      return <span className="text-amber-300">Taken (on-chain)</span>;
+    }
+    if (avail.existsKV) {
+      return <span className="text-amber-300">Taken (in app)</span>;
+    }
+    return <span className="text-slate-300">Unavailable</span>;
+  }, [raw, okFormat, checking, avail]);
+
+  const disableSubmit =
+    busy ||
+    !okFormat ||
+    checking ||
+    (avail ? (!avail.ok || !avail.available) : false);
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
@@ -155,31 +257,13 @@ export default function CreatorOnboard() {
           />
         </label>
 
-        {/* inline guidance + availability */}
         <div className="flex items-center justify-between text-xs">
           <p id="handle-help" className="text-slate-400">
             Letters, numbers, underscores, dots, or hyphens (3–32).
           </p>
-          <div className="text-right">
-            {avail.state === 'idle' && raw.length === 0 ? null : null}
-            {avail.state === 'invalid' && (
-              <span className="text-rose-300">Invalid handle</span>
-            )}
-            {avail.state === 'checking' && (
-              <span className="text-slate-300">Checking…</span>
-            )}
-            {avail.state === 'available' && (
-              <span className="text-emerald-300">Available ✓</span>
-            )}
-            {avail.state === 'taken' && (
-              <span className="text-amber-300">
-                Taken {avail.where === 'onchain' ? '(on-chain)' : '(in app)'}
-              </span>
-            )}
-          </div>
+          <div className="text-right">{helpRight}</div>
         </div>
 
-        {/* fee preview */}
         {!!feeView && (
           <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
             Current creation fee: <span className="text-slate-100">{feeView} USDC</span>
@@ -189,9 +273,9 @@ export default function CreatorOnboard() {
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={!ok || busy || avail.state === 'invalid' || avail.state === 'taken'}
+            disabled={disableSubmit}
             className="btn disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-disabled={!ok || busy || avail.state === 'invalid' || avail.state === 'taken'}
+            aria-disabled={disableSubmit}
           >
             {busy ? 'Creating…' : 'Create my page'}
           </button>
@@ -208,8 +292,14 @@ export default function CreatorOnboard() {
 
         <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-xs text-slate-400">
           By creating a page you agree to the{' '}
-          <a href="/terms" className="underline hover:text-slate-200">Terms</a> and{' '}
-          <a href="/privacy" className="underline hover:text-slate-200">Privacy Policy</a>.
+          <a href="/terms" className="underline hover:text-slate-200">
+            Terms
+          </a>{' '}
+          and{' '}
+          <a href="/privacy" className="underline hover:text-slate-200">
+            Privacy Policy
+          </a>
+          .
         </div>
       </form>
     </div>
