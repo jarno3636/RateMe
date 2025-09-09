@@ -68,13 +68,11 @@ export async function GET(req: NextRequest) {
   const title = c.displayName || c.handle || 'Creator'
   const handle = c.handle?.startsWith('@') ? c.handle : `@${c.handle || 'unknown'}`
 
-  // avatar node (inline <img> supported by next/og)
-  const hasAvatar = !!c.avatarUrl
-  const avatarNode = hasAvatar ? (
+  const avatarNode = c.avatarUrl ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       alt="avatar"
-      src={c.avatarUrl!}
+      src={c.avatarUrl}
       width={240}
       height={240}
       style={{ objectFit: 'cover', width: '100%', height: '100%' }}
@@ -97,7 +95,6 @@ export async function GET(req: NextRequest) {
           fontFamily: 'system-ui, ui-sans-serif, Segoe UI, Roboto',
         }}
       >
-        {/* Logo badge */}
         <div
           style={{
             position: 'absolute',
@@ -111,7 +108,6 @@ export async function GET(req: NextRequest) {
           Rate Me
         </div>
 
-        {/* Left: Avatar */}
         <div
           style={{
             width: 240,
@@ -125,7 +121,6 @@ export async function GET(req: NextRequest) {
           {avatarNode}
         </div>
 
-        {/* Right: Text */}
         <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 40, gap: 16 }}>
           <div style={{ fontSize: 56, fontWeight: 800, letterSpacing: -1 }}>{title}</div>
           <div style={{ fontSize: 36, color: '#93c5fd' }}>{handle}</div>
@@ -170,7 +165,6 @@ export async function GET(req: NextRequest) {
     {
       ...size,
       headers: {
-        // refresh avatars fairly often
         'Cache-Control': 'public, s-maxage=60, max-age=60, stale-while-revalidate=30',
       },
     }
