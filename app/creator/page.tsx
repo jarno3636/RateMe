@@ -138,8 +138,11 @@ export default function CreatorOnboard() {
 
         // 2) KV registration (server-side Neynar hydration + uniqueness)
         const reg = await registerCreator({ handle });
-        if (!reg.ok) {
-          throw new Error(reg.error || 'Failed to register');
+
+        // Narrow union safely
+        if (!('creator' in reg)) {
+          const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
+          throw new Error(msg);
         }
 
         // Compute share links for toast
@@ -283,7 +286,7 @@ export default function CreatorOnboard() {
             {busy ? 'Creating…' : 'Create my page'}
           </button>
 
-        <a
+          <a
             href="https://warpcast.com/~/settings/username"
             target="_blank"
             rel="noreferrer"
