@@ -1,14 +1,16 @@
-// app/api/og/creator/route.ts
+// app/api/og/creator/route.tsx
 import { ImageResponse } from 'next/og'
 import { NextRequest } from 'next/server'
-import { getCreator as _getCreator, getCreatorByHandle as _getCreatorByHandle } from '@/lib/kv'
+import {
+  getCreator as _getCreator,
+  getCreatorByHandle as _getCreatorByHandle,
+} from '@/lib/kv'
 
 export const runtime = 'edge'
 export const alt = 'Rate Me — Creator'
 export const size = { width: 1200, height: 630 }
 export const contentType = 'image/png'
 
-/** Resolve site URL once (no trailing slash) */
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
 }
@@ -19,8 +21,8 @@ function normalizeId(s: string) {
 
 async function getCreator(idOrHandle: string) {
   const id = normalizeId(idOrHandle)
-  const creator = await _getCreator(id)
-  if (creator) return creator
+  const byId = await _getCreator(id)
+  if (byId) return byId
   const byHandle = await _getCreatorByHandle(id)
   if (byHandle) return byHandle
   return {
@@ -36,6 +38,7 @@ async function getCreator(idOrHandle: string) {
 
 /** Fallback avatar: gradient with first letter */
 function letterAvatar(letter: string) {
+  const ch = (letter || 'U').slice(0, 1).toUpperCase()
   return (
     <div
       style={{
@@ -50,7 +53,7 @@ function letterAvatar(letter: string) {
         fontWeight: 800,
       }}
     >
-      {letter.toUpperCase()}
+      {ch}
     </div>
   )
 }
@@ -65,7 +68,7 @@ export async function GET(req: NextRequest) {
   const title = c.displayName || c.handle || 'Creator'
   const handle = c.handle?.startsWith('@') ? c.handle : `@${c.handle || 'unknown'}`
 
-  // Decide avatar rendering
+  // avatar node (inline <img> supported by next/og)
   const hasAvatar = !!c.avatarUrl
   const avatarNode = hasAvatar ? (
     // eslint-disable-next-line @next/next/no-img-element
@@ -77,7 +80,7 @@ export async function GET(req: NextRequest) {
       style={{ objectFit: 'cover', width: '100%', height: '100%' }}
     />
   ) : (
-    letterAvatar(handle[1] || 'U')
+    letterAvatar((handle.replace(/^@/, '') || 'U')[0] || 'U')
   )
 
   return new ImageResponse(
@@ -91,7 +94,7 @@ export async function GET(req: NextRequest) {
           color: '#e5e7eb',
           padding: '48px',
           position: 'relative',
-          fontFamily: 'system-ui, sans-serif',
+          fontFamily: 'system-ui, ui-sans-serif, Segoe UI, Roboto',
         }}
       >
         {/* Logo badge */}
@@ -102,6 +105,7 @@ export async function GET(req: NextRequest) {
             right: 24,
             fontSize: 28,
             color: '#67e8f9',
+            letterSpacing: 0.25,
           }}
         >
           Rate Me
@@ -166,7 +170,7 @@ export async function GET(req: NextRequest) {
     {
       ...size,
       headers: {
-        // avoid stale avatars: refresh every 60s
+        // refresh avatars fairly often
         'Cache-Control': 'public, s-maxage=60, max-age=60, stale-while-revalidate=30',
       },
     }
