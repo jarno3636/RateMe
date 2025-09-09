@@ -1,8 +1,12 @@
 // lib/creatorHub.ts
-import type { Abi, Address } from 'viem';
+import type { Abi, Address } from 'viem'
+import { base as BASE } from 'viem/chains'   // ✅ exportable chain object
 
-/** Base mainnet */
-export const BASE_CHAIN_ID = 8453;
+/** Re-export the chain so other files can import { BASE } */
+export { BASE }
+
+/** Base mainnet id (kept for convenience) */
+export const BASE_CHAIN_ID = BASE.id // 8453
 
 /**
  * ✅ Set in Vercel (Project → Settings → Environment Variables):
@@ -10,15 +14,10 @@ export const BASE_CHAIN_ID = 8453;
  */
 export const CREATOR_HUB_ADDR: Address =
   (process.env.NEXT_PUBLIC_CREATOR_HUB_ADDR as Address) ??
-  '0x0000000000000000000000000000000000000000';
+  '0x0000000000000000000000000000000000000000'
 
 /**
  * Minimal ABI covering the functions used in useCreatorHub()
- * (plans, posts, hasPostAccess, isActive, getCreatorPlanIds, getCreatorPostIds,
- *  createPlan, createPost, subscribe, buyPost)
- *
- * If your contract also exposes cancelSubscription, you can keep that
- * entry below—calling it is optional.
  */
 export const CREATOR_HUB_ABI = [
   // --- views used by the hook ---
@@ -130,7 +129,7 @@ export const CREATOR_HUB_ABI = [
     outputs: [],
   },
 
-  // Optional — include only if your contract implements it:
+  // Optional — only if implemented in your contract:
   {
     type: 'function',
     stateMutability: 'nonpayable',
@@ -138,4 +137,4 @@ export const CREATOR_HUB_ABI = [
     inputs: [{ name: 'creator', type: 'address' }],
     outputs: [],
   },
-] as const satisfies Abi;
+] as const satisfies Abi
