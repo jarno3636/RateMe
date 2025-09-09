@@ -1,4 +1,5 @@
 // lib/api/creator.ts
+
 export type Availability = {
   ok: boolean
   valid: boolean
@@ -8,10 +9,25 @@ export type Availability = {
   error?: string
 }
 
+export type RegisterCreatorBody = {
+  handle: string
+  address?: `0x${string}` | null
+  fid?: number
+}
+
+export type RegisterCreatorResp =
+  | { ok: true; creator: { id: string; handle: string } }
+  | { ok: false; error: string }
+
+/* --------------------------- helpers --------------------------- */
+
 function normalizeHandle(s: string) {
   return String(s || '').trim().replace(/^@/, '').toLowerCase()
 }
 
+/**
+ * Check if a handle is available (KV + onchain check).
+ */
 export async function checkHandleAvailability(raw: string): Promise<Availability> {
   const handle = normalizeHandle(raw)
   const valid =
@@ -65,5 +81,30 @@ export async function checkHandleAvailability(raw: string): Promise<Availability
       available: false,
       error: e?.message || 'network error',
     }
+  }
+}
+
+/**
+ * Register a new creator by calling the POST API route.
+ * Will hydrate from Neynar and write to KV on the server.
+ */
+export async function registerCreator(
+  body: RegisterCreatorBody
+): Promise<RegisterCreatorResp> {
+  try {
+    const res = await fetch('/api/creator/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const j = await res.json().catch(() => null)
+
+    if (!res.ok || !j) {
+      return { ok: false, error: j?.error || `register failed (${res.status})` }
+    }
+
+    return { ok: true, creator: j.creator }
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'network error' }
   }
 }
