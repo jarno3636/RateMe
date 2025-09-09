@@ -1,10 +1,15 @@
 // lib/registry.ts
 import type { Abi, Address } from 'viem';
 
-// Base mainnet USDC (6 decimals)
-export const BASE_USDC: Address = '0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913';
+// Base mainnet (chain id 8453)
+export const BASE_CHAIN_ID = 8453;
 
-// Your verified registry
+// USDC on Base (6 decimals)
+export const BASE_USDC: Address =
+  (process.env.NEXT_PUBLIC_BASE_USDC as Address) ||
+  '0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913';
+
+// Your verified ProfileRegistryUSDC
 export const PROFILE_REGISTRY_ADDR: Address =
   (process.env.NEXT_PUBLIC_PROFILE_REGISTRY as Address) ||
   '0x4769667dC49A8E05018729108fD98521F4EbC53a';
@@ -27,7 +32,7 @@ export const USDC_ABI = [
   },
 ] as const satisfies Abi;
 
-// Minimal ABI for the flows we use (matches your verified contract)
+// Minimal ABI for what we call in the app
 export const PROFILE_REGISTRY_ABI = [
   { type: 'function', name: 'feeUnits', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint256' }] },
   { type: 'function', name: 'handleTaken', stateMutability: 'view', inputs: [{ name: 'handle', type: 'string' }], outputs: [{ type: 'bool' }] },
