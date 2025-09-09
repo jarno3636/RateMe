@@ -52,8 +52,7 @@ function json(data: unknown, init?: ResponseInit) {
 
 /* ------------------------------- GET --------------------------------- */
 /**
- * Idempotent check for an existing creator.
- * Usage:
+ * Idempotent availability check.
  *   /api/creator/register?handle=alice
  *   /api/creator/register?id=alice
  *
@@ -70,14 +69,12 @@ export async function GET(req: NextRequest) {
     if (!source) return json({ error: 'Missing handle or id' }, { status: 400 })
 
     const parsed = Handle.safeParse(source)
-    if (!parsed.success) return json({ error: 'Invalid handle' }, { status: 400 })
+    if (!parsed.success) return json({ ok: true, exists: false, onchainTaken: false, error: 'invalid' }, { status: 200 })
     const id = parsed.data // normalized lowercase
 
     // KV lookup (by id and by handle mapping)
     let creator = await getCreator(id)
-    if (!creator) {
-      creator = await getCreatorByHandle(id)
-    }
+    if (!creator) creator = await getCreatorByHandle(id)
 
     // On-chain handleTaken check (best-effort)
     let onchainTaken = false
