@@ -1,58 +1,134 @@
 // app/api/creator/register/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { createCreatorUnique } from '@/lib/kv'
-import { fetchNeynarUserByHandle, fetchNeynarUserByFid } from '@/lib/neynar'
-
-import { createPublicClient, http } from 'viem'
+import { z } from 'zod'
+import { createPublicClient, http, isAddress, getAddress } from 'viem'
 import { base } from 'viem/chains'
-import { PROFILE_REGISTRY_ABI, PROFILE_REGISTRY_ADDR } from '@/lib/registry'
 import { kv } from '@vercel/kv'
+
+import { createCreatorUnique, getCreator, getCreatorByHandle } from '@/lib/kv'
+import { fetchNeynarUserByHandle, fetchNeynarUserByFid } from '@/lib/neynar'
+import { PROFILE_REGISTRY_ABI, PROFILE_REGISTRY_ADDR } from '@/lib/registry'
 
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
 
-function normalizeHandle(s: string) {
-  return s.trim().replace(/^@/, '').toLowerCase()
-}
-function isValidHandle(h: string) {
-  return h.length >= 3 && h.length <= 32 && /^[a-z0-9._-]+$/.test(h)
-}
+/* ------------------------------ helpers ------------------------------ */
+
+const Handle = z
+  .string()
+  .trim()
+  .transform((s) => s.replace(/^@/, '').toLowerCase())
+  .refine((h) => h.length >= 3 && h.length <= 32 && /^[a-z0-9._-]+$/.test(h), {
+    message: 'Invalid handle',
+  })
+
+const BodySchema = z.object({
+  handle: Handle,
+  address: z
+    .string()
+    .optional()
+    .nullable()
+    .transform((a) => (a ? a.trim() : null))
+    .refine((a) => a === null || isAddress(a), { message: 'Invalid address' })
+    .transform((a) => (a ? (getAddress(a) as `0x${string}`) : null)),
+  fid: z.number().int().positive().optional(),
+  // optional UI override; we'll still try Neynar
+  displayName: z.string().trim().min(1).max(64).optional(),
+})
 
 const pub = createPublicClient({
   chain: base,
-  transport: http(), // respects NEXT_PUBLIC_VERCEL_ env networking
+  transport: http(
+    process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || undefined
+  ),
 })
 
+function json(data: unknown, init?: ResponseInit) {
+  return NextResponse.json(data, {
+    headers: { 'cache-control': 'no-store' },
+    ...init,
+  })
+}
+
+/* ------------------------------- GET --------------------------------- */
+/**
+ * Idempotent check for an existing creator.
+ * Usage:
+ *   /api/creator/register?handle=alice
+ *   /api/creator/register?id=alice
+ *
+ * Response:
+ *   { ok: true, exists: boolean, onchainTaken: boolean, creator?: {...} }
+ */
+export async function GET(req: NextRequest) {
+  try {
+    const url = new URL(req.url)
+    const rawHandle = url.searchParams.get('handle')
+    const rawId = url.searchParams.get('id')
+    const source = (rawHandle ?? rawId ?? '').trim()
+
+    if (!source) return json({ error: 'Missing handle or id' }, { status: 400 })
+
+    const parsed = Handle.safeParse(source)
+    if (!parsed.success) return json({ error: 'Invalid handle' }, { status: 400 })
+    const id = parsed.data // normalized lowercase
+
+    // KV lookup (by id and by handle mapping)
+    let creator = await getCreator(id)
+    if (!creator) {
+      creator = await getCreatorByHandle(id)
+    }
+
+    // On-chain handleTaken check (best-effort)
+    let onchainTaken = false
+    try {
+      onchainTaken = (await pub.readContract({
+        address: PROFILE_REGISTRY_ADDR,
+        abi: PROFILE_REGISTRY_ABI,
+        functionName: 'handleTaken',
+        args: [id],
+      })) as boolean
+    } catch {
+      // ignore RPC hiccup
+    }
+
+    return json({
+      ok: true,
+      exists: !!creator,
+      onchainTaken,
+      creator: creator || null,
+    })
+  } catch (e: any) {
+    return json({ error: e?.message || 'Server error' }, { status: 500 })
+  }
+}
+
+/* ------------------------------- POST -------------------------------- */
+/**
+ * Create a creator record (KV) after validating handle and soft anti-abuse.
+ * Also performs a best-effort on-chain pre-check and optional Neynar enrichment.
+ */
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}))
-
-    // Normalize + validate handle
-    const rawInput = String(body?.handle ?? '')
-    const handleId = normalizeHandle(rawInput)
-    if (!handleId) {
-      return NextResponse.json({ error: 'Missing handle' }, { status: 400 })
+    // Parse & validate
+    const raw = await req.json().catch(() => ({}))
+    const body = BodySchema.safeParse(raw)
+    if (!body.success) {
+      const first = body.error.issues[0]
+      return json({ error: first?.message || 'Bad request' }, { status: 400 })
     }
-    if (!isValidHandle(handleId)) {
-      return NextResponse.json({ error: 'Invalid handle' }, { status: 400 })
-    }
+    const { handle: handleId, address, fid: fidInput, displayName: displayNameFromBody } = body.data
 
-    // Optional inputs
-    const address = (body?.address ?? null) as `0x${string}` | null
-    const fidInput = typeof body?.fid === 'number' ? (body.fid as number) : undefined
-
-    // Soft rate limit per IP + handle to prevent spam
+    // Simple per-IP + handle rate-limit
     const ip =
       req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       req.headers.get('x-real-ip') ||
       'unknown'
-    const rlKey = `ratelimit:creator:${handleId}:${ip}`
-    const rlOk = await kv.set(rlKey, '1', { nx: true, ex: 10 })
-    if (!rlOk) {
-      return NextResponse.json({ error: 'Slow down, please retry shortly' }, { status: 429 })
-    }
+    const rlKey = `rl:creator-register:${handleId}:${ip}`
+    const okRL = await kv.set(rlKey, '1', { nx: true, ex: 15 }) // 15s window
+    if (!okRL) return json({ error: 'Slow down, please retry shortly' }, { status: 429 })
 
-    // On-chain check: reject if handle already exists on Base (your verified contract)
+    // On-chain pre-check (don’t hard fail if RPC errors)
     try {
       const exists = (await pub.readContract({
         address: PROFILE_REGISTRY_ADDR,
@@ -60,29 +136,23 @@ export async function POST(req: NextRequest) {
         functionName: 'handleTaken',
         args: [handleId],
       })) as boolean
-
-      if (exists) {
-        return NextResponse.json(
-          { error: 'Handle already registered on-chain' },
-          { status: 409 }
-        )
-      }
+      if (exists) return json({ error: 'Handle already registered on-chain' }, { status: 409 })
     } catch {
-      // If RPC hiccups, don’t block — KV uniqueness + UI flow will still be safe.
+      // noop
     }
 
-    // Neynar enrichment (best-effort)
-    let displayName: string | undefined
+    // Neynar enrichment (best-effort, prefer FID if provided)
+    let displayName = displayNameFromBody
     let avatarUrl: string | undefined
     let bio: string | undefined
-    let fid: number | undefined = fidInput
+    let fid = fidInput
 
     try {
       if (fidInput) {
         const u = await fetchNeynarUserByFid(fidInput)
         if (u) {
           fid = u.fid
-          displayName = u.display_name || undefined
+          displayName ||= u.display_name || undefined
           avatarUrl = u.pfp_url || undefined
           bio = u.bio?.text || undefined
         }
@@ -90,36 +160,42 @@ export async function POST(req: NextRequest) {
         const u = await fetchNeynarUserByHandle(handleId)
         if (u) {
           fid = u.fid
-          displayName = u.display_name || undefined
+          displayName ||= u.display_name || undefined
           avatarUrl = u.pfp_url || undefined
           bio = u.bio?.text || undefined
         }
       }
     } catch {
-      // ignore enrichment errors
+      // ignore enrichment hiccups
     }
 
-    // Create atomically; KV setnx inside createCreatorUnique guarantees uniqueness
+    // Atomic create (KV SETNX inside guarantees uniqueness)
     const creator = await createCreatorUnique({
-      id: handleId,                 // primary key (lowercased)
-      handle: handleId,             // store lowercase; UI can render with @
-      address,
+      id: handleId,                // primary key (lowercased)
+      handle: handleId,            // stored lowercase; UI renders "@"
+      address: address ?? null,
       fid,
-      displayName: displayName ?? handleId,
+      displayName: displayName || handleId,
       avatarUrl,
       bio,
       createdAt: Date.now(),
     })
 
-    return NextResponse.json({ ok: true, creator }, { status: 201 })
+    // Optional tiny audit log (non-blocking)
+    try {
+      await kv.lpush('creator:events', JSON.stringify({ t: Date.now(), type: 'register', handleId, ip }))
+      await kv.ltrim('creator:events', 0, 199)
+    } catch {}
+
+    return json({ ok: true, creator }, { status: 201 })
   } catch (e: any) {
     const msg = String(e?.message || e)
 
     if (msg.includes('Handle is taken') || msg.includes('already exists')) {
-      return NextResponse.json({ error: 'Handle already registered' }, { status: 409 })
+      return json({ error: 'Handle already registered' }, { status: 409 })
     }
 
     console.error('creator/register failed:', e)
-    return NextResponse.json({ error: 'Server error' }, { status: 500 })
+    return json({ error: 'Server error' }, { status: 500 })
   }
 }
