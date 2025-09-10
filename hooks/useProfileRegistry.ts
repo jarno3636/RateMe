@@ -9,6 +9,7 @@ import {
   useSwitchChain,
 } from 'wagmi';
 import type { Address, Abi } from 'viem';
+import { getAddress } from 'viem';
 import {
   PROFILE_REGISTRY_ABI,
   PROFILE_REGISTRY_ADDR,
@@ -17,12 +18,24 @@ import {
   BASE_CHAIN_ID,
 } from '@/lib/registry';
 
-const REG = PROFILE_REGISTRY_ADDR as Address;
-const USDC = BASE_USDC as Address;
+const ZERO = '0x0000000000000000000000000000000000000000' as const;
 
-function req<T>(v: T | undefined, msg: string): T {
+// Normalize (defensive) — lib/registry should already export checksummed values.
+function asAddr(s: string | undefined | null): Address {
+  if (!s) throw new Error('Missing address');
+  const a = getAddress(s as `0x${string}`);
+  return a as Address;
+}
+const REG = asAddr(PROFILE_REGISTRY_ADDR);
+const USDC = asAddr(BASE_USDC);
+
+function req<T>(v: T | undefined | null, msg: string): T {
   if (v === undefined || v === null) throw new Error(msg);
   return v as T;
+}
+
+function normalizeHandle(s: string) {
+  return s.trim().replace(/^@/, '').toLowerCase();
 }
 
 export function useProfileRegistry() {
@@ -31,22 +44,34 @@ export function useProfileRegistry() {
   const { data: wallet } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
 
+  // --- common guards -------------------------------------------------------
+  const assertAddresses = () => {
+    if (!pub) throw new Error('Public client unavailable');
+    if (!REG || REG === (ZERO as Address)) {
+      throw new Error(
+        'Profile Registry address is not configured. Set NEXT_PUBLIC_PROFILE_REGISTRY_ADDR to a checksummed address.'
+      );
+    }
+    if (!USDC || USDC === (ZERO as Address)) {
+      throw new Error(
+        'USDC address is not configured for Base. Check BASE_USDC/NEXT_PUBLIC_BASE_USDC.'
+      );
+    }
+  };
+
   const ensureBase = useCallback(async () => {
     if (!wallet?.account) throw new Error('Connect wallet');
     if (chainId !== BASE_CHAIN_ID) {
-      await switchChainAsync?.({ chainId: BASE_CHAIN_ID });
+      if (!switchChainAsync) {
+        throw new Error('Wrong network. Please switch to Base.');
+      }
+      await switchChainAsync({ chainId: BASE_CHAIN_ID });
     }
   }, [wallet, chainId, switchChainAsync]);
 
-  const assert = () => {
-    if (!pub) throw new Error('Public client unavailable');
-    if (!wallet?.account) throw new Error('Connect wallet');
-    if (!REG || !USDC) throw new Error('Contract addresses not configured');
-  };
-
   // ---------- Reads ----------
   const feeUnits = useCallback(async (): Promise<bigint> => {
-    req(pub, 'Public client unavailable');
+    assertAddresses();
     return (await pub!.readContract({
       address: REG,
       abi: PROFILE_REGISTRY_ABI as Abi,
@@ -54,8 +79,9 @@ export function useProfileRegistry() {
     })) as bigint;
   }, [pub]);
 
-  const handleTaken = useCallback(async (handle: string): Promise<boolean> => {
-    req(pub, 'Public client unavailable');
+  const handleTaken = useCallback(async (raw: string): Promise<boolean> => {
+    assertAddresses();
+    const handle = normalizeHandle(raw);
     return (await pub!.readContract({
       address: REG,
       abi: PROFILE_REGISTRY_ABI as Abi,
@@ -64,8 +90,9 @@ export function useProfileRegistry() {
     })) as boolean;
   }, [pub]);
 
-  const getIdByHandle = useCallback(async (handle: string): Promise<bigint> => {
-    req(pub, 'Public client unavailable');
+  const getIdByHandle = useCallback(async (raw: string): Promise<bigint> => {
+    assertAddresses();
+    const handle = normalizeHandle(raw);
     return (await pub!.readContract({
       address: REG,
       abi: PROFILE_REGISTRY_ABI as Abi,
@@ -74,27 +101,30 @@ export function useProfileRegistry() {
     })) as bigint;
   }, [pub]);
 
-  // Nice-to-have: single RPC that mirrors your contract's preview
-  const preview = useCallback(async (user: Address) => {
-    req(pub, 'Public client unavailable');
-    const fee = await feeUnits();
-    const allowance = (await pub!.readContract({
-      address: USDC,
-      abi: USDC_ABI as Abi,
-      functionName: 'allowance',
-      args: [user, REG],
-    })) as bigint;
-    return {
-      fee,
-      allowance,
-      okAllowance: allowance >= fee,
-    };
-  }, [pub, feeUnits]);
+  // Nice-to-have: preview fee + allowance for current wallet
+  const preview = useCallback(
+    async (user: Address) => {
+      assertAddresses();
+      const fee = await feeUnits().catch(() => 0n);
+      const allowance = (await pub!.readContract({
+        address: USDC,
+        abi: USDC_ABI as Abi,
+        functionName: 'allowance',
+        args: [user, REG],
+      })) as bigint;
+      return {
+        fee,
+        allowance,
+        okAllowance: fee === 0n ? true : allowance >= fee,
+      };
+    },
+    [pub, feeUnits]
+  );
 
   // ---------- Writes ----------
   const ensureUSDCApproval = useCallback(
     async (needed: bigint, opts?: { infinite?: boolean }) => {
-      assert();
+      assertAddresses();
       await ensureBase();
 
       const owner = req(address, 'No wallet address');
@@ -115,7 +145,6 @@ export function useProfileRegistry() {
         functionName: 'approve',
         args: [REG, amount],
         account: wallet!.account,
-        chain: pub!.chain,
       });
 
       const hash = await wallet!.writeContract(request);
@@ -132,17 +161,19 @@ export function useProfileRegistry() {
       bio?: string;
       fid?: number;
     }) => {
-      assert();
+      assertAddresses();
       await ensureBase();
 
-      const handle = params.handle.trim().replace(/^@/, '').toLowerCase();
+      const handle = normalizeHandle(params.handle);
       if (!/^[a-z0-9._-]{3,32}$/.test(handle)) {
         throw new Error('Invalid handle format');
       }
       if (await handleTaken(handle)) throw new Error('Handle already registered');
 
       const fee = await feeUnits();
-      await ensureUSDCApproval(fee, { infinite: true });
+      if (fee > 0n) {
+        await ensureUSDCApproval(fee, { infinite: true });
+      }
 
       const { request } = await pub!.simulateContract({
         address: REG,
@@ -156,7 +187,6 @@ export function useProfileRegistry() {
           BigInt(params.fid ?? 0),
         ],
         account: wallet!.account,
-        chain: pub!.chain,
       });
 
       const txHash = await wallet!.writeContract(request);
