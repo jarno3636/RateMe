@@ -4,56 +4,50 @@ import Link from 'next/link'
 import { Sparkles, Shield, Ticket, Timer, Users, Star, ArrowRight } from 'lucide-react'
 import CreatorGrid from '@/components/CreatorGrid'
 
-// Try to use centralized Farcaster config (recommended).
-// If it's not there yet, the fallback block below will compute the same values.
+// ---------------- Farcaster config (edge-safe resolution) ----------------
 let SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
-let MINIAPP_DOMAIN = (() => { try { return new URL(SITE).hostname } catch { return 'localhost' } })()
-let fcMiniApp: { version: string; imageUrl: string; button: any }
+let MINIAPP_DOMAIN = (() => {
+  try { return new URL(SITE).hostname } catch { return 'localhost' }
+})()
 
+// Default Mini App descriptor (will be overridden if lib/farcaster exports it)
+let fcMiniApp: { version: string; imageUrl: string; button: any } = {
+  version: '1',
+  imageUrl: `${SITE}/miniapp-card.png`,
+  button: {
+    title: 'Rate Me',
+    action: {
+      type: 'launch_frame',
+      name: 'Rate Me',
+      url: `${SITE}/mini`,
+      splashImageUrl: `${SITE}/icon-192.png`,
+      splashBackgroundColor: '#0b1220',
+    },
+  },
+}
+
+// Try to import centralized Farcaster settings if present
 try {
-  // Optional import — if you already have lib/farcaster.ts it will be used.
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const far = require('@/lib/farcaster')
   SITE = (far.SITE as string) || SITE
   MINIAPP_DOMAIN = (far.MINIAPP_DOMAIN as string) || MINIAPP_DOMAIN
-  fcMiniApp = far.fcMiniApp || {
-    version: '1',
-    imageUrl: `${SITE}/miniapp-card.png`,
-    button: {
-      title: 'Rate Me',
-      action: {
-        type: 'launch_frame',
-        name: 'Rate Me',
-        url: `${SITE}/mini`,
-        splashImageUrl: `${SITE}/icon-192.png`,
-        splashBackgroundColor: '#0b1220',
-      },
-    },
-  }
+  if (far.fcMiniApp) fcMiniApp = far.fcMiniApp
 } catch {
-  // Fallback (works even if lib/farcaster.ts doesn’t exist yet)
-  fcMiniApp = {
-    version: '1',
-    imageUrl: `${SITE}/miniapp-card.png`,
-    button: {
-      title: 'Rate Me',
-      action: {
-        type: 'launch_frame',
-        name: 'Rate Me',
-        url: `${SITE}/mini`,
-        splashImageUrl: `${SITE}/icon-192.png`,
-        splashBackgroundColor: '#0b1220',
-      },
-    },
-  }
+  // optional: ignore if lib/farcaster doesn't exist yet
 }
 
+export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
 
+// ----------------------------- Metadata -----------------------------
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE),
   title: 'Rate Me — Creator subscriptions & paid posts on Base',
   description:
     'Launch subscriptions, paid posts, and custom requests with instant on-chain settlement.',
+  alternates: { canonical: '/' },
+  robots: { index: true, follow: true },
   openGraph: {
     title: 'Rate Me — Creator subscriptions & paid posts on Base',
     description:
@@ -74,12 +68,13 @@ export const metadata: Metadata = {
     'fc:frame:button:3': 'How it Works',
     'fc:frame:button:3:action': 'post',
 
-    // Farcaster Mini App
+    // Farcaster Mini App (shown on profile/compose surfaces)
     'fc:miniapp': JSON.stringify(fcMiniApp),
     'fc:miniapp:domain': MINIAPP_DOMAIN,
   },
 }
 
+// ------------------------------ Page ------------------------------
 export default function Home() {
   return (
     <main className="mx-auto max-w-6xl space-y-14 px-4 py-10">
