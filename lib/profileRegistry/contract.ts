@@ -1,5 +1,4 @@
-// lib/profileRegistry/contract.ts
-import { createPublicClient, http } from 'viem';
+import { createPublicClient, http, fallback } from 'viem';
 import { base } from 'viem/chains';
 import type { Abi, Address } from 'viem';
 
@@ -15,16 +14,17 @@ import {
 /* Client                                                       */
 /* ----------------------------------------------------------- */
 
-const RPC =
-  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-  process.env.BASE_RPC_URL ||
-  'https://mainnet.base.org';
+// Prefer Alchemy; gracefully fall back to Base public RPC
+const transport = fallback([
+  http(process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || ''), // e.g. https://base-mainnet.g.alchemy.com/v2/KEY
+  http('https://mainnet.base.org'),
+]);
 
-// Note: BASE_CHAIN_ID currently defaults to 8453 (Base mainnet).
-// If you later support multiple chains, swap this to a map/defineChain().
 export const registryClient = createPublicClient({
   chain: base,
-  transport: http(RPC),
+  transport,
+  // Use multicall batching for bursts of reads
+  batch: { multicall: true },
 });
 
 function ensureConfigured() {
