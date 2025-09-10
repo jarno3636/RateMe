@@ -3,6 +3,10 @@
 /** Contract-compatible handle regex: 3..32 chars, [a-z0-9._-] only */
 export const HANDLE_REGEX = /^[a-z0-9._-]{3,32}$/;
 
+export type HandleValidation =
+  | { ok: true }
+  | { ok: false; reason: string };
+
 /**
  * Normalize user input into a candidate handle "id":
  * - trims whitespace
@@ -19,32 +23,32 @@ export function isValidHandle(handle: string): boolean {
 }
 
 /** Validate a handle and return a friendly reason when invalid (great for UI/error toasts). */
-export function validateHandle(raw: string): { ok: true } | { ok: false; reason: string } {
+export function validateHandle(raw: string): HandleValidation {
   const h = normalizeHandle(raw);
 
   if (!h) return { ok: false, reason: 'Handle is required' };
   if (h.length < 3) return { ok: false, reason: 'Handle must be at least 3 characters' };
   if (h.length > 32) return { ok: false, reason: 'Handle must be 32 characters or fewer' };
   if (!HANDLE_REGEX.test(h)) {
-    return {
-      ok: false,
-      reason: 'Use only letters, numbers, dots, underscores, or hyphens',
-    };
+    return { ok: false, reason: 'Use only letters, numbers, dots, underscores, or hyphens' };
   }
   return { ok: true };
 }
 
 /**
  * Normalize + validate in one go; returns a safe result object.
- * Useful in forms and API inputs.
+ * Uses an `'in'` type guard so narrowing works under `isolatedModules`.
  */
 export function tryNormalizeHandle(
   input: string
 ): { ok: true; handle: string } | { ok: false; error: string } {
   const handle = normalizeHandle(input);
   const v = validateHandle(handle);
-  if (v.ok) return { ok: true, handle };
-  return { ok: false, error: v.reason };
+
+  if ('reason' in v) {
+    return { ok: false, error: v.reason };
+  }
+  return { ok: true, handle };
 }
 
 /** Throwing variant for server routes where you want to abort fast. */
