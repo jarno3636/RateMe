@@ -10,21 +10,44 @@ import {
 } from 'wagmi';
 import type { Address, Abi } from 'viem';
 import { getAddress } from 'viem';
+import { base } from 'viem/chains';
 import {
   PROFILE_REGISTRY_ABI,
   PROFILE_REGISTRY_ADDR,
   BASE_USDC,
-  USDC_ABI,
-  BASE_CHAIN_ID,
 } from '@/lib/registry';
 
-const ZERO = '0x0000000000000000000000000000000000000000' as const;
+// Minimal ERC20 ABI for allowance/approve
+const ERC20_ABI = [
+  {
+    type: 'function',
+    name: 'allowance',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const satisfies Abi;
 
-// Normalize (defensive) — lib/registry should already export checksummed values.
+const ZERO = '0x0000000000000000000000000000000000000000' as const;
+const BASE_CHAIN_ID = base.id;
+
+// Normalize to checksummed Address early; throws if malformed.
 function asAddr(s: string | undefined | null): Address {
   if (!s) throw new Error('Missing address');
-  const a = getAddress(s as `0x${string}`);
-  return a as Address;
+  return getAddress(s as `0x${string}`) as Address;
 }
 const REG = asAddr(PROFILE_REGISTRY_ADDR);
 const USDC = asAddr(BASE_USDC);
@@ -33,7 +56,6 @@ function req<T>(v: T | undefined | null, msg: string): T {
   if (v === undefined || v === null) throw new Error(msg);
   return v as T;
 }
-
 function normalizeHandle(s: string) {
   return s.trim().replace(/^@/, '').toLowerCase();
 }
@@ -44,7 +66,6 @@ export function useProfileRegistry() {
   const { data: wallet } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
 
-  // --- common guards -------------------------------------------------------
   const assertAddresses = () => {
     if (!pub) throw new Error('Public client unavailable');
     if (!REG || REG === (ZERO as Address)) {
@@ -54,7 +75,7 @@ export function useProfileRegistry() {
     }
     if (!USDC || USDC === (ZERO as Address)) {
       throw new Error(
-        'USDC address is not configured for Base. Check BASE_USDC/NEXT_PUBLIC_BASE_USDC.'
+        'USDC address is not configured for Base. Check NEXT_PUBLIC_BASE_USDC.'
       );
     }
   };
@@ -62,9 +83,7 @@ export function useProfileRegistry() {
   const ensureBase = useCallback(async () => {
     if (!wallet?.account) throw new Error('Connect wallet');
     if (chainId !== BASE_CHAIN_ID) {
-      if (!switchChainAsync) {
-        throw new Error('Wrong network. Please switch to Base.');
-      }
+      if (!switchChainAsync) throw new Error('Wrong network. Please switch to Base.');
       await switchChainAsync({ chainId: BASE_CHAIN_ID });
     }
   }, [wallet, chainId, switchChainAsync]);
@@ -101,22 +120,17 @@ export function useProfileRegistry() {
     })) as bigint;
   }, [pub]);
 
-  // Nice-to-have: preview fee + allowance for current wallet
   const preview = useCallback(
     async (user: Address) => {
       assertAddresses();
       const fee = await feeUnits().catch(() => 0n);
       const allowance = (await pub!.readContract({
         address: USDC,
-        abi: USDC_ABI as Abi,
+        abi: ERC20_ABI,
         functionName: 'allowance',
         args: [user, REG],
       })) as bigint;
-      return {
-        fee,
-        allowance,
-        okAllowance: fee === 0n ? true : allowance >= fee,
-      };
+      return { fee, allowance, okAllowance: fee === 0n ? true : allowance >= fee };
     },
     [pub, feeUnits]
   );
@@ -130,7 +144,7 @@ export function useProfileRegistry() {
       const owner = req(address, 'No wallet address');
       const allowance = (await pub!.readContract({
         address: USDC,
-        abi: USDC_ABI as Abi,
+        abi: ERC20_ABI,
         functionName: 'allowance',
         args: [owner, REG],
       })) as bigint;
@@ -141,7 +155,7 @@ export function useProfileRegistry() {
 
       const { request } = await pub!.simulateContract({
         address: USDC,
-        abi: USDC_ABI as Abi,
+        abi: ERC20_ABI,
         functionName: 'approve',
         args: [REG, amount],
         account: wallet!.account,
@@ -171,9 +185,7 @@ export function useProfileRegistry() {
       if (await handleTaken(handle)) throw new Error('Handle already registered');
 
       const fee = await feeUnits();
-      if (fee > 0n) {
-        await ensureUSDCApproval(fee, { infinite: true });
-      }
+      if (fee > 0n) await ensureUSDCApproval(fee, { infinite: true });
 
       const { request } = await pub!.simulateContract({
         address: REG,
