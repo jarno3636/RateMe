@@ -11,13 +11,19 @@ import {
 import type { Address, Abi } from 'viem';
 import { getAddress } from 'viem';
 import { base } from 'viem/chains';
-import {
-  PROFILE_REGISTRY_ABI,
-  PROFILE_REGISTRY_ADDR,
-  BASE_USDC,
-} from '@/lib/registry';
 
-// Minimal ERC20 ABI for allowance/approve
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
+import {
+  REGISTRY_ADDRESS as PROFILE_REGISTRY_ADDR,
+  USDC_ADDRESS as BASE_USDC,
+  BASE_CHAIN_ID,
+  ZERO_ADDRESS,
+  registryConfigured,
+} from '@/lib/profileRegistry/constants';
+
+/* ------------------------------------------------------------------ */
+/* Minimal ERC20 for allowance/approve                                 */
+/* ------------------------------------------------------------------ */
 const ERC20_ABI = [
   {
     type: 'function',
@@ -27,7 +33,7 @@ const ERC20_ABI = [
       { name: 'owner', type: 'address' },
       { name: 'spender', type: 'address' },
     ],
-    outputs: [{ name: '', type: 'uint256' }],
+    outputs: [{ type: 'uint256' }],
   },
   {
     type: 'function',
@@ -37,60 +43,64 @@ const ERC20_ABI = [
       { name: 'spender', type: 'address' },
       { name: 'amount', type: 'uint256' },
     ],
-    outputs: [{ name: '', type: 'bool' }],
+    outputs: [{ type: 'bool' }],
   },
 ] as const satisfies Abi;
 
-const ZERO = '0x0000000000000000000000000000000000000000' as const;
-const BASE_CHAIN_ID = base.id;
-
-// Normalize to checksummed Address early; throws if malformed.
+/* ------------------------------------------------------------------ */
+/* Utils                                                               */
+/* ------------------------------------------------------------------ */
+function normalizeHandle(s: string) {
+  return s.trim().replace(/^@+/, '').toLowerCase();
+}
 function asAddr(s: string | undefined | null): Address {
   if (!s) throw new Error('Missing address');
   return getAddress(s as `0x${string}`) as Address;
 }
-const REG = asAddr(PROFILE_REGISTRY_ADDR);
-const USDC = asAddr(BASE_USDC);
-
 function req<T>(v: T | undefined | null, msg: string): T {
   if (v === undefined || v === null) throw new Error(msg);
   return v as T;
 }
-function normalizeHandle(s: string) {
-  return s.trim().replace(/^@/, '').toLowerCase();
-}
 
+/* Pre-validated addresses (throws early in dev if misconfigured) */
+const REG = asAddr(PROFILE_REGISTRY_ADDR);
+const USDC = asAddr(BASE_USDC);
+
+/* ------------------------------------------------------------------ */
+/* Hook                                                                */
+/* ------------------------------------------------------------------ */
 export function useProfileRegistry() {
   const { address, chainId } = useAccount();
   const pub = usePublicClient();
   const { data: wallet } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
 
-  const assertAddresses = () => {
+  const assertConfigured = () => {
     if (!pub) throw new Error('Public client unavailable');
-    if (!REG || REG === (ZERO as Address)) {
-      throw new Error(
-        'Profile Registry address is not configured. Set NEXT_PUBLIC_PROFILE_REGISTRY_ADDR to a checksummed address.'
-      );
+    if (!registryConfigured) {
+      throw new Error('ProfileRegistry not configured. Check constants/env.');
     }
-    if (!USDC || USDC === (ZERO as Address)) {
-      throw new Error(
-        'USDC address is not configured for Base. Check NEXT_PUBLIC_BASE_USDC.'
-      );
+    if (!REG || REG === (ZERO_ADDRESS as Address)) {
+      throw new Error('ProfileRegistry address invalid.');
+    }
+    if (!USDC || USDC === (ZERO_ADDRESS as Address)) {
+      throw new Error('USDC address invalid for Base.');
     }
   };
 
   const ensureBase = useCallback(async () => {
     if (!wallet?.account) throw new Error('Connect wallet');
     if (chainId !== BASE_CHAIN_ID) {
-      if (!switchChainAsync) throw new Error('Wrong network. Please switch to Base.');
+      if (!switchChainAsync) throw new Error('Wrong network. Switch to Base.');
       await switchChainAsync({ chainId: BASE_CHAIN_ID });
     }
   }, [wallet, chainId, switchChainAsync]);
 
-  // ---------- Reads ----------
+  /* -------------------------- Reads -------------------------- */
+
+  /** feeUnits() */
   const feeUnits = useCallback(async (): Promise<bigint> => {
-    assertAddresses();
+    assertConfigured();
     return (await pub!.readContract({
       address: REG,
       abi: PROFILE_REGISTRY_ABI as Abi,
@@ -98,8 +108,9 @@ export function useProfileRegistry() {
     })) as bigint;
   }, [pub]);
 
+  /** handleTaken(handle) */
   const handleTaken = useCallback(async (raw: string): Promise<boolean> => {
-    assertAddresses();
+    assertConfigured();
     const handle = normalizeHandle(raw);
     return (await pub!.readContract({
       address: REG,
@@ -109,8 +120,9 @@ export function useProfileRegistry() {
     })) as boolean;
   }, [pub]);
 
+  /** getIdByHandle(handle) */
   const getIdByHandle = useCallback(async (raw: string): Promise<bigint> => {
-    assertAddresses();
+    assertConfigured();
     const handle = normalizeHandle(raw);
     return (await pub!.readContract({
       address: REG,
@@ -120,25 +132,71 @@ export function useProfileRegistry() {
     })) as bigint;
   }, [pub]);
 
+  /** canRegister(handle) -> {ok, reason} (helpful UX) */
+  const canRegister = useCallback(
+    async (raw: string): Promise<{ ok: boolean; reason: string }> => {
+      assertConfigured();
+      const handle = normalizeHandle(raw);
+      const [ok, reason] = (await pub!.readContract({
+        address: REG,
+        abi: PROFILE_REGISTRY_ABI as Abi,
+        functionName: 'canRegister',
+        args: [handle],
+      })) as unknown as [boolean, string];
+      return { ok, reason };
+    },
+    [pub]
+  );
+
+  /**
+   * preview() — prefers contract’s previewCreate(user) when present,
+   * otherwise falls back to USDC allowance + feeUnits().
+   */
   const preview = useCallback(
     async (user: Address) => {
-      assertAddresses();
-      const fee = await feeUnits().catch(() => 0n);
-      const allowance = (await pub!.readContract({
-        address: USDC,
-        abi: ERC20_ABI,
-        functionName: 'allowance',
-        args: [user, REG],
-      })) as bigint;
-      return { fee, allowance, okAllowance: fee === 0n ? true : allowance >= fee };
+      assertConfigured();
+
+      // Try previewCreate(user)
+      try {
+        const [balance, allowance_, fee, okBalance, okAllowance] = (await pub!.readContract({
+          address: REG,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'previewCreate',
+          args: [user],
+        })) as unknown as [bigint, bigint, bigint, boolean, boolean];
+
+        return {
+          fee,
+          allowance: allowance_,
+          okAllowance,
+          balance,
+          okBalance,
+        };
+      } catch {
+        // Fallback: fee + ERC20 allowance only
+        const fee = await feeUnits().catch(() => 0n);
+        const allowance = (await pub!.readContract({
+          address: USDC,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [user, REG],
+        })) as bigint;
+        return {
+          fee,
+          allowance,
+          okAllowance: fee === 0n ? true : allowance >= fee,
+        };
+      }
     },
     [pub, feeUnits]
   );
 
-  // ---------- Writes ----------
+  /* -------------------------- Writes -------------------------- */
+
+  /** Ensure USDC approval for `needed` (infinite by default for smooth UX) */
   const ensureUSDCApproval = useCallback(
     async (needed: bigint, opts?: { infinite?: boolean }) => {
-      assertAddresses();
+      assertConfigured();
       await ensureBase();
 
       const owner = req(address, 'No wallet address');
@@ -151,7 +209,7 @@ export function useProfileRegistry() {
 
       if (allowance >= needed) return;
 
-      const amount = opts?.infinite ? (2n ** 256n - 1n) : needed;
+      const amount = opts?.infinite !== false ? (2n ** 256n - 1n) : needed;
 
       const { request } = await pub!.simulateContract({
         address: USDC,
@@ -159,6 +217,7 @@ export function useProfileRegistry() {
         functionName: 'approve',
         args: [REG, amount],
         account: wallet!.account,
+        chain: pub!.chain,
       });
 
       const hash = await wallet!.writeContract(request);
@@ -167,25 +226,33 @@ export function useProfileRegistry() {
     [address, pub, wallet, ensureBase]
   );
 
+  /** createProfile(...) with on-chain validation (canRegister) */
   const createProfile = useCallback(
     async (params: {
       handle: string;
       displayName?: string;
       avatarURI?: string;
       bio?: string;
-      fid?: number;
+      fid?: number | bigint;
+      /** default true — set to false to approve exact fee */
+      infiniteApproval?: boolean;
     }) => {
-      assertAddresses();
+      assertConfigured();
       await ensureBase();
 
       const handle = normalizeHandle(params.handle);
       if (!/^[a-z0-9._-]{3,32}$/.test(handle)) {
         throw new Error('Invalid handle format');
       }
-      if (await handleTaken(handle)) throw new Error('Handle already registered');
+
+      // Rich validation with reason
+      const can = await canRegister(handle);
+      if (!can.ok) throw new Error(can.reason || 'Handle is not available');
 
       const fee = await feeUnits();
-      if (fee > 0n) await ensureUSDCApproval(fee, { infinite: true });
+      if (fee > 0n) {
+        await ensureUSDCApproval(fee, { infinite: params.infiniteApproval !== false });
+      }
 
       const { request } = await pub!.simulateContract({
         address: REG,
@@ -193,12 +260,13 @@ export function useProfileRegistry() {
         functionName: 'createProfile',
         args: [
           handle,
-          params.displayName || '',
-          params.avatarURI || '',
-          params.bio || '',
+          params.displayName ?? '',
+          params.avatarURI ?? '',
+          params.bio ?? '',
           BigInt(params.fid ?? 0),
         ],
         account: wallet!.account,
+        chain: pub!.chain,
       });
 
       const txHash = await wallet!.writeContract(request);
@@ -207,8 +275,79 @@ export function useProfileRegistry() {
       const id = await getIdByHandle(handle);
       return { txHash, id };
     },
-    [pub, wallet, ensureBase, ensureUSDCApproval, feeUnits, handleTaken, getIdByHandle]
+    [pub, wallet, ensureBase, ensureUSDCApproval, feeUnits, canRegister, getIdByHandle]
   );
 
-  return { feeUnits, handleTaken, getIdByHandle, preview, createProfile };
+  /** Optional extra: changeHandle(id, newHandle) */
+  const changeHandle = useCallback(
+    async (id: bigint, newHandle: string) => {
+      assertConfigured();
+      await ensureBase();
+
+      const h = normalizeHandle(newHandle);
+      if (!/^[a-z0-9._-]{3,32}$/.test(h)) throw new Error('Invalid handle format');
+
+      const can = await canRegister(h);
+      if (!can.ok) throw new Error(can.reason || 'Handle is not available');
+
+      const { request } = await pub!.simulateContract({
+        address: REG,
+        abi: PROFILE_REGISTRY_ABI as Abi,
+        functionName: 'changeHandle',
+        args: [id, h],
+        account: wallet!.account,
+        chain: pub!.chain,
+      });
+
+      const hash = await wallet!.writeContract(request);
+      await pub!.waitForTransactionReceipt({ hash });
+      return hash;
+    },
+    [pub, wallet, ensureBase, canRegister]
+  );
+
+  /** Optional extra: updateProfile fields */
+  const updateProfile = useCallback(
+    async (
+      id: bigint,
+      data: { displayName?: string; avatarURI?: string; bio?: string; fid?: number | bigint }
+    ) => {
+      assertConfigured();
+      await ensureBase();
+
+      const { request } = await pub!.simulateContract({
+        address: REG,
+        abi: PROFILE_REGISTRY_ABI as Abi,
+        functionName: 'updateProfile',
+        args: [
+          id,
+          data.displayName ?? '',
+          data.avatarURI ?? '',
+          data.bio ?? '',
+          BigInt(data.fid ?? 0),
+        ],
+        account: wallet!.account,
+        chain: pub!.chain,
+      });
+
+      const hash = await wallet!.writeContract(request);
+      await pub!.waitForTransactionReceipt({ hash });
+      return hash;
+    },
+    [pub, wallet, ensureBase]
+  );
+
+  return {
+    // reads
+    feeUnits,
+    handleTaken,
+    getIdByHandle,
+    canRegister,
+    preview,
+    // writes
+    createProfile,
+    changeHandle,
+    updateProfile,
+    ensureUSDCApproval,
+  };
 }
