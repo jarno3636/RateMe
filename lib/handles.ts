@@ -54,7 +54,8 @@ export function tryNormalizeHandle(
 /** Throwing variant for server routes where you want to abort fast. */
 export function assertValidHandle(input: string): string {
   const res = tryNormalizeHandle(input);
-  if (!res.ok) throw new Error(res.error);
+  // Use `'in'` guard instead of `res.ok` (safer under isolatedModules)
+  if ('error' in res) throw new Error(res.error);
   return res.handle;
 }
 
