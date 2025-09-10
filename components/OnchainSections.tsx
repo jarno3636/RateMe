@@ -1,7 +1,7 @@
 // components/OnchainSections.tsx
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import type { Address, Abi } from 'viem';
 import { isAddress } from 'viem';
 import { usePublicClient } from 'wagmi';
@@ -51,6 +51,16 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
 
   const hubAddr = CREATOR_HUB_ADDR as Address;
 
+  // Thin wrapper to avoid TS deep type instantiation from viem's multicall
+  const mc = useCallback(
+    async (contracts: any[]) => {
+      // If no calls, keep return shape consistent
+      if (!contracts.length) return [] as any[];
+      return await (pub as any).multicall({ contracts }) as any[];
+    },
+    [pub]
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -60,13 +70,15 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
 
     try {
       if (!pub) throw new Error('Public client unavailable');
+
+      // If no wallet set yet, show friendly empty state
       if (!creatorAddress || !isAddress(creatorAddress)) {
-        // Legit state, just show empty UI
         setPlans([]);
         setPosts([]);
         return;
       }
-      if (!isAddress(hubAddr) || /^0x0{40}$/.test(hubAddr.slice(2))) {
+
+      if (!isAddress(hubAddr) || /^0x0{40}$/i.test(hubAddr.slice(2))) {
         throw new Error('CreatorHub address not configured');
       }
 
@@ -87,36 +99,27 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       ]);
 
       // 2) Multicall to fetch plan/post structs
-      const [planCalls, postCalls] = [
-        planIds.map((id) => ({
-          address: hubAddr,
-          abi: CREATOR_HUB_ABI as Abi,
-          functionName: 'plans',
-          args: [id],
-        })),
-        postIds.map((id) => ({
-          address: hubAddr,
-          abi: CREATOR_HUB_ABI as Abi,
-          functionName: 'posts',
-          args: [id],
-        })),
-      ];
+      const planCalls = planIds.map((id) => ({
+        address: hubAddr,
+        abi: CREATOR_HUB_ABI as Abi,
+        functionName: 'plans',
+        args: [id],
+      }));
+      const postCalls = postIds.map((id) => ({
+        address: hubAddr,
+        abi: CREATOR_HUB_ABI as Abi,
+        functionName: 'posts',
+        args: [id],
+      }));
 
-      const [planRes, postRes] = await Promise.all([
-        planCalls.length
-          ? pub.multicall({ contracts: planCalls })
-          : Promise.resolve([] as any[]),
-        postCalls.length
-          ? pub.multicall({ contracts: postCalls })
-          : Promise.resolve([] as any[]),
-      ]);
+      const [planRes, postRes] = await Promise.all([mc(planCalls), mc(postCalls)]);
 
       const plansParsed: Plan[] = planIds.map((id, i) => {
         // Expect tuple: (creator, token, pricePerPeriod, periodDays, active, name, metadataURI)
         const r: any = (planRes[i] as any)?.result ?? [];
         return {
           id,
-          token: r[1] as Address,
+          token: (r[1] || '0x0000000000000000000000000000000000000000') as Address,
           pricePerPeriod: BigInt(r[2] ?? 0n),
           periodDays: Number(r[3] ?? 0),
           active: Boolean(r[4]),
@@ -130,7 +133,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
         const r: any = (postRes[i] as any)?.result ?? [];
         return {
           id,
-          token: r[1] as Address,
+          token: (r[1] || '0x0000000000000000000000000000000000000000') as Address,
           price: BigInt(r[2] ?? 0n),
           active: Boolean(r[3]),
           accessViaSub: Boolean(r[4]),
@@ -154,13 +157,18 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       ) as Address[];
 
       if (uniqueTokens.length) {
-        const decCalls = uniqueTokens.map((t) => ({ address: t, abi: ERC20_MINI_ABI, functionName: 'decimals' as const }));
-        const symCalls = uniqueTokens.map((t) => ({ address: t, abi: ERC20_MINI_ABI, functionName: 'symbol' as const }));
+        const decCalls = uniqueTokens.map((t) => ({
+          address: t,
+          abi: ERC20_MINI_ABI,
+          functionName: 'decimals' as const,
+        }));
+        const symCalls = uniqueTokens.map((t) => ({
+          address: t,
+          abi: ERC20_MINI_ABI,
+          functionName: 'symbol' as const,
+        }));
 
-        const [decRes, symRes] = await Promise.all([
-          pub.multicall({ contracts: decCalls }),
-          pub.multicall({ contracts: symCalls }),
-        ]);
+        const [decRes, symRes] = await Promise.all([mc(decCalls), mc(symCalls)]);
 
         const meta: Record<string, TokenMeta> = {};
         uniqueTokens.forEach((t, i) => {
@@ -180,7 +188,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
     } finally {
       setLoading(false);
     }
-  }, [pub, creatorAddress, hubAddr]);
+  }, [pub, creatorAddress, hubAddr, mc]);
 
   useEffect(() => {
     let alive = true;
@@ -198,7 +206,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       const meta = tokenMeta[token?.toLowerCase?.() as string];
       const decimals = meta?.decimals ?? 6; // default to 6 if unknown
       const sym = meta?.symbol ?? '';
-      // Simple decimal formatter (not for scientific precision, only display)
+      // Display helper only (not for financial precision)
       const asNum = Number(amount) / Math.pow(10, decimals);
       return `${asNum.toLocaleString(undefined, { maximumFractionDigits: Math.min(6, decimals) })}${
         sym ? ` ${sym}` : ''
@@ -249,10 +257,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
             {plans!.map((p) => (
               <div key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <div className="flex items-center justify-between">
-                  <div className="font-medium truncate" title={p.name || 'Plan'}>
+                  <div className="truncate font-medium" title={p.name || 'Plan'}>
                     {p.name || 'Plan'}
                   </div>
-                  <div className="text-sm text-slate-300 whitespace-nowrap">
+                  <div className="whitespace-nowrap text-sm text-slate-300">
                     {fmtAmount(p.pricePerPeriod, p.token)} / {p.periodDays}d
                   </div>
                 </div>
