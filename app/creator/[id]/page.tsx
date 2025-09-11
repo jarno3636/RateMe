@@ -9,12 +9,12 @@ import OnchainSections from '@/components/OnchainSections'
 import { Star, ExternalLink } from 'lucide-react'
 import { creatorShareLinks } from '@/lib/farcaster'
 
-// On-chain fallback imports
 import type { Abi, Address } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
+import OwnerControls from './OwnerControls'
 
 type Params = { params: { id: string } }
 
@@ -23,17 +23,15 @@ const SITE_CLEAN = (SITE || 'http://localhost:3000').replace(/\/$/, '')
 
 const pub = createPublicClient({
   chain: base,
-  transport: http(
-    process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org'
-  ),
+  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org'),
 })
 
 const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
+const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const idParam = params.id.toLowerCase()
-  // Try to resolve a nicer title for OG if KV has it
   const kv = await getCreator(idParam).catch(() => null)
   const title = kv
     ? `${kv.displayName || kv.handle} (@${kv.handle}) — Rate Me`
@@ -49,16 +47,13 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
 }
 
-/** On-chain read by numeric ID -> light profile shape */
 async function fetchOnchainById(idNum: bigint) {
-  // getProfile(id) -> (owner, handle, displayName, avatarURI, bio, fid, createdAt)
   const r = (await pub.readContract({
     address: REGISTRY_ADDRESS as Address,
     abi: PROFILE_REGISTRY_ABI as Abi,
     functionName: 'getProfile',
     args: [idNum],
   })) as any
-
   if (!r) return null
   const owner = r[0] as Address
   const handle = String(r[1] || '')
@@ -68,7 +63,6 @@ async function fetchOnchainById(idNum: bigint) {
   const fid = Number(BigInt(r[5] || 0))
   const createdAt = Number(BigInt(r[6] || 0)) * 1000
 
-  // If handle is empty, still return minimal info
   return {
     id: handle || idNum.toString(),
     handle: handle || idNum.toString(),
@@ -81,9 +75,7 @@ async function fetchOnchainById(idNum: bigint) {
   }
 }
 
-/** On-chain read by handle -> light profile shape */
 async function fetchOnchainByHandle(handle: string) {
-  // getProfileByHandle(handle) -> (exists, id, owner, handle, displayName, avatarURI, bio, fid, createdAt)
   const r = (await pub.readContract({
     address: REGISTRY_ADDRESS as Address,
     abi: PROFILE_REGISTRY_ABI as Abi,
@@ -108,12 +100,10 @@ export default async function CreatorPage({ params }: Params) {
   const raw = params.id || ''
   const idParam = raw.toLowerCase()
 
-  // 1) Try KV first (works for newly registered creators instantly)
   let creator =
     (await getCreator(idParam).catch(() => null)) ||
     (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
 
-  // 2) If not in KV, try on-chain fallbacks
   if (!creator) {
     if (isNumericId(idParam)) {
       creator = await fetchOnchainById(BigInt(idParam)).catch(() => null)
@@ -134,16 +124,12 @@ export default async function CreatorPage({ params }: Params) {
     (creator.bio || '').toString().slice(0, 280) +
     ((creator.bio || '').length > 280 ? '…' : '')
 
-  // Share links
-  const shares = creatorShareLinks(creator.id, `${creator.displayName || creator.handle} on Rate Me`)
-
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
       {/* Header */}
-      <section className="flex items-start gap-4">
-        {/* Avatar */}
-        <div className="h-16 w-16 overflow-hidden rounded-full ring-2 ring-white/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+      <section className="flex flex-col items-center text-center space-y-4">
+        {/* Big centered avatar */}
+        <div className="h-40 w-40 overflow-hidden rounded-full ring-2 ring-white/10">
           <img
             src={creator.avatarUrl || '/icon-192.png'}
             alt={`${creator.displayName || creator.handle} avatar`}
@@ -151,73 +137,45 @@ export default async function CreatorPage({ params }: Params) {
           />
         </div>
 
-        <div className="min-w-0">
-          <div className="text-xl font-semibold">
+        <div>
+          <div className="text-2xl font-semibold">
             {creator.displayName || creator.handle}{' '}
-            <span className="text-sm text-slate-400">@{creator.handle}</span>
+            <span className="text-base text-slate-400">@{creator.handle}</span>
           </div>
 
-          {bio ? <div className="mt-1 text-sm text-slate-300">{bio}</div> : null}
+          {bio ? <div className="mt-2 text-sm text-slate-300">{bio}</div> : null}
 
-          <div className="mt-1 flex items-center gap-1 text-sm text-slate-400">
+          <div className="mt-2 flex justify-center items-center gap-1 text-sm text-slate-400">
             <Star className="h-4 w-4 text-yellow-400" />
             <span>{avgText}</span>
           </div>
 
-          {!hasAddress && (
-            <div className="mt-2 inline-flex items-center rounded-md border border-amber-300/20 bg-amber-200/10 px-2 py-1 text-xs text-amber-200">
-              No on-chain address linked yet. You can still rate this creator.
-            </div>
-          )}
-
-          {/* Social share row */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <a
-              href={shares.cast}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
-            >
-              Cast this page
-            </a>
-            <a
-              href={shares.tweet}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs hover:bg-white/10"
-            >
-              Tweet this page
-            </a>
+          {/* Share row */}
+          <div className="mt-3 flex flex-wrap justify-center items-center gap-2">
             <ShareBar creatorId={creator.id} handle={creator.handle} />
+            {hasAddress && (
+              <a
+                href={`${BASESCAN}/address/${creator.address}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
+                title={creator.address || ''}
+              >
+                {short(creator.address)} <ExternalLink className="ml-1 h-3 w-3" />
+              </a>
+            )}
+          </div>
+
+          {/* Owner controls */}
+          <div className="mt-3 flex justify-center">
+            <OwnerControls creatorAddress={creator.address as `0x${string}` | null} creatorId={creator.id} />
           </div>
         </div>
-
-        <div className="flex-1" />
       </section>
 
       {/* On-chain plans & posts */}
       {hasAddress ? (
-        <>
-          {/* Trust box: wallet + BaseScan */}
-          <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300">
-              <span className="font-medium">Creator wallet:</span>
-              <code className="rounded bg-black/30 px-1.5 py-0.5">
-                {creator.address}
-              </code>
-              <a
-                className="inline-flex items-center gap-1 rounded border border-white/10 bg-white/5 px-2 py-1 hover:bg-white/10"
-                href={`${BASESCAN}/address/${creator.address}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                View on BaseScan <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-          </section>
-
-          <OnchainSections creatorAddress={creator.address as `0x${string}`} />
-        </>
+        <OnchainSections creatorAddress={creator.address as `0x${string}`} />
       ) : (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-medium">On-chain</div>
