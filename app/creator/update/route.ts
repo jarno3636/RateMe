@@ -1,44 +1,63 @@
-// app/api/creator/update/route.ts
 import { NextResponse } from 'next/server';
-import { getCreator, createCreatorUnique } from '@/lib/kv';
 import { kv } from '@vercel/kv';
+
+/** Same convention as lib/kv.ts */
+const CREATOR_KEY = (id: string) => `creator:${id}`;
+const HANDLE_KEY = (handle: string) => `handle:${handle.toLowerCase()}`;
+
+const lc = (s: string) => s.trim().toLowerCase();
+const normHandle = (s: string) => lc(String(s || '').replace(/^@+/, ''));
 
 export const runtime = 'edge';
 
-type Body = {
-  id: string;                 // creator id (handle or id you show in page url)
-  avatarUrl?: string | null;  // optional
-  bio?: string | null;        // optional
-};
-
-const CREATOR_KEY = (id: string) => `creator:${id.trim().toLowerCase()}`;
-
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as Body;
-    const id = String(body.id || '').trim().toLowerCase();
-    if (!id) {
-      return NextResponse.json({ ok: false, error: 'missing id' }, { status: 400 });
+    const body = await req.json().catch(() => ({}));
+    let { id, handle, displayName, avatarUrl, bio, address, fid } = body || {};
+
+    if (!id && handle) id = normHandle(handle);
+    if (!id || typeof id !== 'string') {
+      return NextResponse.json({ ok: false, error: 'Missing creator id' }, { status: 400 });
+    }
+    const creatorId = lc(id);
+
+    // Load existing
+    const existing = await kv.hgetall<Record<string, any>>(CREATOR_KEY(creatorId));
+    if (!existing || !Object.keys(existing).length) {
+      return NextResponse.json({ ok: false, error: 'Creator not found' }, { status: 404 });
     }
 
-    const existing = await getCreator(id);
-    if (!existing) {
-      return NextResponse.json({ ok: false, error: 'creator not found' }, { status: 404 });
+    // Build partial update; only allow specific fields
+    const patch: Record<string, any> = {};
+    if (typeof displayName === 'string') patch.displayName = displayName;
+    if (typeof avatarUrl === 'string') patch.avatarUrl = avatarUrl;
+    if (typeof bio === 'string') patch.bio = bio;
+    if (typeof fid === 'number') patch.fid = fid;
+    if (typeof address === 'string') patch.address = address as `0x${string}`;
+    if (typeof handle === 'string' && normHandle(handle) !== existing.handle) {
+      // If handle is changing (rare), update both the record and the handle index
+      const newHandle = normHandle(handle);
+      patch.handle = newHandle;
+      await kv.set(HANDLE_KEY(newHandle), creatorId, { ex: 60 * 60 * 24 * 365 });
     }
 
-    // Minimal patch (ownership/auth can be added later via signed message).
-    const patch: Record<string, unknown> = {};
-    if (typeof body.avatarUrl !== 'undefined') patch.avatarUrl = body.avatarUrl || '';
-    if (typeof body.bio !== 'undefined') patch.bio = (body.bio || '').slice(0, 280);
-
-    if (Object.keys(patch).length === 0) {
-      return NextResponse.json({ ok: false, error: 'nothing to update' }, { status: 400 });
+    if (!Object.keys(patch).length) {
+      return NextResponse.json({ ok: true, creator: { ...existing, id: creatorId } });
     }
 
-    await kv.hset(CREATOR_KEY(id), patch);
+    await kv.hset(CREATOR_KEY(creatorId), patch);
 
-    return NextResponse.json({ ok: true });
+    const updated = {
+      ...existing,
+      ...patch,
+      id: creatorId,
+    };
+
+    return NextResponse.json({ ok: true, creator: updated });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || 'server error' }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: e?.message || 'Update failed' },
+      { status: 500 }
+    );
   }
 }
