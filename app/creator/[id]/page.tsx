@@ -18,9 +18,12 @@ import { createPublicClient, http } from 'viem'
 import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
-
-// Inline owner area (renders dashboard/tools if viewer owns the page)
 import OwnerInline from './OwnerInline'
+
+// 🔒 ensure no stale HTML or data
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+export const fetchCache = 'force-no-store'
 
 type Params = { params: { id: string } }
 
