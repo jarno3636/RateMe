@@ -1,64 +1,71 @@
 // app/api/creator/update/route.ts
 import { NextResponse } from 'next/server'
 import { kv } from '@vercel/kv'
+import { revalidatePath } from 'next/cache'
 
 export const runtime = 'nodejs'
 
-type Body = {
-  id?: string            // can be a numeric id OR a handle
-  handle?: string        // optional, if you have it
-  avatarUrl?: string
-  bio?: string
-}
+// Helpers: accept either numeric ID or handle string
+function normalize(s: string) { return String(s || '').trim().toLowerCase() }
+const isNumeric = (s: string) => /^\d+$/.test(s)
 
-const norm = (s?: string | null) => (s || '').trim().toLowerCase().replace(/^@+/, '')
+async function resolveId(idOrHandle: string): Promise<string | null> {
+  const key = normalize(idOrHandle)
+  if (isNumeric(key)) {
+    // trust numeric id
+    const exists = await kv.exists(`creator:${key}`)
+    return exists ? key : null
+  }
+  // try handle -> id mapping first
+  const mapped = await kv.get<string | null>(`handle:${key}`)
+  if (mapped) return mapped
+  // fallback: maybe the handle itself is used as id in KV for early creators
+  const exists = await kv.exists(`creator:${key}`)
+  return exists ? key : null
+}
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json()) as Body
-    const rawId = body.id || body.handle
-    const key = norm(rawId)
-    if (!key) {
-      return NextResponse.json({ ok: false, error: 'Missing creator id/handle' }, { status: 400 })
+    const { id, avatarUrl, bio } = await req.json()
+
+    if (!id) {
+      return NextResponse.json({ ok: false, error: 'Missing id' }, { status: 400 })
     }
 
-    // Try both id & handle lookups, then upsert if missing.
-    // Keys used here are generic; adjust if your KV schema differs.
-    // We maintain a handle->id mapping and a creator record by id/handle.
-    const handle = norm(body.handle || key)
-
-    // Mapping lookups
-    const mappedId = await kv.get<string>(`handles:${handle}`)
-    const creatorKey = mappedId ? `creator:${mappedId}` : `creator:${key}`
-
-    // Fetch existing (may be null)
-    const existing = (await kv.get<Record<string, any>>(creatorKey)) || null
-
-    // Build the new record (upsert)
-    const next = {
-      id: existing?.id || mappedId || key,
-      handle: existing?.handle || handle,
-      displayName: existing?.displayName || existing?.handle || handle,
-      avatarUrl: body.avatarUrl ?? existing?.avatarUrl ?? '',
-      bio: body.bio ?? existing?.bio ?? '',
-      fid: existing?.fid ?? 0,
-      address: existing?.address ?? null,
-      createdAt: existing?.createdAt ?? Date.now(),
-      // keep any other fields you may be storing:
-      ...existing,
+    const creatorId = await resolveId(id)
+    if (!creatorId) {
+      return NextResponse.json({ ok: false, error: 'Creator not found' }, { status: 404 })
     }
 
-    // Write main record
-    await kv.set(creatorKey, next)
+    // Optional: 250-word limiter on server too
+    const words = String(bio || '').trim().split(/\s+/).filter(Boolean)
+    if (words.length > 250) {
+      return NextResponse.json({ ok: false, error: 'Bio must be 250 words or less' }, { status: 400 })
+    }
 
-    // Maintain handle mapping (so pages can resolve handle -> id)
-    await kv.set(`handles:${next.handle}`, next.id)
+    // Write only provided fields
+    const patch: Record<string, string> = {}
+    if (typeof avatarUrl === 'string') patch.avatarUrl = avatarUrl
+    if (typeof bio === 'string') patch.bio = bio
 
-    return NextResponse.json({ ok: true, creator: { id: next.id, handle: next.handle } })
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json({ ok: false, error: 'Nothing to update' }, { status: 400 })
+    }
+
+    await kv.hset(`creator:${creatorId}`, patch)
+
+    // Revalidate both numeric and handle routes just in case
+    revalidatePath(`/creator/${creatorId}`)
+
+    // If the record has a handle, revalidate that route too
+    const cur = await kv.hgetall<Record<string, string>>(`creator:${creatorId}`)
+    const handle = cur?.handle?.toLowerCase?.()
+    if (handle) {
+      revalidatePath(`/creator/${handle}`)
+    }
+
+    return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || 'Failed to update creator' },
-      { status: 500 }
-    )
+    return NextResponse.json({ ok: false, error: e?.message || 'Update failed' }, { status: 500 })
   }
 }
