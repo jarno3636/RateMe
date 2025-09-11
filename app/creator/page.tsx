@@ -22,6 +22,11 @@ import { readPreviewCreate } from '@/lib/profileRegistry/reads';
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
 
+// Force dynamic (avoid build-time render) and Node runtime
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
 function normalizeHandleId(s: string) {
   return s.trim().replace(/^@+/, '').toLowerCase();
 }
@@ -43,7 +48,7 @@ export default function CreatorOnboard() {
   // availability state
   const [checking, setChecking] = useState(false);
   const [avail, setAvail] = useState<Availability | null>(null);
-  const debouncedHandle = useDebouncedValue(handleId, 350);
+  const debouncedHandleId = useDebouncedValue(handleId, 350);
 
   // on-chain flow
   const [busy, setBusy] = useState(false);
@@ -118,11 +123,11 @@ export default function CreatorOnboard() {
     let canceled = false;
 
     (async () => {
-      if (!debouncedHandle) {
+      if (!debouncedHandleId) {
         setAvail(null);
         return;
       }
-      if (!isValidHandleId(debouncedHandle)) {
+      if (!isValidHandleId(debouncedHandleId)) {
         setAvail({
           ok: true,
           valid: false,
@@ -135,7 +140,7 @@ export default function CreatorOnboard() {
 
       setChecking(true);
       try {
-        const res = await checkHandleAvailability(debouncedHandle);
+        const res = await checkHandleAvailability(debouncedHandleId);
         if (canceled) return;
         setAvail(res);
       } catch {
@@ -156,7 +161,7 @@ export default function CreatorOnboard() {
     return () => {
       canceled = true;
     };
-  }, [debouncedHandle, okFormat]);
+  }, [debouncedHandleId, okFormat]);
 
   const submit = useCallback(
     async (e?: React.FormEvent) => {
@@ -186,9 +191,10 @@ export default function CreatorOnboard() {
 
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
-          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, {
-            icon: '⛓️',
-          });
+          toast(
+            `Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`,
+            { icon: '⛓️' }
+          );
         } else {
           toast('Creating profile…', { icon: '⛓️' });
         }
@@ -375,7 +381,7 @@ export default function CreatorOnboard() {
             {busy ? 'Creating…' : 'Create my page'}
           </button>
 
-        <a
+          <a
             href="https://warpcast.com/~/settings/username"
             target="_blank"
             rel="noreferrer"
