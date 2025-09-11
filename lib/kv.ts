@@ -22,8 +22,9 @@ export type Rating = {
 }
 
 /** --------- Keys --------- */
-const CREATOR_KEY = (id: string) => `creator:${id}`
-const HANDLE_KEY  = (handle: string) => `handle:${handle.toLowerCase()}`
+const CREATOR_KEY  = (id: string) => `creator:${id}`
+const HANDLE_KEY   = (handle: string) => `handle:${handle.toLowerCase()}`
+const OWNER_KEY    = (addr: string) => `owner:${addr.toLowerCase()}`   // << new
 const CREATOR_LIST = 'creator:list' // zset score = createdAt
 
 const RATING_KEY = (creatorId: string, raterKey: string) =>
@@ -35,11 +36,12 @@ const RATING_RECENT = (creatorId: string) =>
 
 /** --------- Helpers --------- */
 const lc = (s: string) => s.trim().toLowerCase()
+const normHandle = (s: string) => lc(s.replace(/^@+/, ''))
 
 /** --------- Creators --------- */
 export async function createCreatorUnique(c: Creator) {
-  // normalize handle/id to lowercase for uniqueness
-  const handle = lc(c.handle.replace(/^@/, ''))
+  // normalize
+  const handle = normHandle(c.handle)
   const id = lc(c.id)
 
   // 1) enforce unique handle via SETNX with a long-ish TTL
@@ -50,16 +52,22 @@ export async function createCreatorUnique(c: Creator) {
   if (!ok) throw new Error('Handle is taken')
 
   // 2) store creator hash
-  await kv.hset(CREATOR_KEY(id), {
+  const row: Creator = {
     ...c,
     id,
     handle, // store lowercased handle (UI can render with @)
-  })
+  }
+  await kv.hset(CREATOR_KEY(id), row)
 
   // 3) index in recency zset (score = createdAt)
   await kv.zadd(CREATOR_LIST, { member: id, score: c.createdAt })
 
-  return { ...c, id, handle }
+  // 4) NEW: index by owner address (so we can find by wallet quickly)
+  if (c.address) {
+    await kv.set(OWNER_KEY(c.address), id)
+  }
+
+  return row
 }
 
 export async function getCreator(id: string): Promise<Creator | null> {
@@ -70,6 +78,42 @@ export async function getCreator(id: string): Promise<Creator | null> {
 export async function getCreatorByHandle(handle: string) {
   const id = await kv.get<string | null>(HANDLE_KEY(handle))
   return id ? getCreator(id) : null
+}
+
+/** NEW: lookup creator by owner wallet address (checks the owner index) */
+export async function getCreatorByOwner(address: string): Promise<Creator | null> {
+  if (!address) return null
+  const id = await kv.get<string | null>(OWNER_KEY(address))
+  return id ? getCreator(id) : null
+}
+
+/** NEW: set or update a creator's linked address and keep the index in sync */
+export async function setCreatorAddress(
+  idOrHandle: string,
+  address: `0x${string}` | null
+): Promise<Creator | null> {
+  // accept either creator id or handle
+  const existing =
+    (await getCreator(idOrHandle)) ||
+    (await getCreatorByHandle(idOrHandle))
+  if (!existing) return null
+
+  // remove old owner index if present
+  if (existing.address) {
+    await kv.del(OWNER_KEY(existing.address))
+  }
+
+  const next: Creator = { ...existing, address }
+
+  // update record
+  await kv.hset(CREATOR_KEY(existing.id), next)
+
+  // add new owner index if present
+  if (address) {
+    await kv.set(OWNER_KEY(address), existing.id)
+  }
+
+  return next
 }
 
 /** New: page through creators (newest first). cursor is index into the recency zset. */
