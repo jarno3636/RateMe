@@ -3,6 +3,7 @@
 
 import { useAccount } from 'wagmi'
 import dynamic from 'next/dynamic'
+import Link from 'next/link'
 import type { Address } from 'viem'
 import EditProfileBox from './EditProfileBox'
 
@@ -29,6 +30,7 @@ export default function OwnerInline({
 }) {
   const { address } = useAccount()
   if (!creatorAddress || !address) return null
+
   const isOwner =
     creatorAddress.toLowerCase() === (address as Address).toLowerCase()
   if (!isOwner) return null
@@ -36,8 +38,17 @@ export default function OwnerInline({
   return (
     <section className="mt-2 space-y-4">
       <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
-        <div className="mb-3 text-sm font-medium text-cyan-200">
-          Manage your page
+        {/* Owner tools header */}
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-sm font-medium text-cyan-200">
+            Manage your page
+          </div>
+          <Link
+            href="#creator-tools"
+            className="text-xs text-cyan-200/90 underline decoration-cyan-400/30 underline-offset-2 hover:text-cyan-100"
+          >
+            Jump to tools
+          </Link>
         </div>
 
         {/* Profile photo/bio editor */}
@@ -47,14 +58,64 @@ export default function OwnerInline({
           currentBio={currentBio}
         />
 
+        {/* Help accordions */}
+        <div className="mt-4 grid gap-2 md:grid-cols-2">
+          <details className="rounded-lg border border-white/10 bg-white/5 p-3 open:bg-white/7.5">
+            <summary className="cursor-pointer select-none text-sm font-medium text-slate-200">
+              How subscriptions work
+            </summary>
+            <div className="mt-2 text-xs leading-relaxed text-slate-300">
+              <ul className="list-disc space-y-1 pl-4">
+                <li>
+                  Create a <strong>Subscription plan</strong> with a price in USDC and a period
+                  (e.g., monthly = 30 days).
+                </li>
+                <li>
+                  Fans buy your plan on Base. The contract tracks their active period automatically.
+                </li>
+                <li>
+                  Any post you mark as <em>Accessible via active subscription</em> unlocks for them while their
+                  sub is active.
+                </li>
+                <li>
+                  You can edit/disable plans later. Payouts remain on-chain; you can withdraw in your wallet.
+                </li>
+              </ul>
+            </div>
+          </details>
+
+          <details className="rounded-lg border border-white/10 bg-white/5 p-3 open:bg-white/7.5">
+            <summary className="cursor-pointer select-none text-sm font-medium text-slate-200">
+              Paid posts & previews (blur)
+            </summary>
+            <div className="mt-2 text-xs leading-relaxed text-slate-300">
+              <ul className="list-disc space-y-1 pl-4">
+                <li>
+                  Upload your content (image/video/file) and paste its URI (e.g., ipfs:// or https://).
+                </li>
+                <li>
+                  Set a price (USDC) or set price to <strong>0</strong> for a free post.
+                </li>
+                <li>
+                  Toggle <em>Accessible via active subscription</em> if you want subs to view without paying per-post.
+                </li>
+                <li>
+                  Add a short <em>preview</em> image/text in the post body and mark the main content as <em>blurred</em>.
+                  Non-payers see the preview and a blurred overlay; payers/subs see it unblurred.
+                </li>
+              </ul>
+            </div>
+          </details>
+        </div>
+
         {/* Plans & posts */}
-        <div className="mt-4">
+        <div id="creator-tools" className="mt-4">
           <DashboardClient />
         </div>
 
         <div className="mt-3 rounded-lg border border-white/10 bg-white/5 p-3 text-xs text-slate-300">
-          Tip: For paid posts you can add a preview and blur it for
-          non-subscribers. Free posts (price 0) show unblurred.
+          Tip: Free posts (price = 0) are always visible. Paid or sub-gated posts can show a
+          preview with the main content blurred until unlocked.
         </div>
       </div>
     </section>
