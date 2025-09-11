@@ -2,55 +2,131 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { SITE } from '@/lib/config'
-import { getCreator, getRatingSummary, getRecentRatings } from '@/lib/kv'
+import { getCreator, getCreatorByHandle, getRatingSummary, getRecentRatings } from '@/lib/kv'
 import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
 import { Star, ExternalLink } from 'lucide-react'
 import { creatorShareLinks } from '@/lib/farcaster'
 
+// On-chain fallback imports
+import type { Abi, Address } from 'viem'
+import { createPublicClient, http } from 'viem'
+import { base } from 'viem/chains'
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
+import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
+
 type Params = { params: { id: string } }
 
-function siteUrl() {
-  return (SITE || 'http://localhost:3000').replace(/\/$/, '')
-}
 const BASESCAN = 'https://basescan.org'
+const SITE_CLEAN = (SITE || 'http://localhost:3000').replace(/\/$/, '')
+
+const pub = createPublicClient({
+  chain: base,
+  transport: http(
+    process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org'
+  ),
+})
+
+const isNumericId = (s: string) => /^\d+$/.test(s)
+const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const id = params.id.toLowerCase()
-  const site = siteUrl()
-  const creator = await getCreator(id)
+  const idParam = params.id.toLowerCase()
+  // Try to resolve a nicer title for OG if KV has it
+  const kv = await getCreator(idParam).catch(() => null)
+  const title = kv
+    ? `${kv.displayName || kv.handle} (@${kv.handle}) — Rate Me`
+    : `@${idParam} — Rate Me`
 
-  const title = creator
-    ? `${creator.displayName || creator.handle} (@${creator.handle}) — Rate Me`
-    : `@${id} — Rate Me`
-
-  const url = `${site}/creator/${encodeURIComponent(id)}`
-  const og = `${site}/api/og/creator?id=${encodeURIComponent(id)}`
-
+  const url = `${SITE_CLEAN}/creator/${encodeURIComponent(idParam)}`
+  const og = `${SITE_CLEAN}/api/og/creator?id=${encodeURIComponent(idParam)}`
   return {
     title,
     alternates: { canonical: url },
-    openGraph: {
-      title,
-      url,
-      images: [{ url: og, width: 1200, height: 630 }],
-    },
-    twitter: {
-      card: 'summary_large_image',
-      images: [og],
-      title,
-    },
+    openGraph: { title, url, images: [{ url: og, width: 1200, height: 630 }] },
+    twitter: { card: 'summary_large_image', images: [og], title },
+  }
+}
+
+/** On-chain read by numeric ID -> light profile shape */
+async function fetchOnchainById(idNum: bigint) {
+  // getProfile(id) -> (owner, handle, displayName, avatarURI, bio, fid, createdAt)
+  const r = (await pub.readContract({
+    address: REGISTRY_ADDRESS as Address,
+    abi: PROFILE_REGISTRY_ABI as Abi,
+    functionName: 'getProfile',
+    args: [idNum],
+  })) as any
+
+  if (!r) return null
+  const owner = r[0] as Address
+  const handle = String(r[1] || '')
+  const displayName = String(r[2] || '')
+  const avatarUrl = String(r[3] || '')
+  const bio = String(r[4] || '')
+  const fid = Number(BigInt(r[5] || 0))
+  const createdAt = Number(BigInt(r[6] || 0)) * 1000
+
+  // If handle is empty, still return minimal info
+  return {
+    id: handle || idNum.toString(),
+    handle: handle || idNum.toString(),
+    displayName: displayName || handle || idNum.toString(),
+    avatarUrl,
+    bio,
+    fid,
+    address: owner as `0x${string}`,
+    createdAt,
+  }
+}
+
+/** On-chain read by handle -> light profile shape */
+async function fetchOnchainByHandle(handle: string) {
+  // getProfileByHandle(handle) -> (exists, id, owner, handle, displayName, avatarURI, bio, fid, createdAt)
+  const r = (await pub.readContract({
+    address: REGISTRY_ADDRESS as Address,
+    abi: PROFILE_REGISTRY_ABI as Abi,
+    functionName: 'getProfileByHandle',
+    args: [handle],
+  })) as any
+
+  if (!r?.[0]) return null
+  return {
+    id: handle,
+    handle,
+    displayName: String(r[4] || handle),
+    avatarUrl: String(r[5] || ''),
+    bio: String(r[6] || ''),
+    fid: Number(BigInt(r[7] || 0)),
+    address: (r[2] || r[3]) as `0x${string}`,
+    createdAt: Number(BigInt(r[8] || 0)) * 1000,
   }
 }
 
 export default async function CreatorPage({ params }: Params) {
-  const id = params.id.toLowerCase()
-  const creator = await getCreator(id)
+  const raw = params.id || ''
+  const idParam = raw.toLowerCase()
+
+  // 1) Try KV first (works for newly registered creators instantly)
+  let creator =
+    (await getCreator(idParam).catch(() => null)) ||
+    (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
+
+  // 2) If not in KV, try on-chain fallbacks
+  if (!creator) {
+    if (isNumericId(idParam)) {
+      creator = await fetchOnchainById(BigInt(idParam)).catch(() => null)
+    } else {
+      const h = normalizeHandle(idParam)
+      creator = await fetchOnchainByHandle(h).catch(() => null)
+    }
+  }
+
   if (!creator) return notFound()
 
-  const rating = await getRatingSummary(id)
-  const recent = await getRecentRatings(id)
+  const rating = await getRatingSummary(creator.id).catch(() => ({ count: 0, sum: 0, avg: 0 }))
+  const recent = await getRecentRatings(creator.id).catch(() => [])
 
   const hasAddress = !!creator.address
   const avgText = rating.count ? `${rating.avg.toFixed(2)} • ${rating.count} ratings` : 'No ratings yet'
