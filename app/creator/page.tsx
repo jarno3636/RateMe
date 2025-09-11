@@ -4,13 +4,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from 'wagmi';
+import type { Address, Abi } from 'viem';
+
 import { useProfileRegistry } from '@/hooks/useProfileRegistry';
-import { checkHandleAvailability, registerCreator, type Availability } from '@/lib/api/creator';
+import {
+  checkHandleAvailability,
+  registerCreator,
+  type Availability,
+} from '@/lib/api/creator';
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { creatorShareLinks } from '@/lib/farcaster';
 
+// On-chain reads
+import {
+  readPreviewCreate,
+} from '@/lib/profileRegistry/reads';
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
+import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
+
 function normalizeHandle(s: string) {
-  return s.trim().replace(/^@/, '').toLowerCase();
+  return s.trim().replace(/^@+/, '').toLowerCase();
 }
 function isValidHandle(h: string) {
   if (h.length < 3 || h.length > 32) return false;
@@ -19,6 +34,9 @@ function isValidHandle(h: string) {
 
 export default function CreatorOnboard() {
   const router = useRouter();
+
+  // wallet
+  const { address: wallet, isConnected } = useAccount();
 
   // form state
   const [raw, setRaw] = useState('');
@@ -33,25 +51,92 @@ export default function CreatorOnboard() {
   // on-chain flow
   const [busy, setBusy] = useState(false);
   const [feeView, setFeeView] = useState<string>('');
+  const [allowanceOk, setAllowanceOk] = useState<boolean | null>(null);
   const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
-  // preview creation fee (USDC, 6dp)
+  // --- Auto-redirect if this wallet already owns a profile ---
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const fee = await feeUnits();
-        if (!alive) return;
-        setFeeView((Number(fee) / 1e6).toFixed(2));
+        if (!isConnected || !wallet) return;
+
+        // getProfilesByOwner(address) -> uint256[] ids
+        const ids = (await (window as any).viem?.readContract?.({
+          // If you don’t have window.viem, call via our shared client instead:
+          // Using the same viem public client as server reads is safe in the client, too.
+        })) as unknown;
+
+        // Fallback: use the shared readClient directly
+        // (importless trick, keeps bundle small — we’ll call the contract using fetch-less viem client)
       } catch {
-        if (!alive) return;
-        setFeeView('');
+        // ignore
       }
     })();
     return () => {
       alive = false;
     };
-  }, [feeUnits]);
+  }, [isConnected, wallet]);
+
+  // A clean, portable call for getProfilesByOwner without wiring a new helper:
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        if (!isConnected || !wallet) return;
+        // We’ll invoke the read via fetch-less viem client exposed by our reads module:
+        // Import the minimal pieces here to keep this component focused.
+        const { readClient } = await import('@/lib/profileRegistry/reads');
+        const ids = (await readClient.readContract({
+          address: REGISTRY_ADDRESS as Address,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'getProfilesByOwner',
+          args: [wallet as Address],
+        })) as bigint[];
+
+        if (!alive) return;
+        if (ids && ids.length > 0) {
+          // Redirect to the first profile this wallet owns
+          router.replace(`/creator/${encodeURIComponent(String(ids[0]))}`);
+        }
+      } catch {
+        // no-op
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isConnected, wallet, router]);
+
+  // preview creation fee (prefer previewCreate; fallback to feeUnits)
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        if (wallet) {
+          const pv = await readPreviewCreate(wallet as Address);
+          if (pv) {
+            if (!alive) return;
+            setFeeView((Number(pv.fee) / 1e6).toFixed(2));
+            setAllowanceOk(pv.okAllowance);
+            return;
+          }
+        }
+        // fallback: just feeUnits
+        const fee = await feeUnits();
+        if (!alive) return;
+        setFeeView(fee ? (Number(fee) / 1e6).toFixed(2) : '');
+        setAllowanceOk(null);
+      } catch {
+        if (!alive) return;
+        setFeeView('');
+        setAllowanceOk(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [wallet, feeUnits]);
 
   // live availability check
   useEffect(() => {
@@ -128,7 +213,10 @@ export default function CreatorOnboard() {
 
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
-          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
+          toast(
+            `Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`,
+            { icon: '⛓️' }
+          );
         } else {
           toast('Creating profile…', { icon: '⛓️' });
         }
@@ -139,17 +227,18 @@ export default function CreatorOnboard() {
         // 2) KV registration (server-side Neynar hydration + uniqueness)
         const reg = await registerCreator({ handle });
 
-        // Narrow union safely
         if (!('creator' in reg)) {
           const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
           throw new Error(msg);
         }
 
-        // Compute share links for toast
+        // Compute share links for toast (use creator.id if present, else on-chain id)
         const routeId = reg.creator.id || String(id);
-        const { cast, tweet, url } = creatorShareLinks(routeId, `Check out @${routeId} on Rate Me`);
+        const { cast, tweet, url } = creatorShareLinks(
+          routeId,
+          `Check out @${routeId} on Rate Me`
+        );
 
-        // Success + share toast
         toast.success('Creator page created');
         toast.custom(
           () => (
@@ -191,7 +280,6 @@ export default function CreatorOnboard() {
           { duration: 6000 }
         );
 
-        // Navigate to the new page
         router.push(`/creator/${encodeURIComponent(routeId)}`);
       } catch (err: any) {
         toast.error(err?.message || 'Something went wrong');
@@ -231,10 +319,21 @@ export default function CreatorOnboard() {
     busy ||
     !okFormat ||
     checking ||
-    (avail ? (!avail.ok || !avail.available) : false);
+    (avail ? !avail.ok || !avail.available : false);
 
   return (
     <div className="mx-auto max-w-lg px-4 py-10">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="text-sm text-slate-400">
+          {isConnected ? (
+            <span>Connected as <span className="text-slate-200">{wallet}</span></span>
+          ) : (
+            <span>Connect your wallet to create</span>
+          )}
+        </div>
+        <ConnectButton chainStatus="none" showBalance={false} />
+      </div>
+
       <form onSubmit={submit} className="space-y-4">
         <header>
           <h1 className="text-2xl font-semibold">Become a creator</h1>
@@ -272,16 +371,23 @@ export default function CreatorOnboard() {
 
         {!!feeView && (
           <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-            Current creation fee: <span className="text-slate-100">{feeView} USDC</span>
+            Current creation fee:{' '}
+            <span className="text-slate-100">{feeView} USDC</span>
+            {allowanceOk === true && (
+              <span className="ml-2 text-emerald-300">(allowance ok)</span>
+            )}
+            {allowanceOk === false && (
+              <span className="ml-2 text-amber-300">(approval required)</span>
+            )}
           </div>
         )}
 
         <div className="flex items-center gap-3">
           <button
             type="submit"
-            disabled={disableSubmit}
+            disabled={disableSubmit || !isConnected}
             className="btn disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-disabled={disableSubmit}
+            aria-disabled={disableSubmit || !isConnected}
           >
             {busy ? 'Creating…' : 'Create my page'}
           </button>
