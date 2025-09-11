@@ -1,7 +1,7 @@
-/// app/api/creators/route.ts
+// app/api/creators/route.ts
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { listCreatorsPage, getRatingSummary } from '@/lib/kv';
+import { listCreatorsPage, getRatingSummary, type Creator } from '@/lib/kv';
 import { listProfilesFlat } from '@/lib/profileRegistry/reads';
 
 export const runtime = 'edge';
@@ -20,8 +20,6 @@ function withCors(init?: ResponseInit) {
     headers: {
       ...(init?.headers || {}),
       ...CORS_HEADERS,
-      // allow caller to still override/append cache headers
-      ...(init?.headers || {}),
     },
   };
 }
@@ -37,12 +35,12 @@ const Query = z.object({
     .optional()
     .transform(v => (v ? Number(v) : undefined))
     .pipe(z.number().int().min(0).optional()),
-  include: z.enum(['rating']).optional(), // extendable later (e.g., 'onchain')
+  include: z.enum(['rating']).optional(),
 });
 
 /**
- * Map on-chain profile rows to the Creator shape your UI expects from KV.
- * NOTE: Keep keys aligned with what /components expect (id, handle, displayName, avatarUrl, bio).
+ * Map on-chain profile rows to the *KV Creator* shape the UI expects.
+ * Only include fields defined by `Creator` to keep types happy.
  */
 function mapOnchainToCreator(item: {
   id: bigint;
@@ -51,19 +49,14 @@ function mapOnchainToCreator(item: {
   displayName: string;
   avatarURI: string;
   bio: string;
-  fid: bigint;
-  createdAt: bigint;
-}) {
+}) : Creator {
   return {
-    id: String(item.id),                // string id for consistency with KV
-    handle: item.handle || '',          // used in slugs/@mentions
-    displayName: item.displayName || '',// nice name
-    avatarUrl: item.avatarURI || '',    // UI key is avatarUrl (not avatarURI)
+    id: String(item.id),
+    handle: item.handle || '',
+    displayName: item.displayName || '',
+    avatarUrl: item.avatarURI || '',
     bio: item.bio || '',
-    // Optional extras if your UI starts using them later:
-    fid: Number(item.fid || 0n),
-    owner: item.owner,
-    createdAt: Number(item.createdAt || 0n) * 1000, // ms
+    address: item.owner, // <- required by Creator
   };
 }
 
@@ -88,19 +81,28 @@ export async function GET(req: Request) {
     // 1) Primary: KV-backed discover
     let { creators, nextCursor } = await listCreatorsPage({ limit, cursor });
 
-    // 2) Fallback: if KV has no rows (brand new deployment / missing cron), read from on-chain registry
+    // 2) Fallback: populate from on-chain registry if KV is empty
     if (!creators?.length) {
       const pageSize = BigInt(Math.max(1, Math.min(50, limit)));
-      const chain = await listProfilesFlat(0n, pageSize); // newest first per contract impl
-      const mapped = chain.items.map(mapOnchainToCreator);
+      const chain = await listProfilesFlat(0n, pageSize);
 
-      // emulate the same paging shape (numeric cursor); we expose 0/null when no more
-      creators = mapped;
+      const mapped: Creator[] = chain.items.map(item =>
+        mapOnchainToCreator({
+          id: item.id,
+          owner: item.owner,
+          handle: item.handle,
+          displayName: item.displayName,
+          avatarURI: item.avatarURI,
+          bio: item.bio,
+        })
+      );
+
+      creators = mapped; // now matches Creator[]
       nextCursor = chain.nextCursor ? Number(chain.nextCursor) : null;
     }
 
-    // 3) Optional enrichment: ratings (count/sum/avg)
-    let enriched = creators;
+    // 3) Optional enrichment: ratings
+    let enriched: Array<Creator & { rating?: { count: number; sum: number; avg: number } }> = creators;
     if (include === 'rating' && creators.length) {
       const summaries = await Promise.all(
         creators.map(c =>
@@ -114,16 +116,14 @@ export async function GET(req: Request) {
       { creators: enriched, nextCursor },
       withCors({
         headers: {
-          // cache lightly at the edge, but avoid client caching
           'Cache-Control': 's-maxage=15, stale-while-revalidate=60',
         },
       })
     );
   } catch (err) {
     console.error('GET /api/creators failed:', err);
-    // Soft-fail: return empty page with 200 so UI shows "No creators" instead of error
     return NextResponse.json(
-      { creators: [] as any[], nextCursor: null },
+      { creators: [] as Creator[], nextCursor: null },
       withCors({
         status: 200,
         headers: { 'Cache-Control': 'no-store' },
