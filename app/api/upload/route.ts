@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server'
 import { put } from '@vercel/blob'
 
-export const runtime = 'nodejs' // keep Node runtime for reliable uploads
+export const runtime = 'nodejs' // more reliable for uploads
 
 const ACCEPT_PREFIXES = ['image/', 'video/']
 const MAX_MB = 25
@@ -10,14 +10,13 @@ const MAX_MB = 25
 export async function POST(req: Request) {
   try {
     const form = await req.formData()
-    // TS on Vercel sometimes loses DOM lib types; cast to any so `.get` is recognized
+    // TS quirk on server builds: cast so `.get` is recognized
     const file = (form as any).get('file') as File | null
 
     if (!file) {
       return NextResponse.json({ ok: false, error: 'No file provided' }, { status: 400 })
     }
 
-    // Validate type & size
     if (!ACCEPT_PREFIXES.some((p) => file.type?.startsWith(p))) {
       return NextResponse.json({ ok: false, error: 'Unsupported file type' }, { status: 400 })
     }
@@ -32,14 +31,12 @@ export async function POST(req: Request) {
       access: 'public',
       addRandomSuffix: false,
       contentType: file.type || undefined,
-      cacheControl: 'public, max-age=31536000, immutable',
+      // token is optional if Vercel project has Blob enabled; include if needed:
+      // token: process.env.BLOB_READ_WRITE_TOKEN,
     })
 
     return NextResponse.json({ ok: true, url })
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || 'Upload failed' },
-      { status: 500 },
-    )
+    return NextResponse.json({ ok: false, error: e?.message || 'Upload failed' }, { status: 500 })
   }
 }
