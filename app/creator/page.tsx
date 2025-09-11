@@ -18,16 +18,14 @@ import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { creatorShareLinks } from '@/lib/farcaster';
 
 // On-chain reads
-import {
-  readPreviewCreate,
-} from '@/lib/profileRegistry/reads';
+import { readPreviewCreate } from '@/lib/profileRegistry/reads';
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
 
-function normalizeHandle(s: string) {
+function normalizeHandleId(s: string) {
   return s.trim().replace(/^@+/, '').toLowerCase();
 }
-function isValidHandle(h: string) {
+function isValidHandleId(h: string) {
   if (h.length < 3 || h.length > 32) return false;
   return /^[a-z0-9._-]+$/.test(h);
 }
@@ -40,13 +38,13 @@ export default function CreatorOnboard() {
 
   // form state
   const [raw, setRaw] = useState('');
-  const handle = useMemo(() => normalizeHandle(raw), [raw]);
-  const okFormat = useMemo(() => isValidHandle(handle), [handle]);
+  const handleId = useMemo(() => normalizeHandleId(raw), [raw]);
+  const okFormat = useMemo(() => isValidHandleId(handleId), [handleId]);
 
   // availability state
   const [checking, setChecking] = useState(false);
   const [avail, setAvail] = useState<Availability | null>(null);
-  const debouncedHandle = useDebouncedValue(handle, 350);
+  const debouncedHandle = useDebouncedValue(handleId, 350);
 
   // on-chain flow
   const [busy, setBusy] = useState(false);
@@ -61,31 +59,6 @@ export default function CreatorOnboard() {
       try {
         if (!isConnected || !wallet) return;
 
-        // getProfilesByOwner(address) -> uint256[] ids
-        const ids = (await (window as any).viem?.readContract?.({
-          // If you don’t have window.viem, call via our shared client instead:
-          // Using the same viem public client as server reads is safe in the client, too.
-        })) as unknown;
-
-        // Fallback: use the shared readClient directly
-        // (importless trick, keeps bundle small — we’ll call the contract using fetch-less viem client)
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [isConnected, wallet]);
-
-  // A clean, portable call for getProfilesByOwner without wiring a new helper:
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        if (!isConnected || !wallet) return;
-        // We’ll invoke the read via fetch-less viem client exposed by our reads module:
-        // Import the minimal pieces here to keep this component focused.
         const { readClient } = await import('@/lib/profileRegistry/reads');
         const ids = (await readClient.readContract({
           address: REGISTRY_ADDRESS as Address,
@@ -96,7 +69,6 @@ export default function CreatorOnboard() {
 
         if (!alive) return;
         if (ids && ids.length > 0) {
-          // Redirect to the first profile this wallet owns
           router.replace(`/creator/${encodeURIComponent(String(ids[0]))}`);
         }
       } catch {
@@ -147,7 +119,7 @@ export default function CreatorOnboard() {
         setAvail(null);
         return;
       }
-      if (!isValidHandle(debouncedHandle)) {
+      if (!isValidHandleId(debouncedHandle)) {
         setAvail({
           ok: true,
           valid: false,
@@ -186,7 +158,7 @@ export default function CreatorOnboard() {
   const submit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
-      if (!okFormat || !handle || busy) return;
+      if (!okFormat || !handleId || busy) return;
 
       // if we have an availability result, only allow when available
       if (avail && (!avail.ok || !avail.available)) {
@@ -205,7 +177,7 @@ export default function CreatorOnboard() {
       setBusy(true);
       try {
         // final on-chain guard (cheap read)
-        if (await handleTaken(handle)) {
+        if (await handleTaken(handleId)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
           return;
@@ -222,10 +194,10 @@ export default function CreatorOnboard() {
         }
 
         // 1) On-chain create
-        const { id } = await createProfile({ handle });
+        const { id } = await createProfile({ handle: handleId });
 
         // 2) KV registration (server-side Neynar hydration + uniqueness)
-        const reg = await registerCreator({ handle });
+        const reg = await registerCreator({ handle: handleId });
 
         if (!('creator' in reg)) {
           const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
@@ -287,7 +259,7 @@ export default function CreatorOnboard() {
         setBusy(false);
       }
     },
-    [okFormat, handle, busy, router, createProfile, feeUnits, handleTaken, avail]
+    [okFormat, handleId, busy, router, createProfile, feeUnits, handleTaken, avail]
   );
 
   // UI helpers based on unified availability
