@@ -1,8 +1,5 @@
 // app/discover/page.tsx
 import type { Metadata } from 'next'
-import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import { listCreatorsPage, type Creator } from '@/lib/kv'
 import DiscoverClient from './DiscoverClient'
 
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
@@ -20,13 +17,30 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', images: ['/miniapp-card.png'] },
 }
 
-export default async function DiscoverPage() {
-  // Preload the first page server-side for fast TTFB & SEO
-  const { creators, nextCursor } = await listCreatorsPage({ limit: 12, cursor: 0 })
+type ApiCreator = {
+  id: string
+  handle: string
+  displayName?: string
+  avatarUrl?: string
+  bio?: string
+  rating?: { count: number; sum: number; avg: number }
+}
 
-  // If something is catastrophically wrong, show a “soft” empty state instead of 404
-  const initial = Array.isArray(creators) ? creators : []
-  if (!initial) return notFound()
+export default async function DiscoverPage() {
+  // Preload the first page server-side via the API (include=rating) and no-store
+  const res = await fetch(
+    `${SITE}/api/creators?limit=12&cursor=0&include=rating`,
+    { cache: 'no-store', headers: { accept: 'application/json' } }
+  )
+
+  // If the API has a hiccup, fall back to an empty page (soft-empty state)
+  let initial: ApiCreator[] = []
+  let nextCursor: number | null = null
+  if (res.ok) {
+    const json = await res.json()
+    initial = Array.isArray(json?.creators) ? json.creators : []
+    nextCursor = typeof json?.nextCursor === 'number' ? json.nextCursor : null
+  }
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
