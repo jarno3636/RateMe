@@ -7,7 +7,10 @@ import { kv } from '@vercel/kv'
 
 import { createCreatorUnique, getCreator, getCreatorByHandle } from '@/lib/kv'
 import { fetchNeynarUserByHandle, fetchNeynarUserByFid } from '@/lib/neynar'
-import { PROFILE_REGISTRY_ABI, PROFILE_REGISTRY_ADDR } from '@/lib/registry'
+
+// ✅ New registry imports (replaces "@/lib/registry")
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
+import { REGISTRY_ADDRESS as PROFILE_REGISTRY_ADDR } from '@/lib/profileRegistry/constants'
 
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
@@ -36,11 +39,14 @@ const BodySchema = z.object({
   displayName: z.string().trim().min(1).max(64).optional(),
 })
 
+const BASE_RPC =
+  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+  process.env.BASE_RPC_URL ||
+  'https://mainnet.base.org'
+
 const pub = createPublicClient({
   chain: base,
-  transport: http(
-    process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || undefined
-  ),
+  transport: http(BASE_RPC),
 })
 
 function json(data: unknown, init?: ResponseInit) {
@@ -69,7 +75,12 @@ export async function GET(req: NextRequest) {
     if (!source) return json({ error: 'Missing handle or id' }, { status: 400 })
 
     const parsed = Handle.safeParse(source)
-    if (!parsed.success) return json({ ok: true, exists: false, onchainTaken: false, error: 'invalid' }, { status: 200 })
+    if (!parsed.success) {
+      return json(
+        { ok: true, exists: false, onchainTaken: false, error: 'invalid' },
+        { status: 200 },
+      )
+    }
     const id = parsed.data // normalized lowercase
 
     // KV lookup (by id and by handle mapping)
@@ -85,8 +96,8 @@ export async function GET(req: NextRequest) {
         functionName: 'handleTaken',
         args: [id],
       })) as boolean
-    } catch {
-      // ignore RPC hiccup
+    } catch (e) {
+      console.warn('handleTaken read failed:', e)
     }
 
     return json({
@@ -134,8 +145,8 @@ export async function POST(req: NextRequest) {
         args: [handleId],
       })) as boolean
       if (exists) return json({ error: 'Handle already registered on-chain' }, { status: 409 })
-    } catch {
-      // noop
+    } catch (e) {
+      console.warn('pre-check handleTaken failed:', e)
     }
 
     // Neynar enrichment (best-effort, prefer FID if provided)
@@ -162,8 +173,8 @@ export async function POST(req: NextRequest) {
           bio = u.bio?.text || undefined
         }
       }
-    } catch {
-      // ignore enrichment hiccups
+    } catch (e) {
+      console.warn('Neynar enrichment failed:', e)
     }
 
     // Atomic create (KV SETNX inside guarantees uniqueness)
@@ -175,7 +186,7 @@ export async function POST(req: NextRequest) {
       displayName: displayName || handleId,
       avatarUrl,
       bio,
-      createdAt: Date.now(),
+      createdAt: Math.floor(Date.now() / 1000), // ✅ unix seconds
     })
 
     // Optional tiny audit log (non-blocking)
