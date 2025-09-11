@@ -26,8 +26,7 @@ function normalizeHandleId(s: string) {
   return s.trim().replace(/^@+/, '').toLowerCase();
 }
 function isValidHandleId(h: string) {
-  if (h.length < 3 || h.length > 32) return false;
-  return /^[a-z0-9._-]+$/.test(h);
+  return h.length >= 3 && h.length <= 32 && /^[a-z0-9._-]+$/.test(h);
 }
 
 export default function CreatorOnboard() {
@@ -52,13 +51,15 @@ export default function CreatorOnboard() {
   const [allowanceOk, setAllowanceOk] = useState<boolean | null>(null);
   const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
-  // --- Auto-redirect if this wallet already owns a profile ---
+  // detect existing on-chain profile(s) for a clearer CTA
+  const [ownedId, setOwnedId] = useState<string | null>(null);
+
+  // If this wallet already owns a registry profile, surface a "Go to my page" button
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         if (!isConnected || !wallet) return;
-
         const { readClient } = await import('@/lib/profileRegistry/reads');
         const ids = (await readClient.readContract({
           address: REGISTRY_ADDRESS as Address,
@@ -69,16 +70,18 @@ export default function CreatorOnboard() {
 
         if (!alive) return;
         if (ids && ids.length > 0) {
-          router.replace(`/creator/${encodeURIComponent(String(ids[0]))}`);
+          setOwnedId(String(ids[0]));
+        } else {
+          setOwnedId(null);
         }
       } catch {
-        // no-op
+        // ignore
       }
     })();
     return () => {
       alive = false;
     };
-  }, [isConnected, wallet, router]);
+  }, [isConnected, wallet]);
 
   // preview creation fee (prefer previewCreate; fallback to feeUnits)
   useEffect(() => {
@@ -160,7 +163,6 @@ export default function CreatorOnboard() {
       e?.preventDefault();
       if (!okFormat || !handleId || busy) return;
 
-      // if we have an availability result, only allow when available
       if (avail && (!avail.ok || !avail.available)) {
         toast.error(
           avail?.error
@@ -176,7 +178,6 @@ export default function CreatorOnboard() {
 
       setBusy(true);
       try {
-        // final on-chain guard (cheap read)
         if (await handleTaken(handleId)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
@@ -185,10 +186,9 @@ export default function CreatorOnboard() {
 
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
-          toast(
-            `Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`,
-            { icon: '⛓️' }
-          );
+          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, {
+            icon: '⛓️',
+          });
         } else {
           toast('Creating profile…', { icon: '⛓️' });
         }
@@ -198,13 +198,11 @@ export default function CreatorOnboard() {
 
         // 2) KV registration (server-side Neynar hydration + uniqueness)
         const reg = await registerCreator({ handle: handleId });
-
         if (!('creator' in reg)) {
           const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
           throw new Error(msg);
         }
 
-        // Compute share links for toast (use creator.id if present, else on-chain id)
         const routeId = reg.creator.id || String(id);
         const { cast, tweet, url } = creatorShareLinks(
           routeId,
@@ -298,13 +296,27 @@ export default function CreatorOnboard() {
       <div className="mb-4 flex items-center justify-between">
         <div className="text-sm text-slate-400">
           {isConnected ? (
-            <span>Connected as <span className="text-slate-200">{wallet}</span></span>
+            <span>
+              Connected as <span className="text-slate-200">{wallet}</span>
+            </span>
           ) : (
             <span>Connect your wallet to create</span>
           )}
         </div>
         <ConnectButton chainStatus="none" showBalance={false} />
       </div>
+
+      {ownedId && (
+        <div className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-200">
+          You already have a creator profile.{' '}
+          <button
+            onClick={() => router.push(`/creator/${encodeURIComponent(ownedId)}`)}
+            className="ml-2 inline-flex items-center rounded-lg border border-emerald-400/30 px-2 py-1 hover:bg-emerald-400/10"
+          >
+            Go to my page
+          </button>
+        </div>
+      )}
 
       <form onSubmit={submit} className="space-y-4">
         <header>
@@ -343,8 +355,7 @@ export default function CreatorOnboard() {
 
         {!!feeView && (
           <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
-            Current creation fee:{' '}
-            <span className="text-slate-100">{feeView} USDC</span>
+            Current creation fee: <span className="text-slate-100">{feeView} USDC</span>
             {allowanceOk === true && (
               <span className="ml-2 text-emerald-300">(allowance ok)</span>
             )}
@@ -364,7 +375,7 @@ export default function CreatorOnboard() {
             {busy ? 'Creating…' : 'Create my page'}
           </button>
 
-          <a
+        <a
             href="https://warpcast.com/~/settings/username"
             target="_blank"
             rel="noreferrer"
