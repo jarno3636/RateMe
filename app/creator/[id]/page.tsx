@@ -19,7 +19,7 @@ import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
 
-// NEW: inline owner area (client) that renders the dashboard if you’re the owner
+// Inline owner area (renders dashboard/tools if viewer owns the page)
 import OwnerInline from './OwnerInline'
 
 type Params = { params: { id: string } }
@@ -38,12 +38,9 @@ const pub = createPublicClient({
 
 const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
-const short = (a?: string | null) =>
-  a ? `${a.slice(0, 6)}…${a.slice(-4)}` : ''
+const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
-export async function generateMetadata({
-  params,
-}: Params): Promise<Metadata> {
+export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const idParam = params.id.toLowerCase()
   const kv = await getCreator(idParam).catch(() => null)
   const title = kv
@@ -150,7 +147,7 @@ export default async function CreatorPage({ params }: Params) {
       {/* Header */}
       <section className="flex flex-col items-center text-center space-y-4">
         {/* Big centered avatar */}
-        <div className="h-40 w-40 overflow-hidden rounded-full ring-2 ring-white/10">
+        <div className="h-48 w-48 overflow-hidden rounded-full ring-2 ring-white/10">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={creator.avatarUrl || '/icon-192.png'}
@@ -195,6 +192,8 @@ export default async function CreatorPage({ params }: Params) {
             <OwnerInline
               creatorAddress={(creator.address || null) as `0x${string}` | null}
               creatorId={creator.id}
+              currentAvatar={creator.avatarUrl}
+              currentBio={creator.bio}
             />
           </div>
         </div>
@@ -202,9 +201,7 @@ export default async function CreatorPage({ params }: Params) {
 
       {/* On-chain plans & posts */}
       {hasAddress ? (
-        <OnchainSections
-          creatorAddress={creator.address as `0x${string}`}
-        />
+        <OnchainSections creatorAddress={creator.address as `0x${string}`} />
       ) : (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-medium">On-chain</div>
