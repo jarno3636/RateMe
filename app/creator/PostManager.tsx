@@ -2,12 +2,13 @@
 'use client';
 
 import { useState } from 'react';
-import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { Loader2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useCreatorHub } from '@/hooks/useCreatorHub';
+import { USDC_ADDRESS as DEFAULT_TOKEN } from '@/lib/profileRegistry/constants';
 
 export default function PostManager({ creatorId }: { creatorId: string }) {
-  const { createPost /*, setPostActive, updatePost, ...*/ } = useCreatorHub();
+  const { createPost /* , setPostActive, updatePost, ... */ } = useCreatorHub();
   const [price, setPrice] = useState('');
   const [uri, setUri] = useState('');
   const [accessViaSub, setAccessViaSub] = useState(true);
@@ -16,13 +17,25 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
   async function submit() {
     try {
       setSubmitting(true);
-      const units = Math.round(Number(price || '0') * 1e6); // USDC 6d
-      if (!uri) throw new Error('Add a post URI (IPFS/Arweave/https)');
+
+      if (!uri.trim()) {
+        throw new Error('Add a post URI (IPFS/Arweave/https)');
+      }
+
+      // Convert human price to token units (USDC 6dp). Allow 0 for free posts.
+      const num = Number(price || '0');
+      if (!Number.isFinite(num) || num < 0) {
+        throw new Error('Enter a valid price');
+      }
+      const units = Math.round(num * 1e6);
+
       await createPost({
+        token: DEFAULT_TOKEN as `0x${string}`,
         price: BigInt(units),
-        uri,
+        uri: uri.trim(),
         accessViaSub,
       });
+
       toast.success('Post created');
       setPrice('');
       setUri('');
@@ -53,17 +66,28 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
             onChange={(e) => setUri(e.target.value)}
           />
         </div>
-        <label className="mt-2 inline-flex items-center gap-2 text-sm text-slate-300">
-          <input
-            type="checkbox"
-            checked={accessViaSub}
-            onChange={(e) => setAccessViaSub(e.target.checked)}
-            className="h-4 w-4 rounded border-white/10 bg-white/5"
-          />
-          Accessible via active subscription
-        </label>
+
+        <div className="mt-2 grid gap-3 sm:grid-cols-3 items-center">
+          <label className="inline-flex items-center gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              checked={accessViaSub}
+              onChange={(e) => setAccessViaSub(e.target.checked)}
+              className="h-4 w-4 rounded border-white/10 bg-white/5"
+            />
+            Accessible via active subscription
+          </label>
+          <div className="text-xs text-slate-400 sm:col-span-2">
+            Token: <span className="text-slate-200">USDC (Base)</span>
+          </div>
+        </div>
+
         <div>
-          <button onClick={submit} disabled={submitting} className="btn mt-3 inline-flex items-center">
+          <button
+            onClick={submit}
+            disabled={submitting}
+            className="btn mt-3 inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
+          >
             {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
             Create post
           </button>
