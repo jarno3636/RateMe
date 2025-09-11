@@ -2,19 +2,25 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { SITE } from '@/lib/config'
-import { getCreator, getCreatorByHandle, getRatingSummary, getRecentRatings } from '@/lib/kv'
+import {
+  getCreator,
+  getCreatorByHandle,
+  getRatingSummary,
+  getRecentRatings,
+} from '@/lib/kv'
 import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
 import { Star, ExternalLink } from 'lucide-react'
-import { creatorShareLinks } from '@/lib/farcaster'
 
 import type { Abi, Address } from 'viem'
 import { createPublicClient, http } from 'viem'
 import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
-import OwnerControls from './OwnerControls'
+
+// NEW: inline owner area (client) that renders the dashboard if you’re the owner
+import OwnerInline from './OwnerInline'
 
 type Params = { params: { id: string } }
 
@@ -23,14 +29,21 @@ const SITE_CLEAN = (SITE || 'http://localhost:3000').replace(/\/$/, '')
 
 const pub = createPublicClient({
   chain: base,
-  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL || 'https://mainnet.base.org'),
+  transport: http(
+    process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+      process.env.BASE_RPC_URL ||
+      'https://mainnet.base.org'
+  ),
 })
 
 const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
-const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
+const short = (a?: string | null) =>
+  a ? `${a.slice(0, 6)}…${a.slice(-4)}` : ''
 
-export async function generateMetadata({ params }: Params): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+}: Params): Promise<Metadata> {
   const idParam = params.id.toLowerCase()
   const kv = await getCreator(idParam).catch(() => null)
   const title = kv
@@ -82,7 +95,6 @@ async function fetchOnchainByHandle(handle: string) {
     functionName: 'getProfileByHandle',
     args: [handle],
   })) as any
-
   if (!r?.[0]) return null
   return {
     id: handle,
@@ -100,26 +112,35 @@ export default async function CreatorPage({ params }: Params) {
   const raw = params.id || ''
   const idParam = raw.toLowerCase()
 
+  // KV first (fast path for freshly registered creators)
   let creator =
     (await getCreator(idParam).catch(() => null)) ||
     (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
 
+  // On-chain fallback
   if (!creator) {
     if (isNumericId(idParam)) {
       creator = await fetchOnchainById(BigInt(idParam)).catch(() => null)
     } else {
-      const h = normalizeHandle(idParam)
-      creator = await fetchOnchainByHandle(h).catch(() => null)
+      creator = await fetchOnchainByHandle(normalizeHandle(idParam)).catch(
+        () => null
+      )
     }
   }
 
   if (!creator) return notFound()
 
-  const rating = await getRatingSummary(creator.id).catch(() => ({ count: 0, sum: 0, avg: 0 }))
+  const rating = await getRatingSummary(creator.id).catch(() => ({
+    count: 0,
+    sum: 0,
+    avg: 0,
+  }))
   const recent = await getRecentRatings(creator.id).catch(() => [])
 
   const hasAddress = !!creator.address
-  const avgText = rating.count ? `${rating.avg.toFixed(2)} • ${rating.count} ratings` : 'No ratings yet'
+  const avgText = rating.count
+    ? `${rating.avg.toFixed(2)} • ${rating.count} ratings`
+    : 'No ratings yet'
   const bio =
     (creator.bio || '').toString().slice(0, 280) +
     ((creator.bio || '').length > 280 ? '…' : '')
@@ -130,6 +151,7 @@ export default async function CreatorPage({ params }: Params) {
       <section className="flex flex-col items-center text-center space-y-4">
         {/* Big centered avatar */}
         <div className="h-40 w-40 overflow-hidden rounded-full ring-2 ring-white/10">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={creator.avatarUrl || '/icon-192.png'}
             alt={`${creator.displayName || creator.handle} avatar`}
@@ -143,14 +165,16 @@ export default async function CreatorPage({ params }: Params) {
             <span className="text-base text-slate-400">@{creator.handle}</span>
           </div>
 
-          {bio ? <div className="mt-2 text-sm text-slate-300">{bio}</div> : null}
+          {bio ? (
+            <div className="mt-2 text-sm text-slate-300">{bio}</div>
+          ) : null}
 
           <div className="mt-2 flex justify-center items-center gap-1 text-sm text-slate-400">
             <Star className="h-4 w-4 text-yellow-400" />
             <span>{avgText}</span>
           </div>
 
-          {/* Share row */}
+          {/* One share row + subtle wallet stub */}
           <div className="mt-3 flex flex-wrap justify-center items-center gap-2">
             <ShareBar creatorId={creator.id} handle={creator.handle} />
             {hasAddress && (
@@ -166,21 +190,27 @@ export default async function CreatorPage({ params }: Params) {
             )}
           </div>
 
-          {/* Owner controls */}
-          <div className="mt-3 flex justify-center">
-            <OwnerControls creatorAddress={creator.address as `0x${string}` | null} creatorId={creator.id} />
+          {/* Inline owner area (renders if connected wallet === creator.address) */}
+          <div className="mt-4">
+            <OwnerInline
+              creatorAddress={(creator.address || null) as `0x${string}` | null}
+              creatorId={creator.id}
+            />
           </div>
         </div>
       </section>
 
       {/* On-chain plans & posts */}
       {hasAddress ? (
-        <OnchainSections creatorAddress={creator.address as `0x${string}`} />
+        <OnchainSections
+          creatorAddress={creator.address as `0x${string}`}
+        />
       ) : (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-medium">On-chain</div>
           <p className="mt-1 text-sm text-slate-400">
-            This creator hasn’t connected a wallet yet. Subscriptions and paid posts will show here once they do.
+            This creator hasn’t connected a wallet yet. Subscriptions and paid
+            posts will show here once they do.
           </p>
         </section>
       )}
