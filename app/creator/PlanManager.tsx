@@ -2,29 +2,39 @@
 'use client';
 
 import { useState } from 'react';
-import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { Loader2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useCreatorHub } from '@/hooks/useCreatorHub';
+// Default token = Base USDC (6 decimals)
+import { USDC_ADDRESS as DEFAULT_TOKEN } from '@/lib/profileRegistry/constants';
 
 export default function PlanManager({ creatorId }: { creatorId: string }) {
   const { createPlan /*, setPlanActive, updatePlan, ...*/ } = useCreatorHub();
   const [name, setName] = useState('');
-  const [price, setPrice] = useState(''); // human (auto 6d for USDC; adjust if you support other tokens)
+  const [price, setPrice] = useState(''); // human input; assumed USDC (6dp)
   const [periodDays, setPeriodDays] = useState(30);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     try {
       setSubmitting(true);
-      const units = Math.round(Number(price || '0') * 1e6); // USDC 6 decimals
+
+      // Validate & convert human price -> token units (USDC 6 decimals)
+      const num = Number(price);
+      if (!Number.isFinite(num) || num <= 0) {
+        throw new Error('Enter a valid price');
+      }
+      const units = Math.round(num * 1e6); // 6dp
       if (!units || units < 0) throw new Error('Enter a valid price');
+
       await createPlan({
-        // you may require token address; default to USDC in your hook
-        name: name || 'Plan',
+        token: DEFAULT_TOKEN as `0x${string}`,
+        name: name?.trim() || 'Plan',
         pricePerPeriod: BigInt(units),
-        periodDays,
+        periodDays: Math.max(1, Math.floor(Number(periodDays || 1))),
         metadataURI: '',
       });
+
       toast.success('Plan created');
       setName('');
       setPrice('');
@@ -47,6 +57,9 @@ export default function PlanManager({ creatorId }: { creatorId: string }) {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
+        </div>
+
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <input
             className="rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
             placeholder="Price (USDC)"
@@ -62,12 +75,21 @@ export default function PlanManager({ creatorId }: { creatorId: string }) {
             value={periodDays}
             onChange={(e) => setPeriodDays(Math.max(1, Number(e.target.value || 1)))}
           />
+          <div className="flex items-center text-xs text-slate-400">
+            Token:&nbsp;<span className="text-slate-200">USDC (Base)</span>
+          </div>
         </div>
-        <button onClick={submit} disabled={submitting} className="btn mt-3 inline-flex items-center">
+
+        <button
+          onClick={submit}
+          disabled={submitting}
+          className="btn mt-3 inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
+        >
           {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
           Create plan
         </button>
       </div>
+
       {/* TODO: list existing plans for this creator (read from hub) with enable/disable actions */}
     </section>
   );
