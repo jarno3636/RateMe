@@ -78,7 +78,7 @@ export async function readCanRegister(rawHandle: string): Promise<CanRegister> {
   return { ok, reason };
 }
 
-/** previewCreate(user) -> fee/allowance/balance checks (null if absent) */
+/** previewCreate(user) -> fee/allowance/balance checks (null if absent on old deployments) */
 export async function readPreviewCreate(user: Address): Promise<PreviewCreate | null> {
   try {
     const [balance, allowance, fee, okBalance, okAllowance] = (await readClient.readContract({
@@ -90,7 +90,6 @@ export async function readPreviewCreate(user: Address): Promise<PreviewCreate | 
 
     return { balance, allowance, fee, okBalance, okAllowance };
   } catch {
-    // Older deployments may not have previewCreate
     return null;
   }
 }
@@ -112,7 +111,7 @@ export async function readProfileByHandle(rawHandle: string): Promise<ProfileFla
     string,       // avatarURI
     string,       // bio
     bigint,       // fid
-    bigint        // createdAt (uint64)
+    bigint        // createdAt
   ];
 
   const exists = res?.[0];
@@ -128,6 +127,61 @@ export async function readProfileByHandle(rawHandle: string): Promise<ProfileFla
     fid: res[7],
     createdAt: res[8],
   };
+}
+
+/** ids owned by a wallet address */
+export async function readProfilesByOwner(owner: Address): Promise<bigint[]> {
+  return (await readClient.readContract({
+    address: REG,
+    abi: ABI,
+    functionName: 'getProfilesByOwner',
+    args: [owner],
+  })) as bigint[];
+}
+
+/** getProfilesFlat(ids[]) -> array of flat profiles in the same order as ids */
+export async function readProfilesFlat(ids: bigint[]): Promise<ProfileFlat[]> {
+  if (!ids?.length) return [];
+  const r = (await readClient.readContract({
+    address: REG,
+    abi: ABI,
+    functionName: 'getProfilesFlat',
+    args: [ids],
+  })) as unknown as [
+    bigint[],   // outIds
+    Address[],  // owners
+    string[],   // handles
+    string[],   // displayNames
+    string[],   // avatarURIs
+    string[],   // bios
+    bigint[],   // fids
+    bigint[]    // createdAts
+  ];
+
+  const outIds = r[0] || [];
+  const owners = r[1] || [];
+  const handles = r[2] || [];
+  const displayNames = r[3] || [];
+  const avatarURIs = r[4] || [];
+  const bios = r[5] || [];
+  const fids = r[6] || [];
+  const createdAts = r[7] || [];
+
+  const n = outIds.length;
+  const items: ProfileFlat[] = new Array(n);
+  for (let i = 0; i < n; i++) {
+    items[i] = {
+      id: outIds[i],
+      owner: owners[i],
+      handle: handles[i],
+      displayName: displayNames[i],
+      avatarURI: avatarURIs[i],
+      bio: bios[i],
+      fid: fids[i],
+      createdAt: createdAts[i],
+    };
+  }
+  return items;
 }
 
 /**
