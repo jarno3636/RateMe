@@ -1,9 +1,14 @@
+// components/Header.tsx (or wherever this file lives)
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import { useAccount } from 'wagmi';
+import type { Abi, Address } from 'viem';
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
+import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
 
 const nav = [
   { href: '/', label: 'Home' },
@@ -16,6 +21,46 @@ const nav = [
 
 export default function Header() {
   const [open, setOpen] = useState(false);
+  const { address } = useAccount();
+  const [ownedId, setOwnedId] = useState<string | null>(null);
+  const [checkingOwned, setCheckingOwned] = useState(false);
+
+  // Detect if this wallet already owns a creator profile
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        setCheckingOwned(true);
+        setOwnedId(null);
+        if (!address) return;
+
+        const { readClient } = await import('@/lib/profileRegistry/reads');
+        const ids = (await readClient.readContract({
+          address: REGISTRY_ADDRESS as Address,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'getProfilesByOwner',
+          args: [address as Address],
+        })) as bigint[];
+
+        if (!alive) return;
+        if (ids && ids.length > 0) {
+          setOwnedId(String(ids[0]));
+        } else {
+          setOwnedId(null);
+        }
+      } catch {
+        // ignore RPC hiccups
+        if (alive) setOwnedId(null);
+      } finally {
+        if (alive) setCheckingOwned(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [address]);
+
+  const creatorHref = ownedId ? `/creator/${encodeURIComponent(ownedId)}` : '/creator';
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-slate-950/70 backdrop-blur supports-[backdrop-filter]:bg-slate-950/50">
@@ -25,7 +70,9 @@ export default function Header() {
           <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-fuchsia-500/60 to-cyan-500/60 text-[13px] ring-1 ring-white/20">
             😈
           </span>
-          <span className="tracking-tight group-hover:text-white">Rate<span className="text-cyan-300">Me</span></span>
+          <span className="tracking-tight group-hover:text-white">
+            Rate<span className="text-cyan-300">Me</span>
+          </span>
         </Link>
 
         {/* Desktop nav */}
@@ -44,8 +91,15 @@ export default function Header() {
         {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Wallet */}
-        <div className="hidden md:block">
+        {/* Quick link to creator page (desktop) */}
+        <div className="hidden items-center gap-3 md:flex">
+          <Link
+            href={creatorHref}
+            className="rounded-xl border border-white/10 px-3 py-1.5 text-sm text-slate-200 hover:bg-white/5"
+            aria-busy={checkingOwned}
+          >
+            {ownedId ? 'My creator page' : 'Become a Creator'}
+          </Link>
           <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
         </div>
 
@@ -63,21 +117,31 @@ export default function Header() {
       </div>
 
       {/* Mobile drawer */}
-      <div
-        id="mobile-nav"
-        className={`md:hidden ${open ? 'block' : 'hidden'}`}
-      >
+      <div id="mobile-nav" className={`md:hidden ${open ? 'block' : 'hidden'}`}>
         <div className="space-y-1 border-t border-white/10 px-4 py-3">
-          {nav.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              onClick={() => setOpen(false)}
-              className="block rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5"
-            >
-              {n.label}
-            </Link>
-          ))}
+          {/* Conditionally show creator link first on mobile */}
+          <Link
+            href={creatorHref}
+            onClick={() => setOpen(false)}
+            className="block rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5"
+          >
+            {ownedId ? 'My creator page' : 'Become a Creator'}
+          </Link>
+
+          {nav
+            // avoid duplicating the generic “Become a Creator” item since we already put a contextual one above
+            .filter((n) => n.href !== '/creator')
+            .map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                onClick={() => setOpen(false)}
+                className="block rounded-lg px-3 py-2 text-sm text-slate-200 hover:bg-white/5"
+              >
+                {n.label}
+              </Link>
+            ))}
+
           <div className="mt-2 rounded-lg border border-white/10 bg-white/5 p-3">
             <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
           </div>
