@@ -3,7 +3,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { Loader2, Search, ExternalLink, Share2 } from 'lucide-react'
+import { Loader2, Search, ExternalLink, Share2, Star } from 'lucide-react'
 
 type CreatorRow = {
   id: string
@@ -11,6 +11,7 @@ type CreatorRow = {
   displayName?: string
   avatarUrl?: string
   bio?: string
+  rating?: { count: number; sum: number; avg: number } // <- included when include=rating
 }
 
 const SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
@@ -64,12 +65,11 @@ export default function DiscoverClient({
     setLoading(true)
     setErr(null)
     try {
-      const res = await fetch(`/api/creators?limit=12&cursor=${cursor}`, {
+      const res = await fetch(`/api/creators?limit=12&cursor=${cursor}&include=rating`, {
         headers: { accept: 'application/json' },
         cache: 'no-store',
       })
       const j = await res.json()
-      // Endpoint returns { creators, nextCursor }
       const page: CreatorRow[] = Array.isArray(j?.creators) ? j.creators : []
       setRows((s) => [...s, ...page])
       setCursor(typeof j?.nextCursor === 'number' ? j.nextCursor : null)
@@ -124,6 +124,15 @@ export default function DiscoverClient({
 
                 {c.bio && (
                   <p className="mt-3 line-clamp-3 text-sm text-slate-300">{c.bio}</p>
+                )}
+
+                {/* Rating summary (when include=rating) */}
+                {c.rating && c.rating.count > 0 && (
+                  <div className="mt-2 flex items-center gap-1 text-sm text-slate-400">
+                    <Star className="h-3.5 w-3.5 text-yellow-400" />
+                    <span>{c.rating.avg.toFixed(1)}</span>
+                    <span className="text-xs text-slate-500">({c.rating.count})</span>
+                  </div>
                 )}
 
                 <div className="mt-4 flex gap-2">
