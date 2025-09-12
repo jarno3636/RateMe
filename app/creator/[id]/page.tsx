@@ -12,11 +12,10 @@ import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
 import SubscriptionBadge from '@/components/SubscriptionBadge'
-import EditProfileButton from '@/components/EditProfileButton'
 import { Star, ExternalLink } from 'lucide-react'
 
 import type { Abi, Address } from 'viem'
-import { createPublicClient, http } from 'viem'
+import { createPublicClient, http, isAddress } from 'viem'
 import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
@@ -45,6 +44,75 @@ const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
 const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
+// --- NEW: safe registry address + helpers ---
+const REG_ADDR: Address | undefined =
+  isAddress(REGISTRY_ADDRESS as any) ? (REGISTRY_ADDRESS as Address) : undefined
+
+const isZeroAddr = (a?: string) =>
+  !a || /^0x0{40}$/i.test(a.replace(/^0x/i, ''))
+
+/** Safely read on-chain by numeric id; swallow RPC/ABI errors */
+async function fetchOnchainById(idNum: bigint) {
+  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
+  try {
+    const r = (await pub.readContract({
+      address: REG_ADDR,
+      abi: PROFILE_REGISTRY_ABI as Abi,
+      functionName: 'getProfile',
+      args: [idNum],
+    })) as any
+    if (!r) return null
+
+    const owner = r[0] as Address
+    const handle = String(r[1] || '')
+    const displayName = String(r[2] || '')
+    const avatarUrl = String(r[3] || '')
+    const bio = String(r[4] || '')
+    const fid = Number(BigInt(r[5] || 0))
+    const createdAt = Number(BigInt(r[6] || 0)) * 1000
+
+    return {
+      id: handle || idNum.toString(),
+      handle: handle || idNum.toString(),
+      displayName: displayName || handle || idNum.toString(),
+      avatarUrl,
+      bio,
+      fid,
+      address: owner as `0x${string}`,
+      createdAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Safely read on-chain by handle; swallow RPC/ABI errors */
+async function fetchOnchainByHandle(handle: string) {
+  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
+  try {
+    const r = (await pub.readContract({
+      address: REG_ADDR,
+      abi: PROFILE_REGISTRY_ABI as Abi,
+      functionName: 'getProfileByHandle',
+      args: [handle],
+    })) as any
+    if (!r?.[0]) return null
+
+    return {
+      id: handle,
+      handle,
+      displayName: String(r[4] || handle),
+      avatarUrl: String(r[5] || ''),
+      bio: String(r[6] || ''),
+      fid: Number(BigInt(r[7] || 0)),
+      address: (r[2] || r[3]) as `0x${string}`,
+      createdAt: Number(BigInt(r[8] || 0)) * 1000,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const idParam = params.id.toLowerCase()
   const kv = await getCreator(idParam).catch(() => null)
@@ -62,54 +130,6 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
 }
 
-async function fetchOnchainById(idNum: bigint) {
-  const r = (await pub.readContract({
-    address: REGISTRY_ADDRESS as Address,
-    abi: PROFILE_REGISTRY_ABI as Abi,
-    functionName: 'getProfile',
-    args: [idNum],
-  })) as any
-  if (!r) return null
-  const owner = r[0] as Address
-  const handle = String(r[1] || '')
-  const displayName = String(r[2] || '')
-  const avatarUrl = String(r[3] || '')
-  const bio = String(r[4] || '')
-  const fid = Number(BigInt(r[5] || 0))
-  const createdAt = Number(BigInt(r[6] || 0)) * 1000
-
-  return {
-    id: handle || idNum.toString(),
-    handle: handle || idNum.toString(),
-    displayName: displayName || handle || idNum.toString(),
-    avatarUrl,
-    bio,
-    fid,
-    address: owner as `0x${string}`,
-    createdAt,
-  }
-}
-
-async function fetchOnchainByHandle(handle: string) {
-  const r = (await pub.readContract({
-    address: REGISTRY_ADDRESS as Address,
-    abi: PROFILE_REGISTRY_ABI as Abi,
-    functionName: 'getProfileByHandle',
-    args: [handle],
-  })) as any
-  if (!r?.[0]) return null
-  return {
-    id: handle,
-    handle,
-    displayName: String(r[4] || handle),
-    avatarUrl: String(r[5] || ''),
-    bio: String(r[6] || ''),
-    fid: Number(BigInt(r[7] || 0)),
-    address: (r[2] || r[3]) as `0x${string}`,
-    createdAt: Number(BigInt(r[8] || 0)) * 1000,
-  }
-}
-
 export default async function CreatorPage({ params }: Params) {
   const raw = params.id || ''
   const idParam = raw.toLowerCase()
@@ -119,14 +139,12 @@ export default async function CreatorPage({ params }: Params) {
     (await getCreator(idParam).catch(() => null)) ||
     (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
 
-  // On-chain fallback
+  // On-chain fallback (fully guarded)
   if (!creator) {
     if (isNumericId(idParam)) {
-      creator = await fetchOnchainById(BigInt(idParam)).catch(() => null)
+      creator = await fetchOnchainById(BigInt(idParam))
     } else {
-      creator = await fetchOnchainByHandle(normalizeHandle(idParam)).catch(
-        () => null
-      )
+      creator = await fetchOnchainByHandle(normalizeHandle(idParam))
     }
   }
 
@@ -145,7 +163,7 @@ export default async function CreatorPage({ params }: Params) {
     : 'No ratings yet'
 
   // Cache-bust avatar when updated
-  const updatedAt = Number(creator.updatedAt || 0)
+  const updatedAt = Number((creator as any).updatedAt || 0)
   const avatarBase = creator.avatarUrl || '/icon-192.png'
   const avatarSrc =
     updatedAt && avatarBase.startsWith('http')
@@ -221,22 +239,14 @@ export default async function CreatorPage({ params }: Params) {
             </div>
           </div>
 
-          {/* Owner tools (inline + edit modal launcher) */}
+          {/* Owner tools */}
           <div className="w-full">
-            <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2">
+            <div className="mx-auto max-w-xl">
               <OwnerInline
                 creatorAddress={(creator.address || null) as `0x${string}` | null}
                 creatorId={creator.id}
                 currentAvatar={creator.avatarUrl}
                 currentBio={creator.bio}
-              />
-              <EditProfileButton
-                creatorId={creator.id}
-                currentAvatar={creator.avatarUrl}
-                currentBio={creator.bio}
-                // Revalidation happens server-side; if you want to force a client refresh,
-                // you can wrap this page header in a client component and call router.refresh().
-                onSaved={() => {/* optional hook for client refresh */}}
               />
             </div>
           </div>
