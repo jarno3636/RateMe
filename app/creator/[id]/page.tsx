@@ -157,80 +157,96 @@ export default async function CreatorPage({ params }: Params) {
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
-      {/* Header */}
-      <section className="flex flex-col items-center text-center space-y-4">
-        {/* Big centered avatar */}
-        <div className="h-48 w-48 overflow-hidden rounded-full ring-2 ring-white/10">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={avatarSrc}
-            alt={`${creator.displayName || creator.handle} avatar`}
-            className="h-full w-full object-cover"
-          />
-        </div>
+      {/* ------------------- Polished Header ------------------- */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
+        <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-white/10" />
+        <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-violet-400/10 blur-3xl" />
 
-        <div>
-          <div className="text-2xl font-semibold">
-            {creator.displayName || creator.handle}{' '}
-            <span className="text-base text-slate-400">@{creator.handle}</span>
-          </div>
-
-          {bio ? (
-            <div className="mt-2 text-sm text-slate-300">{bio}</div>
-          ) : null}
-
-          <div className="mt-2 flex justify-center items-center gap-1 text-sm text-slate-400">
-            <Star className="h-4 w-4 text-yellow-400" />
-            <span>{avgText}</span>
-          </div>
-
-          {/* Share + wallet + subscription badge */}
-          <div className="mt-3 flex flex-wrap justify-center items-center gap-2">
-            <ShareBar creatorId={creator.id} handle={creator.handle} />
-            {hasAddress && (
-              <a
-                href={`${BASESCAN}/address/${creator.address}`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center rounded-full border border-white/10 bg-white/5 px-2 py-1 text-xs text-slate-300 hover:bg-white/10"
-                title={creator.address || ''}
-              >
-                {short(creator.address)} <ExternalLink className="ml-1 h-3 w-3" />
-              </a>
-            )}
-            {hasAddress ? (
-              <SubscriptionBadge
-                creatorAddress={creator.address as `0x${string}`}
+        <div className="relative flex flex-col items-center text-center gap-5">
+          {/* Avatar with glow */}
+          <div className="relative">
+            <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-2xl" aria-hidden />
+            <div className="h-40 w-40 overflow-hidden rounded-full ring-2 ring-white/15 shadow-2xl">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarSrc}
+                alt={`${creator.displayName || creator.handle} avatar`}
+                className="h-full w-full object-cover"
               />
+            </div>
+          </div>
+
+          {/* Name / handle / rating */}
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold sm:text-3xl">
+              {creator.displayName || creator.handle}{' '}
+              <span className="text-base font-normal text-slate-400">@{creator.handle}</span>
+            </h1>
+
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.06] px-3 py-1 text-sm text-slate-200">
+              <Star className="h-4 w-4 text-yellow-400" />
+              <span>{avgText}</span>
+            </div>
+
+            {bio ? (
+              <p className="mx-auto max-w-2xl text-sm leading-relaxed text-slate-300">{bio}</p>
             ) : null}
           </div>
 
-          {/* Owner tools (edit profile, plans, posts) */}
-          <div className="mt-4">
-            <OwnerInline
-              creatorAddress={(creator.address || null) as `0x${string}` | null}
-              creatorId={creator.id}
-              currentAvatar={creator.avatarUrl}
-              currentBio={creator.bio}
-            />
+          {/* Actions row: share, address, subscription badge */}
+          <div className="w-full">
+            <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-2">
+              <ShareBar creatorId={creator.id} handle={creator.handle} />
+
+              {hasAddress && (
+                <a
+                  href={`${BASESCAN}/address/${creator.address}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+                  title={creator.address || ''}
+                >
+                  <span className="font-mono">{short(creator.address)}</span>
+                  <ExternalLink className="ml-1 h-3.5 w-3.5 opacity-80" />
+                </a>
+              )}
+
+              {hasAddress ? (
+                <div className="ml-1">
+                  <SubscriptionBadge creatorAddress={creator.address as `0x${string}`} />
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Owner tools */}
+          <div className="w-full">
+            <div className="mx-auto max-w-xl">
+              <OwnerInline
+                creatorAddress={(creator.address || null) as `0x${string}` | null}
+                creatorId={creator.id}
+                currentAvatar={creator.avatarUrl}
+                currentBio={creator.bio}
+              />
+            </div>
           </div>
         </div>
       </section>
 
-      {/* On-chain sections */}
+      {/* ------------------- On-chain sections ------------------- */}
       {hasAddress ? (
         <OnchainSections creatorAddress={creator.address as `0x${string}`} />
       ) : (
         <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <div className="text-sm font-medium">On-chain</div>
           <p className="mt-1 text-sm text-slate-400">
-            This creator hasn’t connected a wallet yet. Subscriptions and paid
-            posts will show here once they do.
+            This creator hasn’t connected a wallet yet. Subscriptions and paid posts will show here once they do.
           </p>
         </section>
       )}
 
-      {/* Ratings */}
+      {/* ------------------- Ratings ------------------- */}
       <section className="grid gap-4 md:grid-cols-2">
         <RateBox creatorId={creator.id} />
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
