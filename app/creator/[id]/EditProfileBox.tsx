@@ -2,6 +2,7 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
 const MAX_BIO_WORDS = 250;
@@ -15,6 +16,7 @@ export default function EditProfileBox({
   currentAvatar?: string | null;
   currentBio?: string | null;
 }) {
+  const router = useRouter();
   const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
   const [bio, setBio] = useState(currentBio || '');
   const [saving, setSaving] = useState(false);
@@ -27,7 +29,6 @@ export default function EditProfileBox({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // quick client-side checks (mirror server)
     if (!file.type.startsWith('image/')) {
       toast.error('Avatar must be an image');
       e.target.value = '';
@@ -47,7 +48,6 @@ export default function EditProfileBox({
       const res = await fetch('/api/upload?kind=avatar', {
         method: 'POST',
         body: fd,
-        // no cache on uploads
       });
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok || !j?.url) {
@@ -81,6 +81,8 @@ export default function EditProfileBox({
         throw new Error(j?.error || `save failed (${res.status})`);
       }
       toast.success('Profile updated');
+      // 🔁 Re-fetch server components so public page reflects changes immediately
+      router.refresh();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update');
     } finally {
@@ -110,7 +112,7 @@ export default function EditProfileBox({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
+                  disabled={uploading || saving}
                   className="btn-secondary text-xs disabled:opacity-60"
                 >
                   {uploading ? 'Uploading…' : 'Upload from device'}
@@ -155,7 +157,7 @@ export default function EditProfileBox({
 
       <button
         onClick={save}
-        disabled={saving}
+        disabled={saving || uploading}
         className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
       >
         {saving ? 'Saving…' : 'Save changes'}
