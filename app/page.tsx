@@ -1,7 +1,7 @@
 // app/page.tsx
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { Sparkles, Shield, Ticket, Timer, Users, Star, ArrowRight } from 'lucide-react'
+import { Sparkles, Shield, Ticket, Timer, Users, Star, ArrowRight, Percent, Zap } from 'lucide-react'
 import CreatorGrid from '@/components/CreatorGrid'
 
 // ---------------- Farcaster config (edge-safe resolution) ----------------
@@ -10,7 +10,7 @@ let MINIAPP_DOMAIN = (() => {
   try { return new URL(SITE).hostname } catch { return 'localhost' }
 })()
 
-// Default Mini App descriptor (will be overridden if lib/farcaster exports it)
+// Default Mini App descriptor (overridden if lib/farcaster exports it)
 let fcMiniApp: { version: string; imageUrl: string; button: any } = {
   version: '1',
   imageUrl: `${SITE}/miniapp-card.png`,
@@ -26,16 +26,13 @@ let fcMiniApp: { version: string; imageUrl: string; button: any } = {
   },
 }
 
-// Try to import centralized Farcaster settings if present
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const far = require('@/lib/farcaster')
   SITE = (far.SITE as string) || SITE
   MINIAPP_DOMAIN = (far.MINIAPP_DOMAIN as string) || MINIAPP_DOMAIN
   if (far.fcMiniApp) fcMiniApp = far.fcMiniApp
-} catch {
-  // optional: ignore if lib/farcaster doesn't exist yet
-}
+} catch { /* optional */ }
 
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
@@ -45,19 +42,18 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE),
   title: 'Rate Me — Creator subscriptions & paid posts on Base',
   description:
-    'Launch subscriptions, paid posts, and custom requests with instant on-chain settlement.',
+    'Subscriptions, paid posts, and custom requests with instant on-chain settlement and just a 1% platform fee.',
   alternates: { canonical: '/' },
   robots: { index: true, follow: true },
   openGraph: {
     title: 'Rate Me — Creator subscriptions & paid posts on Base',
     description:
-      'Launch subscriptions, paid posts, and custom requests with instant on-chain settlement.',
+      'Subscriptions, paid posts, and custom requests with instant on-chain settlement and a 1% fee.',
     url: SITE,
     images: [{ url: `${SITE}/miniapp-card.png`, width: 1200, height: 630 }],
   },
   twitter: { card: 'summary_large_image', images: [`${SITE}/miniapp-card.png`] },
   other: {
-    // Farcaster Frames vNext
     'fc:frame': 'vNext',
     'fc:frame:image': `${SITE}/miniapp-card.png`,
     'fc:frame:post_url': `${SITE}/api/frame?screen=home`,
@@ -67,8 +63,6 @@ export const metadata: Metadata = {
     'fc:frame:button:2:action': 'post',
     'fc:frame:button:3': 'How it Works',
     'fc:frame:button:3:action': 'post',
-
-    // Farcaster Mini App (shown on profile/compose surfaces)
     'fc:miniapp': JSON.stringify(fcMiniApp),
     'fc:miniapp:domain': MINIAPP_DOMAIN,
   },
@@ -100,8 +94,8 @@ export default function Home() {
           </h1>
 
           <p className="mx-auto mt-4 max-w-2xl text-lg leading-relaxed text-slate-300">
-            A premium monetization mini app for creators. Subscriptions, paid posts, and custom
-            requests—settled instantly on-chain.
+            Subscriptions, paid posts, and custom requests — with easy crypto payments and instant
+            on-chain settlement. Keep more: platform fee is just <b>1%</b>.
           </p>
 
           <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
@@ -122,21 +116,26 @@ export default function Home() {
           </div>
 
           {/* quick stats */}
-          <div className="mt-10 grid grid-cols-1 gap-3 text-left md:grid-cols-3">
+          <div className="mt-10 grid grid-cols-1 gap-3 text-left md:grid-cols-4">
             <Stat
-              icon={<Shield className="h-4 w-4" aria-hidden="true" />}
-              label="Trust"
-              value="Non-custodial • Instant payouts"
+              icon={<Percent className="h-4 w-4" aria-hidden="true" />}
+              label="Fees"
+              value="1% platform fee"
+            />
+            <Stat
+              icon={<Zap className="h-4 w-4" aria-hidden="true" />}
+              label="Payouts"
+              value="Instant, on-chain"
             />
             <Stat
               icon={<Ticket className="h-4 w-4" aria-hidden="true" />}
               label="Monetize"
-              value="Subscriptions • Paid posts • Requests"
+              value="Subs • Paid posts • Requests"
             />
             <Stat
-              icon={<Timer className="h-4 w-4" aria-hidden="true" />}
-              label="Speed"
-              value="Fast settlement on Base"
+              icon={<Shield className="h-4 w-4" aria-hidden="true" />}
+              label="Trust"
+              value="Non-custodial receipts"
             />
           </div>
         </div>
@@ -175,7 +174,7 @@ export default function Home() {
         <BadgeCard
           icon={<Timer className="h-4 w-4" aria-hidden="true" />}
           title="Frictionless for fans"
-          desc="Pay once to unlock a post or subscribe to everything—no confusing flows."
+          desc="Pay once to unlock a post or subscribe for everything—no confusing flows."
         />
       </section>
 
@@ -203,7 +202,7 @@ export default function Home() {
           />
           <Step
             n={3}
-            title="Trust"
+            title="Trust & Fees"
             points={[
               'Non-custodial settlement on Base',
               'Transparent receipts on-chain',
@@ -223,7 +222,7 @@ export default function Home() {
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6">
           <h3 className="text-lg font-semibold">For Creators</h3>
           <p className="mt-2 text-slate-300">
-            Set your tiers, publish content, and get paid instantly. No lock-in, no dark patterns.
+            Set your tiers, publish content, and get paid instantly. Keep more with a 1% platform fee.
           </p>
           <div className="mt-4">
             <Link href="/creator" className="btn">Launch your page</Link>
