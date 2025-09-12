@@ -1,97 +1,172 @@
 // app/api/creator/save/route.ts
-import { NextRequest, NextResponse } from 'next/server'
+import { NextResponse } from 'next/server'
+import { kv } from '@vercel/kv'
 import { revalidatePath } from 'next/cache'
-import { ensureCreator, setCreatorAddress } from '@/lib/kv'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
-type PatchBody = Partial<{
-  id: string             // id or handle (any form)
-  handle: string         // optional, normalized inside ensureCreator
-  displayName: string
-  avatarUrl: string
-  bio: string
-  address: `0x${string}` | null
-  fid: number
-}>
+/* ------------------------------- CORS ------------------------------- */
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Cache-Control': 'no-store',
+}
 
-function json(data: unknown, init?: ResponseInit) {
-  return NextResponse.json(data, {
-    headers: { 'cache-control': 'no-store' },
-    ...init,
+export function OPTIONS() {
+  return new NextResponse(null, { status: 204, headers: corsHeaders })
+}
+
+/* ------------------------------ helpers ----------------------------- */
+const isNumeric = (s: string) => /^\d+$/.test(s)
+const MAX_BIO_WORDS = 250
+
+function normalize(s: string) {
+  return String(s || '').trim().toLowerCase()
+}
+function isLikelyUrl(s?: string | null) {
+  if (!s) return false
+  const v = String(s).trim()
+  return /^https?:\/\//i.test(v) || /^ipfs:\/\//i.test(v)
+}
+function guessFromString(s: string) {
+  const t = String(s || '').trim()
+  if (!t) return {}
+  if (isLikelyUrl(t)) return { avatarUrl: t }
+  if (!/\s/.test(t) && t.length <= 64) return { displayName: t }
+  return { bio: t }
+}
+
+/** Resolve a creator id from id or handle (supports legacy storage). */
+async function resolveId(idOrHandle: string): Promise<string | null> {
+  const key = normalize(idOrHandle)
+  if (!key) return null
+
+  // numeric id directly
+  if (isNumeric(key)) {
+    const exists = await kv.exists(`creator:${key}`)
+    return exists ? key : null
+  }
+
+  // handle map
+  const mapped = (await kv.get<string | null>(`handle:${key}`)) || null
+  if (mapped) return mapped
+
+  // legacy: some records used the handle directly as the id
+  const legacy = await kv.exists(`creator:${key}`)
+  return legacy ? key : null
+}
+
+/** Ensure creator:{id} is a hash; migrate legacy plain values if needed. */
+async function ensureHashKey(creatorId: string): Promise<void> {
+  const key = `creator:${creatorId}`
+
+  // Already a hash?
+  const asHash = await kv.hgetall<Record<string, unknown>>(key)
+  if (asHash && Object.keys(asHash).length > 0) return
+
+  // Maybe a plain value (legacy)
+  const raw = await kv.get(key)
+  if (raw == null) return
+
+  const now = Date.now()
+  let patch: any = {}
+  if (typeof raw === 'string') patch = guessFromString(raw)
+  else if (typeof raw === 'object' && raw) patch = { ...raw }
+  else return
+
+  // Rewrite as normalized hash
+  await kv.del(key)
+  await kv.hset(key, {
+    id: creatorId,
+    handle: (patch.handle || creatorId)?.toString().toLowerCase(),
+    displayName: patch.displayName || creatorId,
+    avatarUrl: patch.avatarUrl || '',
+    bio: patch.bio || '',
+    address: patch.address || '',
+    fid: Number(patch.fid || 0),
+    createdAt: Number(patch.createdAt || now),
+    updatedAt: now,
   })
 }
 
-const MAX_BIO_WORDS = 250
-function tooLongBio(bio?: string) {
-  if (!bio) return false
-  const words = bio.trim().split(/\s+/).filter(Boolean)
-  return words.length > MAX_BIO_WORDS
-}
-function isLikelyUrl(u?: string | null) {
-  if (!u) return false
-  const v = String(u).trim()
-  return /^https?:\/\//i.test(v) || /^ipfs:\/\//i.test(v)
-}
-
-export async function POST(req: NextRequest) {
+/* -------------------------------- POST ------------------------------ */
+/**
+ * POST /api/creator/save
+ * Body: { id: string | handle, bio?: string, avatarUrl?: string }
+ */
+export async function POST(req: Request) {
   try {
-    const body = (await req.json().catch(() => ({}))) as PatchBody
-    const source = (body.id || body.handle || '').trim()
-    if (!source) return json({ ok: false, error: 'Missing id or handle' }, { status: 400 })
+    const { id, bio, avatarUrl } = await req.json()
 
-    // 1) Ensure creator exists & get canonical id + record (migrates legacy keys)
-    const { id, creator } = await ensureCreator(source)
+    if (!id) {
+      return NextResponse.json(
+        { ok: false, error: 'Missing id' },
+        { status: 400, headers: corsHeaders }
+      )
+    }
 
-    // 2) Validate patch fields
+    const creatorId = await resolveId(id)
+    if (!creatorId) {
+      return NextResponse.json(
+        { ok: false, error: 'Creator not found' },
+        { status: 404, headers: corsHeaders }
+      )
+    }
+
+    // Make sure storage is normalized
+    await ensureHashKey(creatorId)
+
+    // Validate patch
     const patch: Record<string, unknown> = {}
-
-    if (typeof body.displayName === 'string' && body.displayName.trim()) {
-      patch.displayName = body.displayName.trim().slice(0, 64)
-    }
-
-    if (typeof body.avatarUrl === 'string') {
-      const a = body.avatarUrl.trim()
-      if (a && !isLikelyUrl(a)) {
-        return json({ ok: false, error: 'Avatar URL must be http(s) or ipfs' }, { status: 400 })
+    if (typeof bio === 'string') {
+      const words = bio.trim().split(/\s+/).filter(Boolean)
+      if (words.length > MAX_BIO_WORDS) {
+        return NextResponse.json(
+          { ok: false, error: `Bio must be ${MAX_BIO_WORDS} words or less` },
+          { status: 400, headers: corsHeaders }
+        )
       }
-      if (a.length > 1024) {
-        return json({ ok: false, error: 'Avatar URL too long' }, { status: 400 })
+      patch.bio = bio
+    }
+    if (typeof avatarUrl === 'string') {
+      if (avatarUrl && avatarUrl.length > 1024) {
+        return NextResponse.json(
+          { ok: false, error: 'Avatar URL too long' },
+          { status: 400, headers: corsHeaders }
+        )
       }
-      patch.avatarUrl = a
-    }
-
-    if (typeof body.bio === 'string') {
-      if (tooLongBio(body.bio)) {
-        return json({ ok: false, error: `Bio must be ${MAX_BIO_WORDS} words or less` }, { status: 400 })
+      if (avatarUrl && !isLikelyUrl(avatarUrl)) {
+        return NextResponse.json(
+          { ok: false, error: 'Avatar URL must be http(s) or ipfs' },
+          { status: 400, headers: corsHeaders }
+        )
       }
-      patch.bio = body.bio
+      patch.avatarUrl = avatarUrl
     }
 
-    if (typeof body.fid === 'number' && Number.isFinite(body.fid)) {
-      patch.fid = Math.max(0, Math.floor(body.fid))
+    if (Object.keys(patch).length === 0) {
+      return NextResponse.json(
+        { ok: false, error: 'Nothing to update' },
+        { status: 400, headers: corsHeaders }
+      )
     }
 
-    // 3) Optional: address update keeps owner index in sync
-    if (typeof body.address !== 'undefined') {
-      await setCreatorAddress(id, body.address as `0x${string}` | null)
-    }
+    patch.updatedAt = Date.now()
+    await kv.hset(`creator:${creatorId}`, patch)
 
-    // If nothing else to change, we’re done (address might have been updated)
-    if (Object.keys(patch).length) {
-      patch.updatedAt = Date.now()
-      // kv.hset is inside ensureCreator’s normalized keyspace, so we can write directly
-      const { kv } = await import('@vercel/kv')
-      await kv.hset(`creator:${id}`, patch)
-    }
+    // Revalidate both /creator/:id and /creator/:handle
+    revalidatePath(`/creator/${creatorId}`)
+    const cur = await kv.hgetall<Record<string, string>>(`creator:${creatorId}`)
+    const handle = cur?.handle?.toLowerCase?.()
+    if (handle) revalidatePath(`/creator/${handle}`)
 
-    // 4) Revalidate canonical paths (by id and by handle)
-    revalidatePath(`/creator/${id}`)
-    const nextHandle = (patch.displayName ? creator.handle : creator.handle) || creator.handle
-    if (nextHandle) revalidatePath(`/creator/${nextHandle.toLowerCase()}`)
-
-    return json({ ok: true })
+    return NextResponse.json({ ok: true }, { headers: corsHeaders })
   } catch (e: any) {
-    return json({ ok: false, error: e?.message || 'Save failed' }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: e?.message || 'Update failed' },
+      { status: 500, headers: corsHeaders }
+    )
   }
 }
