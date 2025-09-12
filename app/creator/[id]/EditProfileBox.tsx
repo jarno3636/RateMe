@@ -1,31 +1,52 @@
 // app/creator/[id]/EditProfileBox.tsx
 'use client';
 
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
 const MAX_BIO_WORDS = 250;
 
+function withVersion(url: string, v?: number) {
+  if (!url) return url;
+  if (!/^https?:\/\//i.test(url)) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}v=${v ?? Date.now()}`;
+}
+
 export default function EditProfileBox({
   creatorId,
   currentAvatar,
   currentBio,
-  onSaved, // <-- added
+  onSaved,
 }: {
   creatorId: string;
   currentAvatar?: string | null;
   currentBio?: string | null;
-  onSaved?: () => void; // <-- added
+  onSaved?: () => void;
 }) {
   const router = useRouter();
+
+  // Collapsed by default
+  const [open, setOpen] = useState(false);
+
+  // Editable state
   const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
   const [bio, setBio] = useState(currentBio || '');
+
+  // Ops state
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  const [avatarVersion, setAvatarVersion] = useState<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const wordCount = bio.trim().split(/\s+/).filter(Boolean).length;
+
+  const previewSrc = useMemo(
+    () => withVersion(avatarUrl || '/icon-192.png', avatarVersion),
+    [avatarUrl, avatarVersion]
+  );
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -56,6 +77,8 @@ export default function EditProfileBox({
         throw new Error(j?.error || `upload failed (${res.status})`);
       }
       setAvatarUrl(j.url);
+      // version bump for cache-bust while editing
+      setAvatarVersion(Date.now());
       toast.success('Avatar uploaded');
     } catch (err: any) {
       toast.error(err?.message || 'Upload failed');
@@ -82,11 +105,22 @@ export default function EditProfileBox({
       if (!res.ok || !j?.ok) {
         throw new Error(j?.error || `save failed (${res.status})`);
       }
+
+      // If API returned the updated creator, use it for instant UI update
+      const updated = j.creator as
+        | { avatarUrl?: string; bio?: string; updatedAt?: number }
+        | undefined;
+
+      if (updated?.avatarUrl) setAvatarUrl(updated.avatarUrl);
+      if (typeof updated?.bio === 'string') setBio(updated.bio);
+      // bump version with server's updatedAt so the header image picks up immediately
+      if (updated?.updatedAt) setAvatarVersion(Number(updated.updatedAt));
       toast.success('Profile updated');
 
-      // refresh server components and notify parent (if provided)
+      // Close editor, refresh RSC, and notify parent if needed
+      setOpen(false);
       router.refresh();
-      onSaved?.(); // <-- added
+      onSaved?.();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update');
     } finally {
@@ -95,75 +129,102 @@ export default function EditProfileBox({
   };
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
-      <div className="text-sm font-medium">Edit profile</div>
+    <section className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+      {/* Header row with toggle */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-cyan-200">Manage your profile</div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs text-cyan-50 hover:bg-cyan-300/20"
+        >
+          {open ? 'Close' : 'Edit profile'}
+        </button>
+      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* Avatar upload & URL */}
-        <div>
-          <label className="text-xs text-slate-400">Profile photo</label>
-          <div className="mt-2 flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={avatarUrl || '/icon-192.png'}
-              alt="avatar preview"
-              className="h-16 w-16 rounded-full object-cover ring-1 ring-white/10"
-            />
-            <div className="flex-1">
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || saving}
-                  className="btn-secondary text-xs disabled:opacity-60"
-                >
-                  {uploading ? 'Uploading…' : 'Upload from device'}
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={handleAvatarFile}
+      {!open ? null : (
+        <div className="mt-4 space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Avatar upload & URL */}
+            <div>
+              <label className="text-xs text-slate-300">Profile photo</label>
+              <div className="mt-2 flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewSrc}
+                  alt="avatar preview"
+                  className="h-16 w-16 rounded-full object-cover ring-1 ring-white/10"
                 />
-              </div>
+                <div className="flex-1">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading || saving}
+                      className="btn-secondary text-xs disabled:opacity-60"
+                    >
+                      {uploading ? 'Uploading…' : 'Upload from device'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarFile}
+                    />
+                  </div>
 
-              <input
-                className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
-                placeholder="https://... or ipfs://..."
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
+                  <input
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
+                    placeholder="https://... or ipfs://..."
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Use a direct image link or upload (PNG/JPG/GIF/WebP ≤ 10 MB).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bio */}
+            <div>
+              <label className="text-xs text-slate-300">Bio (max 250 words)</label>
+              <textarea
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
+                rows={4}
+                placeholder="Tell fans what you offer"
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
               />
-              <p className="mt-1 text-[11px] text-slate-400">
-                Use a direct image link or upload (PNG/JPG/GIF/WebP ≤ 10 MB).
+              <p
+                className={`mt-1 text-[11px] ${
+                  wordCount > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'
+                }`}
+              >
+                {wordCount}/{MAX_BIO_WORDS} words
               </p>
             </div>
           </div>
-        </div>
 
-        {/* Bio */}
-        <div>
-          <label className="text-xs text-slate-400">Bio (max 250 words)</label>
-          <textarea
-            className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
-            rows={4}
-            placeholder="Tell fans what you offer"
-            value={bio}
-            onChange={(e) => setBio(e.target.value)}
-          />
-          <p className={`mt-1 text-[11px] ${wordCount > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'}`}>
-            {wordCount}/{MAX_BIO_WORDS} words
-          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={save}
+              disabled={saving || uploading}
+              className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </div>
         </div>
-      </div>
-
-      <button
-        onClick={save}
-        disabled={saving || uploading}
-        className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {saving ? 'Saving…' : 'Save changes'}
-      </button>
-    </div>
+      )}
+    </section>
   );
 }
