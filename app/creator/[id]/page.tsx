@@ -198,8 +198,11 @@ export default async function CreatorPage({ params }: Params) {
                 {short(creator.address)} <ExternalLink className="ml-1 h-3 w-3" />
               </a>
             )}
-            {/* lights up after SubscribeButton dispatches rm:subscribed */}
-            {hasAddress ? <SubscriptionBadge /> : null}
+            {hasAddress ? (
+              <SubscriptionBadge
+                creatorAddress={creator.address as `0x${string}`}
+              />
+            ) : null}
           </div>
 
           {/* Owner tools (edit profile, plans, posts) */}
@@ -214,7 +217,7 @@ export default async function CreatorPage({ params }: Params) {
         </div>
       </section>
 
-      {/* On-chain sections (plans + posts rendered with SafeMedia/PaidPostCard/AccessBadge inside) */}
+      {/* On-chain sections */}
       {hasAddress ? (
         <OnchainSections creatorAddress={creator.address as `0x${string}`} />
       ) : (
