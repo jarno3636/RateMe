@@ -24,6 +24,7 @@ export default function EditProfileBox({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const wordCount = bio.trim().split(/\s+/).filter(Boolean).length;
+  const overLimit = wordCount > MAX_BIO_WORDS;
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -65,12 +66,12 @@ export default function EditProfileBox({
 
   const save = async () => {
     try {
-      if (wordCount > MAX_BIO_WORDS) {
+      if (overLimit) {
         throw new Error(`Bio must be ${MAX_BIO_WORDS} words or less`);
       }
 
       setSaving(true);
-      const res = await fetch('/api/creator/update', {
+      const res = await fetch('/api/creator/save', {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         cache: 'no-store',
@@ -81,7 +82,7 @@ export default function EditProfileBox({
         throw new Error(j?.error || `save failed (${res.status})`);
       }
       toast.success('Profile updated');
-      // 🔁 Re-fetch server components so public page reflects changes immediately
+      // Re-fetch server components so public page reflects changes immediately
       router.refresh();
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update');
@@ -149,7 +150,7 @@ export default function EditProfileBox({
             value={bio}
             onChange={(e) => setBio(e.target.value)}
           />
-          <p className={`mt-1 text-[11px] ${wordCount > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'}`}>
+          <p className={`mt-1 text-[11px] ${overLimit ? 'text-red-400' : 'text-slate-400'}`}>
             {wordCount}/{MAX_BIO_WORDS} words
           </p>
         </div>
@@ -157,7 +158,7 @@ export default function EditProfileBox({
 
       <button
         onClick={save}
-        disabled={saving || uploading}
+        disabled={saving || uploading || overLimit}
         className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
       >
         {saving ? 'Saving…' : 'Save changes'}
