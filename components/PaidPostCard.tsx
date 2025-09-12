@@ -1,4 +1,3 @@
-// components/PaidPostCard.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -24,10 +23,10 @@ function parseHints(uri: string) {
 export default function PaidPostCard({
   creatorAddress,
   postId,
-  priceUSDC,               // number in USDC (e.g., 1.00)
-  rawUri,                  // stored URI (may contain rm_preview/rm_blur)
+  priceUSDC,
+  rawUri,
   alsoViaSub,
-  onChanged,               // call after a successful purchase to refresh
+  onChanged,
 }: {
   creatorAddress: `0x${string}`;
   postId: bigint;
@@ -59,13 +58,9 @@ export default function PaidPostCard({
   }
 
   useEffect(() => {
-    let alive = true;
     (async () => {
       await refreshAccess();
     })();
-    return () => {
-      alive = false;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, creatorAddress, postId]);
 
@@ -80,10 +75,9 @@ export default function PaidPostCard({
     onChanged?.();
   }
 
-  const priceLabel =
-    Number.isFinite(priceUSDC)
-      ? `${priceUSDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
-      : `${priceUSDC} USDC`;
+  const priceLabel = Number.isFinite(priceUSDC)
+    ? `${priceUSDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
+    : `${priceUSDC} USDC`;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -101,7 +95,7 @@ export default function PaidPostCard({
             )}
           </div>
         ) : (
-          <div className={hints.blur && !canAccess ? 'blur-md select-none' : ''}>
+          <div className={hints.blur && !canAccess ? 'blur-4xl select-none' : ''}>
             <SafeMedia src={mediaSrc} />
           </div>
         )}
@@ -115,19 +109,13 @@ export default function PaidPostCard({
 
       {/* Footer */}
       <div className="mt-3">
-        {/* Hide raw URI from the page but keep it accessible for screen readers */}
         <span className="sr-only">{hints.base}</span>
-
         <div className="text-xs text-slate-400">
-          {priceLabel}{alsoViaSub ? ' • also via subscription' : ''}
+          {priceLabel}
+          {alsoViaSub ? ' • also via subscription' : ''}
         </div>
-
         {!canAccess && (
-          <button
-            className="btn mt-3"
-            onClick={onBuy}
-            disabled={checking}
-          >
+          <button className="btn mt-3" onClick={onBuy} disabled={checking}>
             Buy Post
           </button>
         )}
