@@ -42,12 +42,15 @@ function req<T>(v: T | undefined, msg: string): T {
 
 export function useCreatorHub() {
   const { address, chainId } = useAccount();
-  const pub = usePublicClient();
+
+  // Pin a public client to Base for **all reads & sims** so we don’t
+  // accidentally read the wrong chain if the user is connected elsewhere.
+  const pubBase = usePublicClient({ chainId: BASE_CHAIN_ID });
   const { data: wallet } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
 
   // ---------- guards ----------
-  const assertPub = () => req(pub, 'Public client unavailable');
+  const assertPub = () => req(pubBase, 'Public client unavailable');
   const assertWallet = () => req(wallet, 'Connect wallet');
   const assertHubAddr = () => {
     if (!HUB_ADDR || HUB_ADDR === ZERO) throw new Error('CreatorHub address not configured');
@@ -58,9 +61,9 @@ export function useCreatorHub() {
     if (chainId !== BASE_CHAIN_ID) {
       await switchChainAsync?.({ chainId: BASE_CHAIN_ID });
     }
-  }, [chainId, switchChainAsync, wallet]);
+  }, [chainId, switchChainAsync]);
 
-  // Generic simulate → write → wait
+  // Generic simulate → write → wait (always against Base)
   const send = useCallback(
     async <TArgs extends unknown[]>(
       fn: keyof any,
@@ -71,6 +74,7 @@ export function useCreatorHub() {
       await ensureBase();
       const _pub = assertPub();
       const _wal = assertWallet();
+
       const { request } = await _pub.simulateContract({
         address: HUB_ADDR,
         abi: HUB_ABI,
@@ -78,15 +82,16 @@ export function useCreatorHub() {
         args: args as any,
         account: _wal.account,
         value: opts?.value,
-        chain: _pub.chain,
+        chain: _pub.chain, // <- Base
       });
+
       const hash = await _wal.writeContract(request);
       return _pub.waitForTransactionReceipt({ hash });
     },
-    [pub, wallet, ensureBase]
+    [ensureBase] // _pub and _wal are derived inside via guards
   );
 
-  // ---------- Reads ----------
+  // ---------- Reads (pinned to Base) ----------
   const readPlan = useCallback(async (id: bigint): Promise<Plan> => {
     assertHubAddr();
     const _pub = assertPub();
@@ -106,7 +111,7 @@ export function useCreatorHub() {
       name: p[5],
       metadataURI: p[6],
     };
-  }, [pub]);
+  }, []);
 
   const readPost = useCallback(async (id: bigint): Promise<Post> => {
     assertHubAddr();
@@ -126,7 +131,7 @@ export function useCreatorHub() {
       accessViaSub: p[4],
       uri: p[5],
     };
-  }, [pub]);
+  }, []);
 
   const hasPostAccess = useCallback(async (user: Address, postId: bigint) => {
     assertHubAddr();
@@ -137,7 +142,7 @@ export function useCreatorHub() {
       functionName: 'hasPostAccess',
       args: [user, postId],
     })) as boolean;
-  }, [pub]);
+  }, []);
 
   const isActive = useCallback(async (user: Address, creator: Address) => {
     assertHubAddr();
@@ -148,7 +153,7 @@ export function useCreatorHub() {
       functionName: 'isActive',
       args: [user, creator],
     })) as boolean;
-  }, [pub]);
+  }, []);
 
   const getCreatorPlanIds = useCallback(async (creator: Address) => {
     assertHubAddr();
@@ -159,7 +164,7 @@ export function useCreatorHub() {
       functionName: 'getCreatorPlanIds',
       args: [creator],
     })) as bigint[];
-  }, [pub]);
+  }, []);
 
   const getCreatorPostIds = useCallback(async (creator: Address) => {
     assertHubAddr();
@@ -170,13 +175,15 @@ export function useCreatorHub() {
       functionName: 'getCreatorPostIds',
       args: [creator],
     })) as bigint[];
-  }, [pub]);
+  }, []);
 
-  // ---------- ERC20 helper ----------
+  // ---------- ERC20 helper (pinned to Base) ----------
   const ensureAllowance = useCallback(
     async (token: Address, owner: Address, spender: Address, needed: bigint, opts?: { infinite?: boolean }) => {
+      if (token === ZERO) return; // native token: no allowance
       const _pub = assertPub();
       const _wal = assertWallet();
+
       const current = (await _pub.readContract({
         address: token,
         abi: erc20Abi,
@@ -198,7 +205,7 @@ export function useCreatorHub() {
       const hash = await _wal.writeContract(request);
       await _pub.waitForTransactionReceipt({ hash });
     },
-    [pub, wallet]
+    []
   );
 
   // ---------- Writes ----------
