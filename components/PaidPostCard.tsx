@@ -23,10 +23,10 @@ function parseHints(uri: string) {
 export default function PaidPostCard({
   creatorAddress,
   postId,
-  priceUSDC,
-  rawUri,
+  priceUSDC,               // number in USDC (e.g., 1.00)
+  rawUri,                  // stored URI (may contain rm_preview/rm_blur)
   alsoViaSub,
-  onChanged,
+  onChanged,               // call after a successful purchase to refresh
 }: {
   creatorAddress: `0x${string}`;
   postId: bigint;
@@ -58,9 +58,13 @@ export default function PaidPostCard({
   }
 
   useEffect(() => {
+    let alive = true;
     (async () => {
       await refreshAccess();
     })();
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, creatorAddress, postId]);
 
@@ -76,8 +80,13 @@ export default function PaidPostCard({
   }
 
   const priceLabel = Number.isFinite(priceUSDC)
-    ? `${priceUSDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
+    ? `${priceUSDC.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      })} USDC`
     : `${priceUSDC} USDC`;
+
+  const isBlurred = hints.blur && !canAccess && !showGrey;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -95,11 +104,21 @@ export default function PaidPostCard({
             )}
           </div>
         ) : (
-          <div className={hints.blur && !canAccess ? 'blur-4xl select-none' : ''}>
+          <div className={isBlurred ? 'blur-4xl select-none' : ''}>
             <SafeMedia src={mediaSrc} />
           </div>
         )}
 
+        {/* Overlay badge when blurred/locked (but not for the grey stub) */}
+        {isBlurred && (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide">
+              Locked
+            </span>
+          </div>
+        )}
+
+        {/* Purchased chip */}
         {canAccess && (
           <div className="absolute left-3 top-3 inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-200 text-xs ring-1 ring-emerald-500/30">
             <CheckCircle className="h-3.5 w-3.5" /> Purchased
@@ -109,11 +128,14 @@ export default function PaidPostCard({
 
       {/* Footer */}
       <div className="mt-3">
+        {/* Keep URI hidden from the page */}
         <span className="sr-only">{hints.base}</span>
+
         <div className="text-xs text-slate-400">
           {priceLabel}
           {alsoViaSub ? ' • also via subscription' : ''}
         </div>
+
         {!canAccess && (
           <button className="btn mt-3" onClick={onBuy} disabled={checking}>
             Buy Post
