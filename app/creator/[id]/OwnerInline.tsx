@@ -5,6 +5,7 @@ import { useAccount } from 'wagmi'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import type { Address } from 'viem'
+import { getAddress } from 'viem'
 import EditProfileBox from './EditProfileBox'
 
 // Lazy-load the dashboard (plans/posts)
@@ -31,8 +32,14 @@ export default function OwnerInline({
   const { address } = useAccount()
   if (!creatorAddress || !address) return null
 
-  const isOwner =
-    creatorAddress.toLowerCase() === (address as Address).toLowerCase()
+  // Checksum-safe comparison
+  let isOwner = false
+  try {
+    isOwner =
+      getAddress(creatorAddress as Address) === getAddress(address as Address)
+  } catch {
+    isOwner = false
+  }
   if (!isOwner) return null
 
   return (
@@ -91,17 +98,16 @@ export default function OwnerInline({
             <div className="mt-2 text-xs leading-relaxed text-slate-300">
               <ul className="list-disc space-y-1 pl-4">
                 <li>
-                  Upload your content (image/video/file) and paste its URI (e.g., ipfs:// or https://).
+                  Paste your content URI (image/video/file) — e.g., <code>ipfs://</code> or <code>https://</code>.
                 </li>
                 <li>
-                  Set a price (USDC) or set price to <strong>0</strong> for a free post.
+                  Set a price (USDC) or use <strong>0</strong> for a free post.
                 </li>
                 <li>
-                  Toggle <em>Accessible via active subscription</em> if you want subs to view without paying per-post.
+                  Toggle <em>Accessible via active subscription</em> to let subs view without per-post payments.
                 </li>
                 <li>
-                  Add a short <em>preview</em> image/text in the post body and mark the main content as <em>blurred</em>.
-                  Non-payers see the preview and a blurred overlay; payers/subs see it unblurred.
+                  Add <code>#rm_preview=...</code> to the URI for a teaser and <code>#rm_blur=1</code> to blur locked content.
                 </li>
               </ul>
             </div>
