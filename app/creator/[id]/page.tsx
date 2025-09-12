@@ -12,6 +12,7 @@ import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
 import SubscriptionBadge from '@/components/SubscriptionBadge'
+import EditProfileButton from '@/components/EditProfileButton'
 import { Star, ExternalLink } from 'lucide-react'
 
 import type { Abi, Address } from 'viem'
@@ -220,14 +221,22 @@ export default async function CreatorPage({ params }: Params) {
             </div>
           </div>
 
-          {/* Owner tools */}
+          {/* Owner tools (inline + edit modal launcher) */}
           <div className="w-full">
-            <div className="mx-auto max-w-xl">
+            <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2">
               <OwnerInline
                 creatorAddress={(creator.address || null) as `0x${string}` | null}
                 creatorId={creator.id}
                 currentAvatar={creator.avatarUrl}
                 currentBio={creator.bio}
+              />
+              <EditProfileButton
+                creatorId={creator.id}
+                currentAvatar={creator.avatarUrl}
+                currentBio={creator.bio}
+                // Revalidation happens server-side; if you want to force a client refresh,
+                // you can wrap this page header in a client component and call router.refresh().
+                onSaved={() => {/* optional hook for client refresh */}}
               />
             </div>
           </div>
