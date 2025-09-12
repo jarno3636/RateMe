@@ -2,82 +2,75 @@
 'use client';
 
 import { useState } from 'react';
+import { X, Pencil } from 'lucide-react';
+import EditProfileBox from '@/app/creator/[id]/EditProfileBox';
 
-export default function EditProfileButton({ creatorId, currentBio, currentAvatar }: {
+export default function EditProfileButton({
+  creatorId,
+  currentAvatar,
+  currentBio,
+  onSaved, // optional callback
+}: {
   creatorId: string;
-  currentBio?: string;
-  currentAvatar?: string;
+  currentAvatar?: string | null;
+  currentBio?: string | null;
+  onSaved?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [bio, setBio] = useState(currentBio || '');
-  const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  async function onSave() {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await fetch('/api/creator/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: creatorId, bio, avatarUrl }),
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Failed to save');
-      setOpen(false);
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setSaving(false);
-    }
-  }
+  // We'll let EditProfileBox do the saving/refresh.
+  // If you want to run extra client logic after save, pass onSaved.
+  const handleSaved = () => {
+    onSaved?.();
+    setOpen(false);
+  };
 
   return (
     <>
       <button
+        type="button"
+        className="btn inline-flex items-center"
         onClick={() => setOpen(true)}
-        className="btn"
+        aria-haspopup="dialog"
+        aria-expanded={open}
       >
-        Edit Profile
+        <Pencil className="h-4 w-4" />
+        Edit profile
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="w-full max-w-md rounded-2xl bg-slate-900 p-6 shadow-lg">
-            <h2 className="text-lg font-semibold mb-4">Edit Profile</h2>
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        >
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setOpen(false)}
+          />
 
-            <label className="block text-sm mb-2">Avatar URL</label>
-            <input
-              type="text"
-              value={avatarUrl}
-              onChange={(e) => setAvatarUrl(e.target.value)}
-              className="w-full rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-sm mb-4"
-              placeholder="https://..."
-            />
-
-            <label className="block text-sm mb-2">Bio</label>
-            <textarea
-              value={bio}
-              onChange={(e) => setBio(e.target.value)}
-              className="w-full rounded-md border border-white/10 bg-slate-800 px-3 py-2 text-sm mb-4"
-              rows={4}
-            />
-
-            {error && <p className="text-sm text-rose-400 mb-3">{error}</p>}
-
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setOpen(false)} className="btn-secondary">
-                Cancel
-              </button>
+          {/* Modal card */}
+          <div className="relative z-[61] w-full max-w-2xl rounded-2xl border border-white/10 bg-slate-950 p-4 shadow-2xl">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-medium">Edit profile</h3>
               <button
-                onClick={onSave}
-                className="btn"
-                disabled={saving}
+                className="btn-secondary p-1"
+                onClick={() => setOpen(false)}
+                aria-label="Close"
               >
-                {saving ? 'Saving…' : 'Save'}
+                <X className="h-4 w-4" />
               </button>
             </div>
+
+            {/* We reuse your editor. It already calls router.refresh() on success. */}
+            <EditProfileBox
+              creatorId={creatorId}
+              currentAvatar={currentAvatar}
+              currentBio={currentBio}
+              // Patch: add this optional prop in EditProfileBox (see below)
+              onSaved={handleSaved}
+            />
           </div>
         </div>
       )}
