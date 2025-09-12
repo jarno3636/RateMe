@@ -7,7 +7,7 @@ import { usePublicClient } from 'wagmi';
 import { CREATOR_HUB_ABI, CREATOR_HUB_ADDR } from '@/lib/creatorHub';
 import SubscribeButton from './SubscribeButton';
 import BuyPostButton from './BuyPostButton';
-import AccessBadge from './AccessBadge';
+// import AccessBadge from './AccessBadge'; // ⬅ removed (prop mismatch)
 import SafeMedia from './SafeMedia';
 import { Loader2, RefreshCw } from 'lucide-react';
 
@@ -42,7 +42,6 @@ const ERC20_MINI_ABI = [
 ] as const satisfies Abi;
 
 function parseContentHints(u: string) {
-  // Supports: ipfs://...#rm_preview=<url>&rm_blur=1
   try {
     const [base, hash = ''] = u.split('#');
     const qs = new URLSearchParams(hash);
@@ -65,7 +64,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
 
   const hubAddr = CREATOR_HUB_ADDR as Address;
 
-  // Thin wrapper to avoid TS deep type instantiation from viem's multicall
   const mc = useCallback(
     async (contracts: any[]) => {
       if (!contracts.length) return [] as any[];
@@ -94,7 +92,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
         throw new Error('CreatorHub address not configured');
       }
 
-      // 1) Read IDs
       const [planIds, postIds] = await Promise.all([
         pub.readContract({
           address: hubAddr,
@@ -110,7 +107,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
         }) as Promise<bigint[]>,
       ]);
 
-      // 2) Multicall to fetch plan/post structs
       const planCalls = planIds.map((id) => ({
         address: hubAddr,
         abi: CREATOR_HUB_ABI as Abi,
@@ -157,7 +153,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       setPlans(activePlans);
       setPosts(activePosts);
 
-      // 3) Token meta
       const uniqueTokens = Array.from(
         new Set(
           [...activePlans.map((p) => p.token), ...activePosts.map((p) => p.token)].filter((a) =>
@@ -214,7 +209,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
   const fmtAmount = useCallback(
     (amount: bigint, token: Address) => {
       const meta = tokenMeta[token?.toLowerCase?.() as string];
-      const decimals = meta?.decimals ?? 6; // default to 6 if unknown
+      const decimals = meta?.decimals ?? 6;
       const sym = meta?.symbol ?? '';
       const asNum = Number(amount) / Math.pow(10, decimals);
       return `${asNum.toLocaleString(undefined, { maximumFractionDigits: Math.min(6, decimals) })}${
@@ -225,8 +220,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
   );
 
   const hasWallet = Boolean(creatorAddress && isAddress(creatorAddress));
-
-  // helpful memo for posts parsed (preview/blur) so we don’t do it every render
   const parsedPosts = useMemo(() => {
     return (posts || []).map((p) => {
       const hints = parseContentHints(p.uri || '');
@@ -236,7 +229,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
 
   return (
     <div className="space-y-8">
-      {/* Header / status */}
       {loading && (
         <div className="flex items-center gap-2 text-sm text-slate-400">
           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -313,12 +305,11 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
             {parsedPosts.map((p) => {
               const { base, previewUri, blur } = p.hints;
               const displaySrc = previewUri || base;
-              const shouldBlur = !previewUri && blur; // blur base only if no teaser
+              const shouldBlur = !previewUri && blur;
 
               return (
                 <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
                   <div className="relative">
-                    {/* Blur via wrapper (SafeMedia has no 'blur' prop) */}
                     <div className={`relative ${shouldBlur ? 'blur-sm' : ''}`}>
                       <SafeMedia
                         src={displaySrc}
@@ -327,7 +318,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
                       />
                     </div>
 
-                    {/* Lock overlay when blurred */}
                     {shouldBlur && (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide">
@@ -336,13 +326,9 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
                       </div>
                     )}
 
-                    {/* Access state chip */}
-                    <div className="absolute left-2 top-2">
-                      <AccessBadge postId={p.id} />
-                    </div>
+                    {/* AccessBadge removed: props don't match current shape */}
                   </div>
 
-                  {/* Hide raw URI from public view */}
                   <span className="sr-only">{p.uri}</span>
 
                   <div className="mt-2 text-xs text-slate-400">
