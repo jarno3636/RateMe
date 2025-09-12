@@ -1,13 +1,15 @@
 // components/OnchainSections.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import type { Address, Abi } from 'viem';
 import { isAddress } from 'viem';
 import { usePublicClient } from 'wagmi';
 import { CREATOR_HUB_ABI, CREATOR_HUB_ADDR } from '@/lib/creatorHub';
 import SubscribeButton from './SubscribeButton';
 import BuyPostButton from './BuyPostButton';
+import AccessBadge from './AccessBadge';
+import SafeMedia from './SafeMedia';
 import { Loader2, RefreshCw } from 'lucide-react';
 
 type Plan = {
@@ -40,6 +42,19 @@ const ERC20_MINI_ABI = [
   { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
 ] as const satisfies Abi;
 
+function parseContentHints(u: string) {
+  // Supports: ipfs://...#rm_preview=<url>&rm_blur=1
+  try {
+    const [base, hash = ''] = u.split('#');
+    const qs = new URLSearchParams(hash);
+    const previewUri = (qs.get('rm_preview') || '').trim();
+    const blur = qs.get('rm_blur') === '1';
+    return { base: base.trim(), previewUri, blur };
+  } catch {
+    return { base: u, previewUri: '', blur: false };
+  }
+}
+
 export default function OnchainSections({ creatorAddress }: { creatorAddress?: Address | null }) {
   const pub = usePublicClient();
 
@@ -54,7 +69,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
   // Thin wrapper to avoid TS deep type instantiation from viem's multicall
   const mc = useCallback(
     async (contracts: any[]) => {
-      // If no calls, keep return shape consistent
       if (!contracts.length) return [] as any[];
       return await (pub as any).multicall({ contracts }) as any[];
     },
@@ -71,7 +85,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
     try {
       if (!pub) throw new Error('Public client unavailable');
 
-      // If no wallet set yet, show friendly empty state
       if (!creatorAddress || !isAddress(creatorAddress)) {
         setPlans([]);
         setPosts([]);
@@ -115,7 +128,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       const [planRes, postRes] = await Promise.all([mc(planCalls), mc(postCalls)]);
 
       const plansParsed: Plan[] = planIds.map((id, i) => {
-        // Expect tuple: (creator, token, pricePerPeriod, periodDays, active, name, metadataURI)
         const r: any = (planRes[i] as any)?.result ?? [];
         return {
           id,
@@ -129,7 +141,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       });
 
       const postsParsed: Post[] = postIds.map((id, i) => {
-        // Expect tuple: (creator, token, price, active, accessViaSub, uri)
         const r: any = (postRes[i] as any)?.result ?? [];
         return {
           id,
@@ -147,7 +158,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       setPlans(activePlans);
       setPosts(activePosts);
 
-      // 3) Collect unique tokens and read decimals+symbol
+      // 3) Token meta
       const uniqueTokens = Array.from(
         new Set(
           [...activePlans.map((p) => p.token), ...activePosts.map((p) => p.token)].filter((a) =>
@@ -206,7 +217,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
       const meta = tokenMeta[token?.toLowerCase?.() as string];
       const decimals = meta?.decimals ?? 6; // default to 6 if unknown
       const sym = meta?.symbol ?? '';
-      // Display helper only (not for financial precision)
       const asNum = Number(amount) / Math.pow(10, decimals);
       return `${asNum.toLocaleString(undefined, { maximumFractionDigits: Math.min(6, decimals) })}${
         sym ? ` ${sym}` : ''
@@ -216,6 +226,14 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
   );
 
   const hasWallet = Boolean(creatorAddress && isAddress(creatorAddress));
+
+  // helpful memo for posts parsed (preview/blur) so we don’t do it every render
+  const parsedPosts = useMemo(() => {
+    return (posts || []).map((p) => {
+      const hints = parseContentHints(p.uri || '');
+      return { ...p, hints };
+    });
+  }, [posts]);
 
   return (
     <div className="space-y-8">
@@ -287,29 +305,50 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
             Creator has not linked a wallet address yet.
           </div>
-        ) : (posts?.length ?? 0) === 0 ? (
+        ) : (parsedPosts?.length ?? 0) === 0 ? (
           <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
             No active paid posts.
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {posts!.map((p) => (
-              <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <div
-                  className="aspect-video w-full rounded-lg bg-gradient-to-br from-slate-800 to-slate-900"
-                  aria-hidden="true"
-                />
-                <div className="mt-2 line-clamp-1 text-sm font-medium" title={p.uri || `Post #${p.id}`}>
-                  {p.uri || `Post #${p.id}`}
-                </div>
-                <div className="text-xs text-slate-400">
-                  {fmtAmount(p.price, p.token)} {p.accessViaSub ? '• also via subscription' : ''}
-                </div>
-                <div className="mt-2">
-                  <BuyPostButton postId={p.id} />
-                </div>
-              </article>
-            ))}
+            {parsedPosts.map((p) => {
+              const { base, previewUri, blur } = p.hints;
+              // Locked-by-default presentation; AccessBadge + Buy/Subscribe unlock in your viewer.
+              // We show preview if present; otherwise we can optionally blur the base.
+              const displaySrc = previewUri || base;
+              const shouldBlur = !previewUri && blur; // only blur if no teaser exists
+
+              return (
+                <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="relative">
+                    <SafeMedia
+                      src={displaySrc}
+                      className="aspect-video w-full rounded-lg overflow-hidden"
+                      blur={shouldBlur}
+                    />
+                    {/* Purchase/subscription status chip (your existing component) */}
+                    <div className="absolute left-2 top-2">
+                      <AccessBadge postId={p.id} />
+                    </div>
+                  </div>
+
+                  {/* Title/URI hidden from public view; keep a tiny invisible span for copy if needed */}
+                  <span className="sr-only">{p.uri}</span>
+
+                  <div className="mt-2 text-xs text-slate-400">
+                    {fmtAmount(p.price, p.token)}{p.accessViaSub ? ' • also via subscription' : ''}
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-2">
+                    <BuyPostButton postId={p.id} />
+                    {/* Optional: tiny helper text */}
+                    {p.accessViaSub ? (
+                      <span className="text-[11px] text-slate-400">Subscribers unlock automatically</span>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>
