@@ -7,6 +7,10 @@ import toast from 'react-hot-toast';
 import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { USDC_ADDRESS as DEFAULT_TOKEN } from '@/lib/profileRegistry/constants';
 
+const MAX_MB = 10;
+const MAX_BYTES = MAX_MB * 1024 * 1024;
+const ALLOWED_PREFIXES = ['image/', 'video/'];
+
 export default function PostManager({ creatorId }: { creatorId: string }) {
   const { createPost /* , setPostActive, updatePost, ... */ } = useCreatorHub();
 
@@ -29,14 +33,32 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
   const openInfo = () => infoRef.current?.showModal();
   const closeInfo = () => infoRef.current?.close();
 
-  async function uploadFile(file: File): Promise<string> {
+  function validateFile(file: File) {
+    if (!ALLOWED_PREFIXES.some((p) => file.type?.startsWith(p))) {
+      throw new Error('Unsupported file type. Use image/video.');
+    }
+    if (file.size > MAX_BYTES) {
+      throw new Error(`File too large (max ${MAX_MB} MB).`);
+    }
+  }
+
+  async function uploadFile(file: File, kind: 'content' | 'preview'): Promise<string> {
+    validateFile(file);
+
     const fd = new FormData();
     fd.append('file', file);
-    const res = await fetch('/api/upload', { method: 'POST', body: fd });
-    if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+
+    const res = await fetch(`/api/upload?kind=${encodeURIComponent(kind)}`, {
+      method: 'POST',
+      body: fd,
+      cache: 'no-store',
+    });
+
     const j = await res.json().catch(() => null);
-    if (!j?.ok || !j?.uri) throw new Error(j?.error || 'Upload failed');
-    return j.uri as string;
+    if (!res.ok || !j?.ok || !j?.url) {
+      throw new Error(j?.error || `Upload failed (${res.status})`);
+    }
+    return j.url as string; // NOTE: backend returns { url }
   }
 
   async function onPickMain(e: React.ChangeEvent<HTMLInputElement>) {
@@ -44,7 +66,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
     if (!f) return;
     try {
       setUploadingMain(true);
-      const u = await uploadFile(f);
+      const u = await uploadFile(f, 'content');
       setUri(u);
       toast.success('Content uploaded');
     } catch (err: any) {
@@ -60,7 +82,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
     if (!f) return;
     try {
       setUploadingPreview(true);
-      const u = await uploadFile(f);
+      const u = await uploadFile(f, 'preview');
       setPreviewUri(u);
       toast.success('Preview uploaded');
     } catch (err: any) {
@@ -86,9 +108,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
       }
       const units = Math.round(num * 1e6);
 
-      // Backward-compatible hinting:
-      // Encode preview & blur flags into the fragment so readers can parse them.
-      // Example: ipfs://abc#rm_preview=<url>&rm_blur=1
+      // Encode preview & blur flags in a fragment for compatibility.
       const hintParams = new URLSearchParams();
       if (previewUri.trim()) hintParams.set('rm_preview', previewUri.trim());
       if (blurForNonSubs) hintParams.set('rm_blur', '1');
@@ -118,6 +138,8 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
     }
   }
 
+  const busy = submitting || uploadingMain || uploadingPreview;
+
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-2">
@@ -127,6 +149,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
           onClick={openInfo}
           aria-label="How do paid posts work?"
           className="inline-flex items-center rounded-md border border-white/10 bg-white/5 p-1 hover:bg-white/10"
+          disabled={busy}
         >
           <Info className="h-4 w-4" />
         </button>
@@ -141,21 +164,23 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
               placeholder="Content URI (e.g. ipfs://... or https://...)"
               value={uri}
               onChange={(e) => setUri(e.target.value)}
+              disabled={busy}
             />
             <div className="flex items-center gap-2">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+              <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                 <span className="inline-flex h-7 items-center rounded-md border border-white/10 bg-white/5 px-2">
                   <Upload className="mr-1 h-3.5 w-3.5" />
                   Upload file
                   <input
                     type="file"
+                    accept="image/*,video/*"
                     onChange={onPickMain}
-                    disabled={uploadingMain}
+                    disabled={uploadingMain || submitting}
                     className="hidden"
                   />
                 </span>
                 <span className="text-slate-400">
-                  {uploadingMain ? 'Uploading…' : 'Choose a file to upload'}
+                  {uploadingMain ? 'Uploading…' : `Images/Videos (≤ ${MAX_MB} MB)`}
                 </span>
               </label>
             </div>
@@ -167,6 +192,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
             inputMode="decimal"
             value={price}
             onChange={(e) => setPrice(e.target.value)}
+            disabled={busy}
           />
         </div>
 
@@ -178,21 +204,23 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
               placeholder="Preview URI (optional — image/video teaser)"
               value={previewUri}
               onChange={(e) => setPreviewUri(e.target.value)}
+              disabled={busy}
             />
             <div className="flex items-center gap-2">
-              <label className="inline-flex items-center gap-2 text-xs text-slate-300">
+              <label className="inline-flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
                 <span className="inline-flex h-7 items-center rounded-md border border-white/10 bg-white/5 px-2">
                   <Upload className="mr-1 h-3.5 w-3.5" />
                   Upload preview
                   <input
                     type="file"
+                    accept="image/*,video/*"
                     onChange={onPickPreview}
-                    disabled={uploadingPreview}
+                    disabled={uploadingPreview || submitting}
                     className="hidden"
                   />
                 </span>
                 <span className="text-slate-400">
-                  {uploadingPreview ? 'Uploading…' : 'Optional teaser file'}
+                  {uploadingPreview ? 'Uploading…' : `Optional teaser (≤ ${MAX_MB} MB)`}
                 </span>
               </label>
             </div>
@@ -204,6 +232,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
               checked={blurForNonSubs}
               onChange={(e) => setBlurForNonSubs(e.target.checked)}
               className="h-4 w-4 rounded border-white/10 bg-white/5"
+              disabled={busy}
             />
             Blur full content for non-subscribers
           </label>
@@ -217,6 +246,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
               checked={accessViaSub}
               onChange={(e) => setAccessViaSub(e.target.checked)}
               className="h-4 w-4 rounded border-white/10 bg-white/5"
+              disabled={busy}
             />
             Accessible via active subscription
           </label>
@@ -233,7 +263,7 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
         <div>
           <button
             onClick={submit}
-            disabled={submitting || uploadingMain || uploadingPreview}
+            disabled={busy}
             className="btn mt-3 inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? (
@@ -262,23 +292,14 @@ export default function PostManager({ creatorId }: { creatorId: string }) {
             </button>
           </div>
           <ul className="mt-3 space-y-2 text-sm text-slate-300 list-disc pl-4">
-            <li>
-              <b>Content</b>: upload a file or paste an IPFS/Arweave/HTTPS URL.
-            </li>
-            <li>
-              <b>Price</b>: a one-off purchase in USDC (6 decimals). <i>0</i> makes it free.
-            </li>
-            <li>
-              <b>Subscribers</b>: when enabled, active subscribers unlock without paying per-post.
-            </li>
-            <li>
-              <b>Preview & Blur</b>: add a teaser and keep the main content blurred for non-subscribers;
-              the teaser stays visible to everyone.
-            </li>
+            <li><b>Content</b>: upload a file or paste an IPFS/Arweave/HTTPS URL.</li>
+            <li><b>Price</b>: a one-off purchase in USDC (6 decimals). <i>0</i> makes it free.</li>
+            <li><b>Subscribers</b>: when enabled, active subscribers unlock without paying per-post.</li>
+            <li><b>Preview & Blur</b>: add a teaser and keep the main content blurred for non-subscribers.</li>
           </ul>
           <p className="mt-3 text-xs text-slate-400">
-            Technical note: preview/blur hints are stored in the post URI fragment for compatibility.
-            Your viewer can parse <code>rm_preview</code> and <code>rm_blur</code> to render the gated view.
+            Technical note: preview/blur hints are stored in the post URI fragment for compatibility
+            (<code>rm_preview</code>, <code>rm_blur</code>).
           </p>
         </div>
       </dialog>
