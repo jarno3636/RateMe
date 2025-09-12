@@ -7,7 +7,6 @@ import { usePublicClient } from 'wagmi';
 import { CREATOR_HUB_ABI, CREATOR_HUB_ADDR } from '@/lib/creatorHub';
 import SubscribeButton from './SubscribeButton';
 import BuyPostButton from './BuyPostButton';
-// import AccessBadge from './AccessBadge'; // ⬅ removed (prop mismatch)
 import SafeMedia from './SafeMedia';
 import { Loader2, RefreshCw } from 'lucide-react';
 
@@ -310,7 +309,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
               return (
                 <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
                   <div className="relative">
-                    <div className={`relative ${shouldBlur ? 'blur-sm' : ''}`}>
+                    <div className={`relative ${shouldBlur ? 'blur-4xl select-none' : ''}`}>
                       <SafeMedia
                         src={displaySrc}
                         className="aspect-video w-full overflow-hidden"
@@ -325,8 +324,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
                         </span>
                       </div>
                     )}
-
-                    {/* AccessBadge removed: props don't match current shape */}
                   </div>
 
                   <span className="sr-only">{p.uri}</span>
