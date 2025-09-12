@@ -8,7 +8,11 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 
 function fmt(ts: number) {
   try {
-    return new Date(ts).toLocaleDateString();
+    return new Date(ts).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
   } catch {
     return '';
   }
@@ -22,16 +26,26 @@ export default function SubscriptionBadge({
   const { address } = useAccount();
   const { getSubExpiry } = useCreatorHub();
   const [expiry, setExpiry] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     let alive = true;
     (async () => {
       if (!address || !creatorAddress) return setExpiry(null);
-      const ts = await getSubExpiry(creatorAddress, address); // returns ms or 0
-      if (!alive) return;
-      setExpiry(ts && ts > Date.now() ? ts : null);
+      try {
+        setLoading(true);
+        const ts = await getSubExpiry?.(creatorAddress, address);
+        if (!alive) return;
+        setExpiry(ts && ts > Date.now() ? ts : null);
+      } catch {
+        if (alive) setExpiry(null);
+      } finally {
+        if (alive) setLoading(false);
+      }
     })();
-    return () => { alive = false };
+    return () => {
+      alive = false;
+    };
   }, [address, creatorAddress, getSubExpiry]);
 
   if (!address || !creatorAddress || !expiry) return null;
