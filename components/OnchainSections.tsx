@@ -1,4 +1,3 @@
-// components/OnchainSections.tsx
 'use client';
 
 import { useEffect, useState, useCallback, useMemo } from 'react';
@@ -306,33 +305,44 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
             Creator has not linked a wallet address yet.
           </div>
         ) : (parsedPosts?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
             No active paid posts.
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {parsedPosts.map((p) => {
               const { base, previewUri, blur } = p.hints;
-              // Locked-by-default presentation; AccessBadge + Buy/Subscribe unlock in your viewer.
-              // We show preview if present; otherwise we can optionally blur the base.
               const displaySrc = previewUri || base;
-              const shouldBlur = !previewUri && blur; // only blur if no teaser exists
+              const shouldBlur = !previewUri && blur; // blur base only if no teaser
 
               return (
                 <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
                   <div className="relative">
-                    <SafeMedia
-                      src={displaySrc}
-                      className="aspect-video w-full rounded-lg overflow-hidden"
-                      blur={shouldBlur}
-                    />
-                    {/* Purchase/subscription status chip (your existing component) */}
+                    {/* Blur via wrapper (SafeMedia has no 'blur' prop) */}
+                    <div className={`relative ${shouldBlur ? 'blur-sm' : ''}`}>
+                      <SafeMedia
+                        src={displaySrc}
+                        className="aspect-video w-full overflow-hidden"
+                        rounded="rounded-lg"
+                      />
+                    </div>
+
+                    {/* Lock overlay when blurred */}
+                    {shouldBlur && (
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide">
+                          Locked
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Access state chip */}
                     <div className="absolute left-2 top-2">
                       <AccessBadge postId={p.id} />
                     </div>
                   </div>
 
-                  {/* Title/URI hidden from public view; keep a tiny invisible span for copy if needed */}
+                  {/* Hide raw URI from public view */}
                   <span className="sr-only">{p.uri}</span>
 
                   <div className="mt-2 text-xs text-slate-400">
@@ -341,7 +351,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress?: A
 
                   <div className="mt-2 flex items-center gap-2">
                     <BuyPostButton postId={p.id} />
-                    {/* Optional: tiny helper text */}
                     {p.accessViaSub ? (
                       <span className="text-[11px] text-slate-400">Subscribers unlock automatically</span>
                     ) : null}
