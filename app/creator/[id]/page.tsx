@@ -11,6 +11,7 @@ import {
 import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
+import SubscriptionBadge from '@/components/SubscriptionBadge'
 import { Star, ExternalLink } from 'lucide-react'
 
 import type { Abi, Address } from 'viem'
@@ -142,13 +143,13 @@ export default async function CreatorPage({ params }: Params) {
     ? `${rating.avg.toFixed(2)} • ${rating.count} ratings`
     : 'No ratings yet'
 
-  // Cache-bust the avatar when updatedAt changes (so it refreshes right after saving)
+  // Cache-bust avatar when updated
   const updatedAt = Number(creator.updatedAt || 0)
-  const avatarSrcBase = creator.avatarUrl || '/icon-192.png'
+  const avatarBase = creator.avatarUrl || '/icon-192.png'
   const avatarSrc =
-    updatedAt && avatarSrcBase.startsWith('http')
-      ? `${avatarSrcBase}${avatarSrcBase.includes('?') ? '&' : '?'}v=${updatedAt}`
-      : avatarSrcBase
+    updatedAt && avatarBase.startsWith('http')
+      ? `${avatarBase}${avatarBase.includes('?') ? '&' : '?'}v=${updatedAt}`
+      : avatarBase
 
   const bio =
     (creator.bio || '').toString().slice(0, 280) +
@@ -183,7 +184,7 @@ export default async function CreatorPage({ params }: Params) {
             <span>{avgText}</span>
           </div>
 
-          {/* One share row + subtle wallet stub */}
+          {/* Share + wallet + subscription badge */}
           <div className="mt-3 flex flex-wrap justify-center items-center gap-2">
             <ShareBar creatorId={creator.id} handle={creator.handle} />
             {hasAddress && (
@@ -197,9 +198,11 @@ export default async function CreatorPage({ params }: Params) {
                 {short(creator.address)} <ExternalLink className="ml-1 h-3 w-3" />
               </a>
             )}
+            {/* lights up after SubscribeButton dispatches rm:subscribed */}
+            {hasAddress ? <SubscriptionBadge /> : null}
           </div>
 
-          {/* Inline owner area (renders if connected wallet === creator.address) */}
+          {/* Owner tools (edit profile, plans, posts) */}
           <div className="mt-4">
             <OwnerInline
               creatorAddress={(creator.address || null) as `0x${string}` | null}
@@ -211,7 +214,7 @@ export default async function CreatorPage({ params }: Params) {
         </div>
       </section>
 
-      {/* On-chain plans & posts */}
+      {/* On-chain sections (plans + posts rendered with SafeMedia/PaidPostCard/AccessBadge inside) */}
       {hasAddress ? (
         <OnchainSections creatorAddress={creator.address as `0x${string}`} />
       ) : (
