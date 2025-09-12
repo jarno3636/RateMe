@@ -9,10 +9,10 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 
 function parseHints(uri: string) {
   try {
-    const parts = uri.split('#');
-    const params = new URLSearchParams(parts[1] || '');
+    const [base, hash = ''] = uri.split('#');
+    const params = new URLSearchParams(hash);
     return {
-      base: parts[0],
+      base,
       preview: params.get('rm_preview') || '',
       blur: params.get('rm_blur') === '1',
     };
@@ -37,7 +37,7 @@ export default function PaidPostCard({
   onChanged?: () => void;
 }) {
   const { address } = useAccount();
-  const { buyPost, canAccessPost } = useCreatorHub();
+  const { buyPost, hasPostAccess } = useCreatorHub();
 
   const [checking, setChecking] = useState(false);
   const [canAccess, setCanAccess] = useState(false);
@@ -45,10 +45,13 @@ export default function PaidPostCard({
   const hints = useMemo(() => parseHints(rawUri), [rawUri]);
 
   async function refreshAccess() {
-    if (!address) return;
+    if (!address) {
+      setCanAccess(false);
+      return;
+    }
     try {
       setChecking(true);
-      const ok = await canAccessPost(creatorAddress, postId, address);
+      const ok = await hasPostAccess(address as `0x${string}`, postId);
       setCanAccess(!!ok);
     } finally {
       setChecking(false);
@@ -56,7 +59,13 @@ export default function PaidPostCard({
   }
 
   useEffect(() => {
-    refreshAccess();
+    let alive = true;
+    (async () => {
+      await refreshAccess();
+    })();
+    return () => {
+      alive = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [address, creatorAddress, postId]);
 
@@ -66,10 +75,15 @@ export default function PaidPostCard({
 
   async function onBuy() {
     if (!address) return;
-    await buyPost({ creator: creatorAddress, postId });
+    await buyPost(postId);
     await refreshAccess();
     onChanged?.();
   }
+
+  const priceLabel =
+    Number.isFinite(priceUSDC)
+      ? `${priceUSDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`
+      : `${priceUSDC} USDC`;
 
   return (
     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -101,9 +115,11 @@ export default function PaidPostCard({
 
       {/* Footer */}
       <div className="mt-3">
-        <div className="text-sm text-slate-200 truncate">{hints.base}</div>
+        {/* Hide raw URI from the page but keep it accessible for screen readers */}
+        <span className="sr-only">{hints.base}</span>
+
         <div className="text-xs text-slate-400">
-          {priceUSDC} USDC{alsoViaSub ? ' • also via subscription' : ''}
+          {priceLabel}{alsoViaSub ? ' • also via subscription' : ''}
         </div>
 
         {!canAccess && (
