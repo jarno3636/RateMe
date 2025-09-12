@@ -5,23 +5,80 @@ import { revalidatePath } from 'next/cache'
 
 export const runtime = 'nodejs'
 
-// Helpers: accept either numeric ID or handle string
-function normalize(s: string) { return String(s || '').trim().toLowerCase() }
+// --- helpers ---
+function normalize(s: string) {
+  return String(s || '').trim().toLowerCase()
+}
 const isNumeric = (s: string) => /^\d+$/.test(s)
+const MAX_BIO_WORDS = 250
 
+function isLikelyUrl(s?: string | null) {
+  if (!s) return false
+  const v = String(s).trim()
+  return /^https?:\/\//i.test(v) || /^ipfs:\/\//i.test(v)
+}
+function guessFromString(s: string) {
+  const t = String(s || '').trim()
+  if (!t) return {}
+  if (isLikelyUrl(t)) return { avatarUrl: t }
+  if (!/\s/.test(t) && t.length <= 64) return { displayName: t }
+  return { bio: t }
+}
+
+/**
+ * Resolve a creator ID to the canonical numeric/string id we store under `creator:{id}`.
+ * Accepts numeric id, handle via `handle:{handle}`, or legacy `creator:{handle}` directly.
+ */
 async function resolveId(idOrHandle: string): Promise<string | null> {
   const key = normalize(idOrHandle)
   if (isNumeric(key)) {
-    // trust numeric id
     const exists = await kv.exists(`creator:${key}`)
     return exists ? key : null
   }
-  // try handle -> id mapping first
+  // handle map
   const mapped = await kv.get<string | null>(`handle:${key}`)
   if (mapped) return mapped
-  // fallback: maybe the handle itself is used as id in KV for early creators
+
+  // legacy: `creator:{handle}` was used as the id key
   const exists = await kv.exists(`creator:${key}`)
   return exists ? key : null
+}
+
+/**
+ * Ensure `creator:{id}` key is a hash.
+ * If a legacy plain string is found, convert it into a normalized hash.
+ */
+async function ensureHashKey(creatorId: string): Promise<void> {
+  const key = `creator:${creatorId}`
+
+  // If already a hash (has fields), hgetall returns object with keys
+  const asHash = await kv.hgetall<Record<string, unknown>>(key)
+  if (asHash && Object.keys(asHash).length > 0) return
+
+  // Try reading as plain value
+  const raw = await kv.get(key)
+  if (raw == null) return
+
+  // Build a normalized record from the old value
+  const now = Date.now()
+  let patch: any = {}
+  if (typeof raw === 'string') patch = guessFromString(raw)
+  else if (typeof raw === 'object' && raw) patch = { ...raw }
+  else return
+
+  // Remove old value type key and write as hash
+  await kv.del(key)
+  await kv.hset(key, {
+    id: creatorId,
+    handle: (patch.handle || creatorId)?.toString().toLowerCase(),
+    displayName: patch.displayName || creatorId,
+    avatarUrl: patch.avatarUrl || '',
+    bio: patch.bio || '',
+    address: patch.address || '',
+    fid: Number(patch.fid || 0),
+    createdAt: Number(patch.createdAt || now),
+    updatedAt: now,
+  })
 }
 
 export async function POST(req: Request) {
@@ -37,35 +94,58 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: 'Creator not found' }, { status: 404 })
     }
 
-    // Optional: 250-word limiter on server too
-    const words = String(bio || '').trim().split(/\s+/).filter(Boolean)
-    if (words.length > 250) {
-      return NextResponse.json({ ok: false, error: 'Bio must be 250 words or less' }, { status: 400 })
-    }
+    // Make sure the key is a hash (migrate legacy string values if needed)
+    await ensureHashKey(creatorId)
 
-    // Write only provided fields
-    const patch: Record<string, string> = {}
-    if (typeof avatarUrl === 'string') patch.avatarUrl = avatarUrl
-    if (typeof bio === 'string') patch.bio = bio
+    // Validate inputs
+    const patch: Record<string, unknown> = {}
+    if (typeof bio === 'string') {
+      const words = bio.trim().split(/\s+/).filter(Boolean)
+      if (words.length > MAX_BIO_WORDS) {
+        return NextResponse.json(
+          { ok: false, error: `Bio must be ${MAX_BIO_WORDS} words or less` },
+          { status: 400 }
+        )
+      }
+      patch.bio = bio
+    }
+    if (typeof avatarUrl === 'string') {
+      // Light sanity (optional)
+      if (avatarUrl && avatarUrl.length > 1024) {
+        return NextResponse.json(
+          { ok: false, error: 'Avatar URL too long' },
+          { status: 400 }
+        )
+      }
+      if (avatarUrl && !isLikelyUrl(avatarUrl)) {
+        return NextResponse.json(
+          { ok: false, error: 'Avatar URL must be http(s) or ipfs' },
+          { status: 400 }
+        )
+      }
+      patch.avatarUrl = avatarUrl
+    }
 
     if (Object.keys(patch).length === 0) {
       return NextResponse.json({ ok: false, error: 'Nothing to update' }, { status: 400 })
     }
 
+    // Always bump updatedAt
+    patch.updatedAt = Date.now()
+
     await kv.hset(`creator:${creatorId}`, patch)
 
-    // Revalidate both numeric and handle routes just in case
+    // Revalidate for both id-based and handle-based routes
     revalidatePath(`/creator/${creatorId}`)
-
-    // If the record has a handle, revalidate that route too
     const cur = await kv.hgetall<Record<string, string>>(`creator:${creatorId}`)
     const handle = cur?.handle?.toLowerCase?.()
-    if (handle) {
-      revalidatePath(`/creator/${handle}`)
-    }
+    if (handle) revalidatePath(`/creator/${handle}`)
 
     return NextResponse.json({ ok: true })
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || 'Update failed' }, { status: 500 })
+    return NextResponse.json(
+      { ok: false, error: e?.message || 'Update failed' },
+      { status: 500 }
+    )
   }
 }
