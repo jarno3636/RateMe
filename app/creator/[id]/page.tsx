@@ -141,6 +141,15 @@ export default async function CreatorPage({ params }: Params) {
   const avgText = rating.count
     ? `${rating.avg.toFixed(2)} • ${rating.count} ratings`
     : 'No ratings yet'
+
+  // Cache-bust the avatar when updatedAt changes (so it refreshes right after saving)
+  const updatedAt = Number(creator.updatedAt || 0)
+  const avatarSrcBase = creator.avatarUrl || '/icon-192.png'
+  const avatarSrc =
+    updatedAt && avatarSrcBase.startsWith('http')
+      ? `${avatarSrcBase}${avatarSrcBase.includes('?') ? '&' : '?'}v=${updatedAt}`
+      : avatarSrcBase
+
   const bio =
     (creator.bio || '').toString().slice(0, 280) +
     ((creator.bio || '').length > 280 ? '…' : '')
@@ -153,7 +162,7 @@ export default async function CreatorPage({ params }: Params) {
         <div className="h-48 w-48 overflow-hidden rounded-full ring-2 ring-white/10">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={creator.avatarUrl || '/icon-192.png'}
+            src={avatarSrc}
             alt={`${creator.displayName || creator.handle} avatar`}
             className="h-full w-full object-cover"
           />
