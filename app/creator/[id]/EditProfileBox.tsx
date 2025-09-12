@@ -11,10 +11,12 @@ export default function EditProfileBox({
   creatorId,
   currentAvatar,
   currentBio,
+  onSaved, // <-- added
 }: {
   creatorId: string;
   currentAvatar?: string | null;
   currentBio?: string | null;
+  onSaved?: () => void; // <-- added
 }) {
   const router = useRouter();
   const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
@@ -24,7 +26,6 @@ export default function EditProfileBox({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const wordCount = bio.trim().split(/\s+/).filter(Boolean).length;
-  const overLimit = wordCount > MAX_BIO_WORDS;
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -66,12 +67,12 @@ export default function EditProfileBox({
 
   const save = async () => {
     try {
-      if (overLimit) {
+      if (wordCount > MAX_BIO_WORDS) {
         throw new Error(`Bio must be ${MAX_BIO_WORDS} words or less`);
       }
 
       setSaving(true);
-      const res = await fetch('/api/creator/save', {
+      const res = await fetch('/api/creator/update', {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         cache: 'no-store',
@@ -82,8 +83,10 @@ export default function EditProfileBox({
         throw new Error(j?.error || `save failed (${res.status})`);
       }
       toast.success('Profile updated');
-      // Re-fetch server components so public page reflects changes immediately
+
+      // refresh server components and notify parent (if provided)
       router.refresh();
+      onSaved?.(); // <-- added
     } catch (e: any) {
       toast.error(e?.message || 'Failed to update');
     } finally {
@@ -99,8 +102,6 @@ export default function EditProfileBox({
         {/* Avatar upload & URL */}
         <div>
           <label className="text-xs text-slate-400">Profile photo</label>
-
-          {/* Preview */}
           <div className="mt-2 flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
@@ -150,7 +151,7 @@ export default function EditProfileBox({
             value={bio}
             onChange={(e) => setBio(e.target.value)}
           />
-          <p className={`mt-1 text-[11px] ${overLimit ? 'text-red-400' : 'text-slate-400'}`}>
+          <p className={`mt-1 text-[11px] ${wordCount > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'}`}>
             {wordCount}/{MAX_BIO_WORDS} words
           </p>
         </div>
@@ -158,7 +159,7 @@ export default function EditProfileBox({
 
       <button
         onClick={save}
-        disabled={saving || uploading || overLimit}
+        disabled={saving || uploading}
         className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
       >
         {saving ? 'Saving…' : 'Save changes'}
