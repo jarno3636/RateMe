@@ -29,3 +29,12 @@ html, body {
 .card {
   @apply rounded-2xl border border-white/10 bg-white/5 p-5 shadow-soft;
 }
+
+/* --- Custom stronger blur utilities --- */
+.blur-4xl {
+  filter: blur(40px);
+}
+
+.blur-5xl {
+  filter: blur(60px);
+}
