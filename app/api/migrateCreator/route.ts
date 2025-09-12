@@ -5,115 +5,139 @@ import { kv } from '@vercel/kv'
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
 
-function lc(s = '') { return s.trim().toLowerCase() }
+const lc = (s: string) => String(s || '').trim().toLowerCase()
 const isNumeric = (s: string) => /^\d+$/.test(s)
+const CREATOR_KEY  = (id: string) => `creator:${id}`
+const HANDLE_KEY   = (handle: string) => `handle:${lc(handle)}`
+const OWNER_KEY    = (addr: string) => `owner:${lc(addr)}`
 
-async function resolveId(source: string): Promise<string | null> {
-  const key = lc(source)
-  if (isNumeric(key)) {
-    const exists = await kv.exists(`creator:${key}`)
-    return exists ? key : null
-  }
-  const byHandle = await kv.get<string | null>(`handle:${key}`)
-  if (byHandle) return byHandle
-  const legacy = await kv.exists(`creator:${key}`)
-  return legacy ? key : null
+function isLikelyUrl(s?: string | null) {
+  if (!s) return false
+  const v = String(s).trim()
+  return /^https?:\/\//i.test(v) || /^ipfs:\/\//i.test(v)
+}
+function guessFromString(s: string) {
+  const t = String(s || '').trim()
+  if (!t) return {}
+  if (isLikelyUrl(t)) return { avatarUrl: t }
+  if (!/\s/.test(t) && t.length <= 64) return { displayName: t }
+  return { bio: t }
 }
 
-function html(body: string, status = 200) {
-  return new NextResponse(
-    `<!doctype html><meta charset="utf-8" />
-     <meta name="viewport" content="width=device-width,initial-scale=1" />
-     <style>
-       body{background:#0b1220;color:#e5e7eb;font:14px/1.45 ui-sans-serif,system-ui,Segoe UI,Roboto}
-       .card{max-width:720px;margin:48px auto;padding:24px;border-radius:16px;
-             border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.05)}
-       code,pre{font-family:ui-monospace, SFMono-Regular, Menlo, monospace}
-       .ok{color:#86efac}.err{color:#fca5a5}
-     </style>
-     <div class="card">${body}</div>`,
-    { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } }
-  )
+async function resolveToId(idOrHandle: string): Promise<string | null> {
+  const key = lc(idOrHandle)
+  if (isNumeric(key)) {
+    const exists = await kv.exists(CREATOR_KEY(key))
+    return exists ? key : null
+  }
+  const mapped = await kv.get<string | null>(HANDLE_KEY(key))
+  if (mapped) return lc(mapped)
+  const exists = await kv.exists(CREATOR_KEY(key))
+  return exists ? key : null
+}
+
+async function migrateToHash(creatorId: string) {
+  const key = CREATOR_KEY(creatorId)
+
+  // 1) Try as hash
+  let asHash: Record<string, any> | null = null
+  try {
+    const h = await kv.hgetall<Record<string, any>>(key)
+    if (h && Object.keys(h).length) asHash = h
+  } catch (e: any) {
+    // WRONGTYPE => fall through to raw get
+  }
+
+  if (asHash) {
+    // Already a hash; just make sure indexes exist & normalize a bit.
+    const normalized = {
+      ...asHash,
+      id: creatorId,
+      handle: lc(asHash.handle || creatorId),
+      address: asHash.address ? lc(asHash.address) : null,
+    }
+    await kv.hset(key, { ...normalized, updatedAt: Date.now() })
+    // rebind handle if missing
+    if (normalized.handle) await kv.set(HANDLE_KEY(normalized.handle), creatorId)
+    // rebind owner if present
+    if (normalized.address) await kv.set(OWNER_KEY(normalized.address), creatorId)
+    return { beforeType: 'hash', afterType: 'hash', data: normalized }
+  }
+
+  // 2) Read raw legacy value
+  const raw = await kv.get(key)
+  if (raw == null) {
+    // nothing there; initialize a minimal hash
+    const now = Date.now()
+    const row = {
+      id: creatorId,
+      handle: creatorId,
+      displayName: creatorId,
+      avatarUrl: '',
+      bio: '',
+      address: null,
+      fid: 0,
+      createdAt: now,
+      updatedAt: now,
+    }
+    await kv.hset(key, row)
+    await kv.set(HANDLE_KEY(row.handle), creatorId)
+    return { beforeType: 'missing', afterType: 'hash', data: row }
+  }
+
+  // 3) Convert raw (string/object/whatever) -> normalized hash
+  const now = Date.now()
+  let patch: any = {}
+  if (typeof raw === 'string') patch = guessFromString(raw)
+  else if (typeof raw === 'object' && raw) patch = { ...raw }
+
+  // overwrite the key as a proper hash
+  await kv.del(key)
+  const row = {
+    id: creatorId,
+    handle: lc(patch.handle || creatorId),
+    displayName: patch.displayName || creatorId,
+    avatarUrl: patch.avatarUrl || '',
+    bio: patch.bio || '',
+    address: patch.address ? lc(patch.address as string) : null,
+    fid: Number(patch.fid || 0),
+    createdAt: Number(patch.createdAt || now),
+    updatedAt: now,
+  }
+  await kv.hset(key, row)
+  if (row.handle) await kv.set(HANDLE_KEY(row.handle), creatorId)
+  if (row.address) await kv.set(OWNER_KEY(row.address), creatorId)
+
+  return { beforeType: typeof raw, afterType: 'hash', data: row }
 }
 
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url)
-    const raw = url.searchParams.get('id') || url.searchParams.get('handle') || ''
+    const raw = lc(url.searchParams.get('id') || url.searchParams.get('handle') || '')
     const mode = (url.searchParams.get('mode') || 'repair').toLowerCase()
 
-    if (!raw) {
-      return html(`<h2 class="err">Missing ?id= or ?handle=</h2>`, 400)
-    }
-    const id = await resolveId(raw)
-    if (!id) {
-      return html(`<h2 class="err">Creator not found for "${raw}"</h2>`, 404)
-    }
+    if (!raw) return NextResponse.json({ ok: false, error: 'Missing id/handle' }, { status: 400 })
 
-    const key = `creator:${id}`
+    const id = await resolveToId(raw)
+    const canonicalId = id || raw
 
-    // Inspect current state
-    const asHash = await kv.hgetall<Record<string, unknown>>(key)
-    let before: 'hash' | 'string' | 'none' = 'none'
-    if (asHash && Object.keys(asHash).length) before = 'hash'
-    else {
-      const rawVal = await kv.get(key)
-      before = rawVal == null ? 'none' : 'string'
+    if (mode !== 'repair') {
+      return NextResponse.json({ ok: false, error: 'Unsupported mode' }, { status: 400 })
     }
 
-    let migrated = false
-    if (mode === 'repair' && before === 'string') {
-      const rawVal = await kv.get(key)
-      // Safe normalize
-      const now = Date.now()
-      let patch: Record<string, unknown> = {}
-      if (typeof rawVal === 'string') {
-        const t = rawVal.trim()
-        const urlish = /^https?:\/\//i.test(t) || /^ipfs:\/\//i.test(t)
-        if (urlish) patch.avatarUrl = t
-        else if (!/\s/.test(t) && t.length <= 64) patch.displayName = t
-        else patch.bio = t
-      } else if (rawVal && typeof rawVal === 'object') {
-        patch = { ...(rawVal as any) }
-      }
-      await kv.del(key)
-      await kv.hset(key, {
-        id,
-        handle: (patch.handle || id).toString().toLowerCase(),
-        displayName: patch.displayName || id,
-        avatarUrl: patch.avatarUrl || '',
-        bio: patch.bio || '',
-        address: patch.address || '',
-        fid: Number(patch.fid || 0),
-        createdAt: Number(patch.createdAt || now),
-        updatedAt: now,
-      })
-      migrated = true
-    }
+    const result = await migrateToHash(canonicalId)
 
-    const afterHash = await kv.hgetall<Record<string, unknown>>(key)
-    const after = afterHash && Object.keys(afterHash).length ? 'hash' : 'string'
-
-    const wantsJson = /application\/json/i.test(req.headers.get('accept') || '')
-    const payload = { ok: true, id, mode, before, after, migrated, sample: afterHash || null }
-
-    if (wantsJson) {
-      return NextResponse.json(payload, { headers: { 'cache-control': 'no-store' } })
-    }
-
-    return html(`
-      <h1>Creator migrate: <code>${id}</code></h1>
-      <p>Status: <strong class="${migrated ? 'ok' : ''}">${migrated ? 'migrated' : 'no change needed'}</strong></p>
-      <p>Before: <code>${before}</code> → After: <code>${after}</code></p>
-      <pre>${JSON.stringify(payload, null, 2)}</pre>
-      <p><a href="/creator/${id}">Back to creator page</a></p>
-    `)
+    return NextResponse.json({
+      ok: true,
+      id: canonicalId,
+      mode,
+      result,
+    }, { headers: { 'cache-control': 'no-store' } })
   } catch (e: any) {
-    const msg = String(e?.message || e)
-    const wantsJson = /application\/json/i.test(req.headers.get('accept') || '')
-    if (wantsJson) {
-      return NextResponse.json({ ok: false, error: msg }, { status: 500 })
-    }
-    return html(`<h2 class="err">Error</h2><pre>${msg}</pre>`, 500)
+    return NextResponse.json(
+      { ok: false, error: e?.message || 'Migration failed' },
+      { status: 500 }
+    )
   }
 }
