@@ -43,8 +43,7 @@ function req<T>(v: T | undefined, msg: string): T {
 export function useCreatorHub() {
   const { address, chainId } = useAccount();
 
-  // Pin a public client to Base for **all reads & sims** so we don’t
-  // accidentally read the wrong chain if the user is connected elsewhere.
+  // Pin reads/sims to Base
   const pubBase = usePublicClient({ chainId: BASE_CHAIN_ID });
   const { data: wallet } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
@@ -82,13 +81,13 @@ export function useCreatorHub() {
         args: args as any,
         account: _wal.account,
         value: opts?.value,
-        chain: _pub.chain, // <- Base
+        chain: _pub.chain,
       });
 
       const hash = await _wal.writeContract(request);
       return _pub.waitForTransactionReceipt({ hash });
     },
-    [ensureBase] // _pub and _wal are derived inside via guards
+    [ensureBase]
   );
 
   // ---------- Reads (pinned to Base) ----------
@@ -176,6 +175,62 @@ export function useCreatorHub() {
       args: [creator],
     })) as bigint[];
   }, []);
+
+  /**
+   * getSubExpiry: returns a millisecond timestamp when the viewer’s subscription
+   * to `creator` expires, or 0 if not subscribed. Tries several common ABI shapes:
+   *   - subExpiries(user, creator) -> uint256
+   *   - getSubExpiry(user, creator) -> uint256
+   *   - subscriptionExpiry(user, creator) -> uint256
+   *   - subscriptions(user, creator) -> (expiry, ...) or uint256
+   */
+  const getSubExpiry = useCallback(
+    async (creator: Address, user?: Address): Promise<number> => {
+      assertHubAddr();
+      const _pub = assertPub();
+      const u = (user || address) as Address | undefined;
+      if (!u) return 0;
+
+      const candidates: Array<{ fn: string; tupleFirst?: boolean }> = [
+        { fn: 'subExpiries' },
+        { fn: 'getSubExpiry' },
+        { fn: 'subscriptionExpiry' },
+        { fn: 'subscriptions', tupleFirst: true }, // might return struct/tuple
+      ];
+
+      for (const c of candidates) {
+        try {
+          const res = (await _pub.readContract({
+            address: HUB_ADDR,
+            abi: HUB_ABI,
+            functionName: c.fn as any,
+            args: [u, creator],
+          })) as unknown;
+
+          // Unwrap possible tuple/struct (expiry first)
+          const raw =
+            c.tupleFirst && Array.isArray(res) ? (res as any)[0] : (res as any);
+
+          // Convert bigint/number/string → number (ms)
+          let ts = 0;
+          if (typeof raw === 'bigint') ts = Number(raw);
+          else if (typeof raw === 'number') ts = raw;
+          else if (typeof raw === 'string') ts = Number(raw);
+
+          if (!Number.isFinite(ts) || ts <= 0) continue;
+
+          // Heuristic: if seconds (< 10^12), convert to ms
+          if (ts < 1_000_000_000_000) ts = ts * 1000;
+
+          return ts;
+        } catch {
+          // try next candidate
+        }
+      }
+      return 0;
+    },
+    [address]
+  );
 
   // ---------- ERC20 helper (pinned to Base) ----------
   const ensureAllowance = useCallback(
@@ -284,6 +339,7 @@ export function useCreatorHub() {
     isActive,
     getCreatorPlanIds,
     getCreatorPostIds,
+    getSubExpiry, // ← added
     // writes
     subscribe,
     buyPost,
