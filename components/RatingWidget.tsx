@@ -10,9 +10,9 @@ type RatingItem = { score: number; comment?: string; at: number };
 type RatingState = { avg: number; count: number; items: RatingItem[] };
 
 const SITE =
-  (process.env.NEXT_PUBLIC_SITE_URL || (typeof window !== 'undefined' ? window.location.origin : ''))
-    .toString()
-    .replace(/\/$/, '');
+  (process.env.NEXT_PUBLIC_SITE_URL ||
+    (typeof window !== 'undefined' ? window.location.origin : '')
+  ).toString().replace(/\/$/, '');
 
 export default function RatingWidget({ creatorId }: Props) {
   const id = useMemo(() => creatorId.toLowerCase().replace(/^@/, ''), [creatorId]);
@@ -29,7 +29,8 @@ export default function RatingWidget({ creatorId }: Props) {
   const abortRef = useRef<AbortController | null>(null);
 
   const display = hover ?? score;
-  const remaining = 280 - comment.length;
+  const SOFT_LIMIT = 280;
+  const remaining = SOFT_LIMIT - comment.length;
   const canSubmit = score >= 1 && score <= 5 && !pending && remaining >= 0;
 
   const shareHref = useMemo(() => {
@@ -50,16 +51,24 @@ export default function RatingWidget({ creatorId }: Props) {
         headers: { accept: 'application/json' },
         signal: ac.signal,
       });
-      const json = (await res.json().catch(() => null)) as RatingState | null;
 
-      if (!res.ok || !json) {
-        throw new Error((json as any)?.error || `Failed to load ratings (${res.status})`);
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j) {
+        throw new Error(j?.error || `Failed to load ratings (${res.status})`);
       }
-      setData({
-        avg: Number.isFinite(json.avg) ? Number(json.avg) : 0,
-        count: Number.isFinite(json.count) ? Number(json.count) : 0,
-        items: Array.isArray(json.items) ? json.items : [],
-      });
+
+      // New API shape: { summary: {avg,count}, recent: Rating[] }
+      const avg = Number(j?.summary?.avg ?? 0);
+      const count = Number(j?.summary?.count ?? 0);
+      const items: RatingItem[] = Array.isArray(j?.recent)
+        ? j.recent.map((r: any) => ({
+            score: Number(r?.score ?? 0),
+            comment: typeof r?.comment === 'string' ? r.comment : undefined,
+            at: Number(r?.createdAt ?? Date.now()),
+          }))
+        : [];
+
+      setData({ avg: Number.isFinite(avg) ? avg : 0, count: Number.isFinite(count) ? count : 0, items });
     } catch (e: any) {
       if (e?.name === 'AbortError') return;
       setError(e?.message || 'Failed to load ratings');
@@ -77,7 +86,7 @@ export default function RatingWidget({ creatorId }: Props) {
     setError(null);
     setOkMsg(null);
 
-    // Optimistic add (we’ll overwrite with fresh fetch result after)
+    // Optimistic UI (clamped to top 10 items)
     const optimistic: RatingItem = {
       score,
       comment: comment.trim() || undefined,
@@ -87,30 +96,43 @@ export default function RatingWidget({ creatorId }: Props) {
       if (!prev) return { avg: score, count: 1, items: [optimistic] };
       const nextCount = prev.count + 1;
       const nextAvg = (prev.avg * prev.count + score) / nextCount;
-      return { avg: nextAvg, count: nextCount, items: [optimistic, ...prev.items].slice(0, 10) };
+      const nextItems = [optimistic, ...prev.items].slice(0, 10);
+      return { avg: nextAvg, count: nextCount, items: nextItems };
     });
 
     startTransition(async () => {
       try {
+        // Keep using /api/rate, which returns { ok: true } or 409 on duplicates
         const res = await fetch('/api/rate', {
           method: 'POST',
           headers: { 'content-type': 'application/json', accept: 'application/json' },
           cache: 'no-store',
-          body: JSON.stringify({ creatorId: id, score, comment: comment.trim() || undefined }),
+          body: JSON.stringify({
+            creatorId: id,
+            score,
+            comment: comment.trim() || undefined, // server caps length
+          }),
         });
         const j = await res.json().catch(() => null);
+
+        if (res.status === 409 || j?.reason === 'duplicate') {
+          setOkMsg('You already rated this creator.');
+          // Reload canonical data to drop optimistic entry if necessary
+          await fetchRatings();
+          return;
+        }
+
         if (!res.ok || !j?.ok) {
           throw new Error(j?.error || `Failed (${res.status})`);
         }
+
         setOkMsg('Thanks for rating!');
         setComment('');
         setScore(0);
-        // Re-sync from server to ensure canonical state
-        fetchRatings();
+        await fetchRatings(); // ensure avg/count match server
       } catch (e: any) {
         setError(e?.message || 'Something went wrong.');
-        // If it failed, reload to drop optimistic change
-        fetchRatings();
+        await fetchRatings(); // drop optimistic state on error
       }
     });
   }, [canSubmit, comment, fetchRatings, id, score]);
@@ -121,7 +143,7 @@ export default function RatingWidget({ creatorId }: Props) {
         <div>
           <h3 className="text-sm font-medium">Rate this creator</h3>
           <div className="text-xs text-slate-400">
-            Average {Number(data?.avg ?? 0).toFixed(1)} / 5 · {data?.count ?? 0} ratings
+            Average {Number(data?.avg ?? 0).toFixed(2)} / 5 · {data?.count ?? 0} ratings
           </div>
         </div>
 
@@ -144,9 +166,7 @@ export default function RatingWidget({ creatorId }: Props) {
                 title={`${n} star${n > 1 ? 's' : ''}`}
               >
                 <Star
-                  className={`h-6 w-6 ${
-                    active ? 'fill-yellow-300 text-yellow-300' : 'text-slate-400'
-                  }`}
+                  className={`h-6 w-6 ${active ? 'fill-yellow-300 text-yellow-300' : 'text-slate-400'}`}
                 />
               </button>
             );
@@ -163,7 +183,7 @@ export default function RatingWidget({ creatorId }: Props) {
           id="rating-comment"
           value={comment}
           onChange={(e) => setComment(e.target.value)}
-          maxLength={560} // hard cap guard; UI still shows remaining vs 280 soft limit
+          maxLength={560} // hard guard; API trims further if needed
           placeholder="What did you like? What can improve?"
           className="w-full rounded-lg border border-white/10 bg-transparent p-2 text-sm outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-400/30"
           rows={3}
@@ -205,9 +225,7 @@ export default function RatingWidget({ creatorId }: Props) {
                 {[1, 2, 3, 4, 5].map((n) => (
                   <Star
                     key={n}
-                    className={`h-3.5 w-3.5 ${
-                      r.score >= n ? 'fill-yellow-300 text-yellow-300' : 'text-slate-500'
-                    }`}
+                    className={`h-3.5 w-3.5 ${r.score >= n ? 'fill-yellow-300 text-yellow-300' : 'text-slate-500'}`}
                   />
                 ))}
                 <span className="ml-2 text-slate-500">
