@@ -1,17 +1,31 @@
 // app/creator/[id]/EditProfileBox.tsx
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import toast from 'react-hot-toast';
 
 const MAX_BIO_WORDS = 250;
+const MAX_AVATAR_MB = 10;
 
+// Turn ipfs:// into a gateway URL for previewing
+function ipfsToHttp(u?: string | null) {
+  if (!u) return '';
+  if (u.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${u.slice('ipfs://'.length)}`;
+  return u;
+}
+
+// Append a cache-busting version param
 function withVersion(url: string, v?: number) {
   if (!url) return url;
-  if (!/^https?:\/\//i.test(url)) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}v=${v ?? Date.now()}`;
+  const src = url.startsWith('ipfs://') ? ipfsToHttp(url) : url;
+  if (!/^https?:\/\//i.test(src)) return src; // allow relative /icon-192.png
+  const sep = src.includes('?') ? '&' : '?';
+  return `${src}${sep}v=${v ?? Date.now()}`;
+}
+
+function wordCountOf(s: string) {
+  return s.trim().split(/\s+/).filter(Boolean).length;
 }
 
 export default function EditProfileBox({
@@ -30,19 +44,27 @@ export default function EditProfileBox({
   // Collapsed by default
   const [open, setOpen] = useState(false);
 
-  // Editable state
+  // Editable state (seeded from props)
   const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
   const [bio, setBio] = useState(currentBio || '');
 
   // Ops state
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-
   const [avatarVersion, setAvatarVersion] = useState<number | undefined>(undefined);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const wordCount = bio.trim().split(/\s+/).filter(Boolean).length;
+  // Keep local state in sync when the panel re-opens (user might have saved elsewhere)
+  useEffect(() => {
+    if (!open) return;
+    setAvatarUrl(currentAvatar || '');
+    setBio(currentBio || '');
+    // bump a small local version so preview updates if the props changed
+    setAvatarVersion(Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentAvatar, currentBio]);
 
+  const wc = useMemo(() => wordCountOf(bio), [bio]);
   const previewSrc = useMemo(
     () => withVersion(avatarUrl || '/icon-192.png', avatarVersion),
     [avatarUrl, avatarVersion]
@@ -57,8 +79,8 @@ export default function EditProfileBox({
       e.target.value = '';
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('Max 10 MB');
+    if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
+      toast.error(`Max ${MAX_AVATAR_MB} MB`);
       e.target.value = '';
       return;
     }
@@ -76,9 +98,9 @@ export default function EditProfileBox({
       if (!res.ok || !j?.ok || !j?.url) {
         throw new Error(j?.error || `upload failed (${res.status})`);
       }
+
       setAvatarUrl(j.url);
-      // version bump for cache-bust while editing
-      setAvatarVersion(Date.now());
+      setAvatarVersion(Date.now()); // local cache-bust while editing
       toast.success('Avatar uploaded');
     } catch (err: any) {
       toast.error(err?.message || 'Upload failed');
@@ -90,7 +112,8 @@ export default function EditProfileBox({
 
   const save = async () => {
     try {
-      if (wordCount > MAX_BIO_WORDS) {
+      const wcNow = wordCountOf(bio);
+      if (wcNow > MAX_BIO_WORDS) {
         throw new Error(`Bio must be ${MAX_BIO_WORDS} words or less`);
       }
 
@@ -113,12 +136,12 @@ export default function EditProfileBox({
 
       if (updated?.avatarUrl) setAvatarUrl(updated.avatarUrl);
       if (typeof updated?.bio === 'string') setBio(updated.bio);
-      // bump version with server's updatedAt so the header image picks up immediately
-      if (updated?.updatedAt) setAvatarVersion(Number(updated.updatedAt));
-      toast.success('Profile updated');
+      if (updated?.updatedAt) setAvatarVersion(Number(updated.updatedAt)); // server-driven cache-bust
 
-      // Close editor, refresh RSC, and notify parent if needed
+      toast.success('Profile updated');
       setOpen(false);
+
+      // Refresh RSC view + notify parent if needed
       router.refresh();
       onSaved?.();
     } catch (e: any) {
@@ -127,6 +150,8 @@ export default function EditProfileBox({
       setSaving(false);
     }
   };
+
+  const disableSave = saving || uploading || wc > MAX_BIO_WORDS;
 
   return (
     <section className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
@@ -181,7 +206,7 @@ export default function EditProfileBox({
                     onChange={(e) => setAvatarUrl(e.target.value)}
                   />
                   <p className="mt-1 text-[11px] text-slate-400">
-                    Use a direct image link or upload (PNG/JPG/GIF/WebP ≤ 10 MB).
+                    Use a direct image link or upload (PNG/JPG/GIF/WebP ≤ {MAX_AVATAR_MB} MB).
                   </p>
                 </div>
               </div>
@@ -189,7 +214,7 @@ export default function EditProfileBox({
 
             {/* Bio */}
             <div>
-              <label className="text-xs text-slate-300">Bio (max 250 words)</label>
+              <label className="text-xs text-slate-300">Bio (max {MAX_BIO_WORDS} words)</label>
               <textarea
                 className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
                 rows={4}
@@ -199,10 +224,10 @@ export default function EditProfileBox({
               />
               <p
                 className={`mt-1 text-[11px] ${
-                  wordCount > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'
+                  wc > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'
                 }`}
               >
-                {wordCount}/{MAX_BIO_WORDS} words
+                {wc}/{MAX_BIO_WORDS} words
               </p>
             </div>
           </div>
@@ -210,7 +235,7 @@ export default function EditProfileBox({
           <div className="flex items-center gap-2">
             <button
               onClick={save}
-              disabled={saving || uploading}
+              disabled={disableSave}
               className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
             >
               {saving ? 'Saving…' : 'Save changes'}
