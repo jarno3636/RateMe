@@ -13,6 +13,9 @@ type RateBoxProps = {
 };
 
 export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxProps) {
+  // Normalize once (lowercase, strip leading '@')
+  const id = useMemo(() => creatorId.trim().toLowerCase().replace(/^@+/, ''), [creatorId]);
+
   const [score, setScore] = useState<number>(5);
   const [hover, setHover] = useState<number | null>(null);
   const [comment, setComment] = useState('');
@@ -24,9 +27,8 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
 
   const canSubmit = useMemo(() => {
     if (busy) return false;
-    if (score < 1 || score > 5) return false;
+    if (!Number.isFinite(score) || score < 1 || score > 5) return false;
     if (tooLong) return false;
-    // Comment is optional; empty is fine
     return true;
   }, [busy, score, tooLong]);
 
@@ -34,30 +36,41 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
     const origin =
       (typeof window !== 'undefined' && window.location?.origin) ||
       (process.env.NEXT_PUBLIC_SITE_URL || 'https://rateme.app');
-    const url = `${origin.replace(/\/$/, '')}/creator/${encodeURIComponent(creatorId)}`;
-    const text = `I just rated @${creatorId} on Rate Me ⭐️${score}/5`;
+    const url = `${origin.replace(/\/$/, '')}/creator/${encodeURIComponent(id)}`;
+    const text = `I just rated @${id} on Rate Me ⭐️${score}/5`;
     return `https://warpcast.com/~/compose?text=${encodeURIComponent(text)}&embeds[]=${encodeURIComponent(url)}`;
-  }, [creatorId, score]);
+  }, [id, score]);
 
   const submit = useCallback(async () => {
     if (!canSubmit) return;
     setBusy(true);
     setJustRated(false);
     try {
+      // Server caps comment at 400; keep client conservative & trimmed
+      const payload = {
+        creatorId: id,
+        score,
+        comment: (comment || '').trim().slice(0, 400) || undefined,
+        raterFid,
+      };
+
       const res = await fetch('/api/rate', {
         method: 'POST',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         cache: 'no-store',
-        body: JSON.stringify({
-          creatorId,
-          score,
-          comment: comment.trim() || undefined,
-          raterFid,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
+
+      // Handle duplicate gracefully
+      if (res.status === 409 || j?.reason === 'duplicate') {
+        toast.success('You already rated this creator.');
+        setJustRated(true);
+        return;
+      }
+
+      if (!res.ok || !j?.ok) {
         const msg = j?.error || `Failed (${res.status})`;
         throw new Error(msg);
       }
@@ -70,7 +83,7 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
     } finally {
       setBusy(false);
     }
-  }, [canSubmit, creatorId, score, comment, raterFid]);
+  }, [canSubmit, id, score, comment, raterFid]);
 
   return (
     <section className="rounded-xl border border-white/10 bg-white/5 p-4">
@@ -80,7 +93,12 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
       </header>
 
       {/* Stars */}
-      <div className="mt-2 flex items-center gap-1" role="radiogroup" aria-label="Rating">
+      <div
+        className="mt-2 flex items-center gap-1"
+        role="radiogroup"
+        aria-label="Rating"
+        aria-required="true"
+      >
         {[1, 2, 3, 4, 5].map((n) => {
           const active = (hover ?? score) >= n;
           return (
@@ -95,11 +113,13 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
               onFocus={() => setHover(n)}
               onBlur={() => setHover(null)}
               onClick={() => setScore(n)}
+              disabled={busy}
               className={`inline-flex h-8 w-8 items-center justify-center rounded-full ring-1 ring-white/10 transition ${
                 active ? 'bg-yellow-400/80 text-slate-900 ring-yellow-400/40' : 'bg-white/10 text-yellow-300'
-              }`}
+              } ${busy ? 'opacity-60 cursor-not-allowed' : ''}`}
             >
               <Star className={`h-4 w-4 ${active ? '' : 'opacity-70'}`} aria-hidden="true" />
+              <span className="sr-only">{n} star{n > 1 ? 's' : ''}</span>
             </button>
           );
         })}
@@ -116,7 +136,8 @@ export default function RateBox({ creatorId, raterFid, maxLen = 280 }: RateBoxPr
         placeholder="Say something helpful (optional)"
         className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none placeholder:text-slate-500 focus:ring-2 focus:ring-cyan-400/30"
         rows={3}
-        maxLength={Math.max(maxLen * 2, maxLen)} // hard cap guard; UI still shows remaining
+        maxLength={Math.max(maxLen * 2, maxLen)} // hard cap guard; server still trims
+        disabled={busy}
       />
 
       {/* Footer row */}
