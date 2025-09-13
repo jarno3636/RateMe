@@ -1,25 +1,18 @@
+// app/api/creator/update/route.ts
 import { NextResponse } from 'next/server';
+import { updateCreatorKV } from '@/lib/kv';
 
-// Optional imports (guarded)
-let prisma: any = null;
-try {
-  // If your app has prisma at this path, this will work; otherwise it’ll be null and we’ll fall back.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  prisma = require('@/lib/prisma')?.prisma ?? require('@/lib/prisma')?.default ?? null;
-} catch { /* ignore */ }
+export const runtime = 'edge';
+export const dynamic = 'force-dynamic';
 
-let kv: any = null;
-try {
-  // If you have @vercel/kv configured, we can fall back to it.
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  kv = require('@vercel/kv');
-} catch { /* ignore */ }
+const MAX_BIO_WORDS = 250;
 
-function isUrlLike(s: unknown) {
-  if (typeof s !== 'string') return false;
+function wordCount(s: string) {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
+function isUrlish(s: string) {
   if (s.startsWith('ipfs://')) return true;
   try {
-    // Allow http(s) only
     const u = new URL(s);
     return u.protocol === 'http:' || u.protocol === 'https:';
   } catch {
@@ -27,82 +20,53 @@ function isUrlLike(s: unknown) {
   }
 }
 
-function wordCount(s: string) {
-  return s.trim().split(/\s+/).filter(Boolean).length;
-}
-
 export async function POST(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const id = String(body?.id || '').trim();
-    const avatarUrl = typeof body?.avatarUrl === 'string' ? body.avatarUrl.trim() : '';
-    const bio = typeof body?.bio === 'string' ? body.bio : '';
+    const b = await req.json().catch(() => ({}));
 
+    const id = String(b?.id || '').trim().toLowerCase();
     if (!id) {
-      return NextResponse.json({ ok: false, error: 'Missing creator id' }, { status: 400 });
-    }
-    if (bio && wordCount(bio) > 250) {
-      return NextResponse.json({ ok: false, error: 'Bio exceeds 250 words' }, { status: 400 });
-    }
-    if (avatarUrl && !(isUrlLike(avatarUrl))) {
-      return NextResponse.json({ ok: false, error: 'avatarUrl must be http(s):// or ipfs://' }, { status: 400 });
+      return NextResponse.json({ ok: false, error: 'missing id' }, { status: 400 });
     }
 
-    let updated: any = null;
+    const bio = typeof b?.bio === 'string' ? b.bio : undefined;
+    const avatarUrlRaw = typeof b?.avatarUrl === 'string' ? b.avatarUrl.trim() : undefined;
+    const handleRaw = typeof b?.handle === 'string' ? b.handle : undefined;
+    const address = typeof b?.address === 'string' ? b.address : undefined;
+    const displayName = typeof b?.displayName === 'string' ? b.displayName : undefined;
+    const fid = typeof b?.fid === 'number' ? b.fid : undefined;
 
-    // 1) Try Prisma first (if present)
-    if (prisma?.creator) {
-      updated = await prisma.creator.update({
-        where: { id },
-        data: {
-          avatarUrl: avatarUrl || null,
-          bio: bio || '',
-        },
-      });
+    if (bio && wordCount(bio) > MAX_BIO_WORDS) {
+      return NextResponse.json({ ok: false, error: 'bio > 250 words' }, { status: 400 });
+    }
+    if (avatarUrlRaw && !(avatarUrlRaw.startsWith('ipfs://') || isUrlish(avatarUrlRaw))) {
+      return NextResponse.json({ ok: false, error: 'bad avatarUrl' }, { status: 400 });
     }
 
-    // 2) Fall back to KV if Prisma unavailable or failed
-    if (!updated && kv) {
-      const key = `creator:${id}`;
-      const existing = await kv.get(key);
-      const nextValue = {
-        ...(existing || {}),
-        id,
-        avatarUrl: avatarUrl || null,
-        bio: bio || '',
-        updatedAt: Date.now(),
-      };
-      await kv.set(key, nextValue);
-      updated = nextValue;
-    }
+    // normalize handle to lowercase w/o leading @
+    const handle = handleRaw
+      ? handleRaw.trim().replace(/^@+/, '').toLowerCase()
+      : undefined;
 
-    if (!updated) {
-      // If neither backend is available, return OK but tell the dev what to enable.
-      return NextResponse.json({
-        ok: false,
-        error:
-          'No data backend found. Provide prisma (lib/prisma.ts) or @vercel/kv to persist creator updates.',
-      }, { status: 500 });
-    }
+    const updated = await updateCreatorKV({
+      id,
+      bio,
+      avatarUrl: avatarUrlRaw,
+      handle,
+      address,
+      displayName,
+      fid,
+    });
 
-    // Revalidate the creator page (works in Next 14/15 with App Router)
+    // Best-effort revalidate (safe to ignore on Edge)
     try {
       const { revalidatePath } = await import('next/cache');
       revalidatePath(`/creator/${id}`);
-    } catch {
-      // non-fatal
-    }
+      if (updated.handle) revalidatePath(`/creator/${updated.handle}`);
+    } catch { /* noop for Edge runtime */ }
 
-    // Normalize a minimal return shape for the client
-    const payload = {
-      id: String(updated.id ?? id),
-      avatarUrl: updated.avatarUrl ?? null,
-      bio: typeof updated.bio === 'string' ? updated.bio : '',
-      updatedAt: Number(updated.updatedAt ?? Date.now()),
-    };
-
-    return NextResponse.json({ ok: true, creator: payload }, { status: 200 });
+    return NextResponse.json({ ok: true, creator: updated }, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ ok: false, error: e?.message || 'server error' }, { status: 500 });
   }
 }
