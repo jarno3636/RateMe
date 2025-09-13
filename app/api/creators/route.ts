@@ -37,9 +37,10 @@ const Query = z.object({
     .transform((v) => (v ? Number(v) : undefined))
     .pipe(z.number().int().min(0).optional()),
   include: z.enum(['rating']).optional(),
+  q: z.string().trim().min(1).max(64).optional(), // simple search (handle/displayName)
 })
 
-/** ---------- mappers to ensure we return `Creator` ---------- */
+/** ---------- mappers to ensure we return `Creator` (ms timestamps) ---------- */
 function mapKVToCreator(item: {
   id: string
   handle?: string
@@ -48,8 +49,14 @@ function mapKVToCreator(item: {
   bio?: string
   address?: `0x${string}`
   createdAt?: number
+  updatedAt?: number
   fid?: number
 }): Creator {
+  const now = Date.now()
+  const createdAt =
+    typeof item.createdAt === 'number' && Number.isFinite(item.createdAt)
+      ? item.createdAt
+      : now
   return {
     id: String(item.id),
     handle: item.handle || '',
@@ -58,12 +65,13 @@ function mapKVToCreator(item: {
     bio: item.bio || '',
     address: (item.address ||
       '0x0000000000000000000000000000000000000000') as `0x${string}`,
-    createdAt:
-      typeof item.createdAt === 'number'
-        ? item.createdAt
-        : Math.floor(Date.now() / 1000),
+    createdAt, // ms
+    updatedAt:
+      typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt)
+        ? item.updatedAt
+        : now,
     fid: item.fid ?? 0,
-  }
+  } as Creator
 }
 
 function mapChainToCreator(item: {
@@ -74,8 +82,10 @@ function mapChainToCreator(item: {
   avatarURI: string
   bio: string
   fid: bigint
-  createdAt: bigint
+  createdAt: bigint // seconds on-chain
 }): Creator {
+  const createdSec = Number(item.createdAt ?? 0n)
+  const createdMs = Number.isFinite(createdSec) ? createdSec * 1000 : Date.now()
   return {
     id: item.id.toString(),
     handle: item.handle || '',
@@ -83,9 +93,10 @@ function mapChainToCreator(item: {
     avatarUrl: item.avatarURI || '',
     bio: item.bio || '',
     address: item.owner,
-    createdAt: Number(item.createdAt ?? 0n), // unix seconds
+    createdAt: createdMs, // ms
+    updatedAt: createdMs,
     fid: Number(item.fid ?? 0n),
-  }
+  } as Creator
 }
 
 /** ---------- handlers ---------- */
@@ -100,11 +111,14 @@ export async function GET(req: Request) {
       limit: url.searchParams.get('limit') ?? undefined,
       cursor: url.searchParams.get('cursor') ?? undefined,
       include: url.searchParams.get('include') ?? undefined,
+      q: url.searchParams.get('q') ?? undefined,
     })
 
     const limit = parsed.success ? parsed.data.limit ?? 12 : 12
     const cursor = parsed.success ? parsed.data.cursor ?? 0 : 0
     const include = parsed.success ? parsed.data.include : undefined
+    const q = parsed.success ? parsed.data.q : undefined
+    const qLower = q?.toLowerCase()
 
     // 1) Primary source: KV
     const page = await listCreatorsPage({ limit, cursor })
@@ -112,7 +126,7 @@ export async function GET(req: Request) {
     let nextCursor: number | null =
       typeof page.nextCursor === 'number' ? page.nextCursor : null
 
-    // 2) If KV is empty, fall back to chain list (first page only, keeps it simple)
+    // 2) If KV is empty, fall back to chain list (first page only)
     if (creators.length === 0 && cursor === 0) {
       try {
         const chain = await listProfilesFlat(0n, BigInt(limit))
@@ -124,7 +138,18 @@ export async function GET(req: Request) {
       }
     }
 
-    // 3) Optional enrichment: ratings
+    // 3) Optional search filter (local, lightweight)
+    if (qLower && creators.length) {
+      creators = creators.filter((c) => {
+        const h = (c.handle || '').toLowerCase()
+        const d = (c.displayName || '').toLowerCase()
+        return h.includes(qLower) || d.includes(qLower)
+      })
+      // When filtering locally, pagination semantics get fuzzy; keep nextCursor only if unfiltered length hit the page size
+      if (creators.length < limit) nextCursor = null
+    }
+
+    // 4) Optional enrichment: ratings
     let enriched: any[] = creators
     if (include === 'rating' && creators.length) {
       const summaries = await Promise.all(
@@ -136,7 +161,7 @@ export async function GET(req: Request) {
     }
 
     return NextResponse.json(
-      { creators: enriched, nextCursor },
+      { ok: true, creators: enriched, nextCursor },
       withCors({
         headers: {
           'Cache-Control': 's-maxage=15, stale-while-revalidate=60',
@@ -146,7 +171,7 @@ export async function GET(req: Request) {
   } catch (err) {
     console.error('listCreatorsPage failed:', err)
     return NextResponse.json(
-      { creators: [] as any[], nextCursor: null },
+      { ok: true, creators: [] as any[], nextCursor: null },
       withCors({
         status: 200,
         headers: { 'Cache-Control': 'no-store' },
