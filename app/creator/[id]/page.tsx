@@ -44,74 +44,21 @@ const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
 const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
-// --- NEW: safe registry address + helpers ---
+// --- helpers for safety/caching ---
+const safeNumber = (v: any, fallback = 0) => {
+  const n = typeof v === 'string' ? Number(v) : (v as number)
+  return Number.isFinite(n) ? n : fallback
+}
+const withVersion = (url: string, v?: number) => {
+  if (!url) return url
+  if (!/^https?:\/\//i.test(url)) return url
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}v=${v ?? Date.now()}`
+}
 const REG_ADDR: Address | undefined =
   isAddress(REGISTRY_ADDRESS as any) ? (REGISTRY_ADDRESS as Address) : undefined
-
 const isZeroAddr = (a?: string) =>
   !a || /^0x0{40}$/i.test(a.replace(/^0x/i, ''))
-
-/** Safely read on-chain by numeric id; swallow RPC/ABI errors */
-async function fetchOnchainById(idNum: bigint) {
-  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
-  try {
-    const r = (await pub.readContract({
-      address: REG_ADDR,
-      abi: PROFILE_REGISTRY_ABI as Abi,
-      functionName: 'getProfile',
-      args: [idNum],
-    })) as any
-    if (!r) return null
-
-    const owner = r[0] as Address
-    const handle = String(r[1] || '')
-    const displayName = String(r[2] || '')
-    const avatarUrl = String(r[3] || '')
-    const bio = String(r[4] || '')
-    const fid = Number(BigInt(r[5] || 0))
-    const createdAt = Number(BigInt(r[6] || 0)) * 1000
-
-    return {
-      id: handle || idNum.toString(),
-      handle: handle || idNum.toString(),
-      displayName: displayName || handle || idNum.toString(),
-      avatarUrl,
-      bio,
-      fid,
-      address: owner as `0x${string}`,
-      createdAt,
-    }
-  } catch {
-    return null
-  }
-}
-
-/** Safely read on-chain by handle; swallow RPC/ABI errors */
-async function fetchOnchainByHandle(handle: string) {
-  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
-  try {
-    const r = (await pub.readContract({
-      address: REG_ADDR,
-      abi: PROFILE_REGISTRY_ABI as Abi,
-      functionName: 'getProfileByHandle',
-      args: [handle],
-    })) as any
-    if (!r?.[0]) return null
-
-    return {
-      id: handle,
-      handle,
-      displayName: String(r[4] || handle),
-      avatarUrl: String(r[5] || ''),
-      bio: String(r[6] || ''),
-      fid: Number(BigInt(r[7] || 0)),
-      address: (r[2] || r[3]) as `0x${string}`,
-      createdAt: Number(BigInt(r[8] || 0)) * 1000,
-    }
-  } catch {
-    return null
-  }
-}
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const idParam = params.id.toLowerCase()
@@ -130,26 +77,81 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   }
 }
 
+/** On-chain fallbacks (bio usually comes from KV) */
+async function fetchOnchainById(idNum: bigint) {
+  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
+  try {
+    const r = (await pub.readContract({
+      address: REG_ADDR,
+      abi: PROFILE_REGISTRY_ABI as Abi,
+      functionName: 'getProfile',
+      args: [idNum],
+    })) as any
+    if (!r) return null
+    const owner = r[0] as Address
+    const handle = String(r[1] || '')
+    const displayName = String(r[2] || '')
+    const avatarUrl = String(r[3] || '')
+    const bio = String(r[4] || '')
+    const fid = Number(BigInt(r[5] || 0))
+    const createdAt = Number(BigInt(r[6] || 0)) * 1000
+    return {
+      id: handle || idNum.toString(),
+      handle: handle || idNum.toString(),
+      displayName: displayName || handle || idNum.toString(),
+      avatarUrl,
+      bio,
+      fid,
+      address: owner as `0x${string}`,
+      createdAt,
+    }
+  } catch {
+    return null
+  }
+}
+async function fetchOnchainByHandle(handle: string) {
+  if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
+  try {
+    const r = (await pub.readContract({
+      address: REG_ADDR,
+      abi: PROFILE_REGISTRY_ABI as Abi,
+      functionName: 'getProfileByHandle',
+      args: [handle],
+    })) as any
+    if (!r?.[0]) return null
+    return {
+      id: handle,
+      handle,
+      displayName: String(r[4] || handle),
+      avatarUrl: String(r[5] || ''),
+      bio: String(r[6] || ''),
+      fid: Number(BigInt(r[7] || 0)),
+      address: (r[2] || r[3]) as `0x${string}`,
+      createdAt: Number(BigInt(r[8] || 0)) * 1000,
+    }
+  } catch {
+    return null
+  }
+}
+
 export default async function CreatorPage({ params }: Params) {
   const raw = params.id || ''
   const idParam = raw.toLowerCase()
 
-  // KV first (fast path for freshly registered creators)
+  // 1) KV (authoritative for bio/avatar)
   let creator =
     (await getCreator(idParam).catch(() => null)) ||
     (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
 
-  // On-chain fallback (fully guarded)
+  // 2) Fallback to chain only if KV missing
   if (!creator) {
-    if (isNumericId(idParam)) {
-      creator = await fetchOnchainById(BigInt(idParam))
-    } else {
-      creator = await fetchOnchainByHandle(normalizeHandle(idParam))
-    }
+    creator = isNumericId(idParam)
+      ? await fetchOnchainById(BigInt(idParam))
+      : await fetchOnchainByHandle(normalizeHandle(idParam))
   }
-
   if (!creator) return notFound()
 
+  // Ratings (KV)
   const rating = await getRatingSummary(creator.id).catch(() => ({
     count: 0,
     sum: 0,
@@ -162,17 +164,17 @@ export default async function CreatorPage({ params }: Params) {
     ? `${rating.avg.toFixed(2)} • ${rating.count} ratings`
     : 'No ratings yet'
 
-  // Cache-bust avatar when updated
-  const updatedAt = Number((creator as any).updatedAt || 0)
+  // Cache-bust avatar when updated; coerce updatedAt safely (could be string from KV)
+  const updatedAt = safeNumber((creator as any).updatedAt, 0)
   const avatarBase = creator.avatarUrl || '/icon-192.png'
-  const avatarSrc =
-    updatedAt && avatarBase.startsWith('http')
-      ? `${avatarBase}${avatarBase.includes('?') ? '&' : '?'}v=${updatedAt}`
-      : avatarBase
+  const avatarSrc = avatarBase.startsWith('http')
+    ? withVersion(avatarBase, updatedAt || undefined)
+    : avatarBase
 
+  // Show bio (truncate to 280, preserve newlines)
+  const rawBio = (creator.bio || '').toString()
   const bio =
-    (creator.bio || '').toString().slice(0, 280) +
-    ((creator.bio || '').length > 280 ? '…' : '')
+    rawBio.slice(0, 280) + (rawBio.length > 280 ? '…' : '')
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
@@ -209,7 +211,9 @@ export default async function CreatorPage({ params }: Params) {
             </div>
 
             {bio ? (
-              <p className="mx-auto max-w-2xl text-sm leading-relaxed text-slate-300">{bio}</p>
+              <p className="mx-auto max-w-2xl whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
+                {bio}
+              </p>
             ) : null}
           </div>
 
@@ -217,7 +221,6 @@ export default async function CreatorPage({ params }: Params) {
           <div className="w-full">
             <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-2">
               <ShareBar creatorId={creator.id} handle={creator.handle} />
-
               {hasAddress && (
                 <a
                   href={`${BASESCAN}/address/${creator.address}`}
@@ -230,7 +233,6 @@ export default async function CreatorPage({ params }: Params) {
                   <ExternalLink className="ml-1 h-3.5 w-3.5 opacity-80" />
                 </a>
               )}
-
               {hasAddress ? (
                 <div className="ml-1">
                   <SubscriptionBadge creatorAddress={creator.address as `0x${string}`} />
