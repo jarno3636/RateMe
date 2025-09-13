@@ -4,6 +4,7 @@ import {
   createPublicClient,
   http,
   isAddress,
+  getAddress,
   verifyMessage,
   type Address,
 } from 'viem'
@@ -31,27 +32,59 @@ function json(data: unknown, init?: ResponseInit) {
 }
 
 /* ------------------------------ nonce helpers ----------------------------- */
+/**
+ * We bind nonces to a specific "scope" (mode/postId/creator) to prevent replays
+ * across different gating actions. If you issue a nonce without scope, it
+ * behaves as a wildcard (backward compatible).
+ */
 
 const NONCE_TTL = 60 * 10 // 10 minutes
+
+type NonceScope = {
+  mode?: 'post' | 'sub'
+  postId?: string // keep as string to avoid edge bigint serialization gotchas
+  creator?: Address
+}
 
 function nonceKey(user: Address, nonce: string) {
   return `auth:nonce:${user.toLowerCase()}:${nonce}`
 }
 
-/** Generate a nonce and store in KV (one-time use) */
-async function issueNonce(user: Address) {
+/** Generate a nonce and store in KV with optional scope (one-time use) */
+async function issueNonce(user: Address, scope?: NonceScope) {
   const nonce = crypto.randomUUID().replace(/-/g, '')
-  await kv.set(nonceKey(user, nonce), Date.now(), { ex: NONCE_TTL })
+  const payload = JSON.stringify({
+    t: Date.now(),
+    scope: scope || null, // null means wildcard
+  })
+  await kv.set(nonceKey(user, nonce), payload, { ex: NONCE_TTL })
   return nonce
 }
 
-/** Consume a nonce (returns false if missing/expired) */
-async function consumeNonce(user: Address, nonce: string) {
+/** Consume a nonce (returns false if missing/expired or scope-mismatch) */
+async function consumeNonce(user: Address, nonce: string, scope?: NonceScope) {
   const key = nonceKey(user, nonce)
-  const exists = await kv.get(key)
-  if (!exists) return false
+  const raw = await kv.get<string>(key)
+  if (!raw) return { ok: false as const, reason: 'badNonce' as const }
   await kv.del(key)
-  return true
+
+  // If the nonce was unscoped, accept any scope.
+  try {
+    const parsed = JSON.parse(raw) as { t: number; scope: NonceScope | null }
+    if (!parsed.scope) return { ok: true as const }
+    // Compare provided scope to stored scope.
+    const a = parsed.scope
+    const b = scope || {}
+    if (a.mode && a.mode !== b.mode) return { ok: false as const, reason: 'scopeMismatch' as const }
+    if (a.postId && a.postId !== b.postId) return { ok: false as const, reason: 'scopeMismatch' as const }
+    if (a.creator && a.creator.toLowerCase() !== (b.creator || '').toLowerCase()) {
+      return { ok: false as const, reason: 'scopeMismatch' as const }
+    }
+    return { ok: true as const }
+  } catch {
+    // If parsing fails, treat as invalid
+    return { ok: false as const, reason: 'badNonce' as const }
+  }
 }
 
 /* ------------------------- signature verification ------------------------- */
@@ -86,9 +119,14 @@ async function verifySig(opts: {
 }) {
   if (!opts.signature || !opts.nonce) return { ok: false, reason: 'missingSig' as const }
 
-  // Nonce must exist (one-time); consume to prevent replay
-  const okNonce = await consumeNonce(opts.user, opts.nonce)
-  if (!okNonce) return { ok: false, reason: 'badNonce' as const }
+  // Bind nonce consumption to the same scope as the message we verify.
+  const scope: NonceScope = {
+    mode: opts.mode,
+    postId: opts.postId ? opts.postId.toString() : undefined,
+    creator: opts.creator,
+  }
+  const nonceCheck = await consumeNonce(opts.user, opts.nonce, scope)
+  if (!nonceCheck.ok) return { ok: false, reason: nonceCheck.reason }
 
   const msg = opts.message || gateMessage({
     mode: opts.mode,
@@ -140,17 +178,58 @@ async function verifyFarcasterCustody(fid: number, user: Address) {
 /* --------------------------------- GET ------------------------------------ */
 /**
  * GET
- * - /api/gate                      -> health
- * - /api/gate?nonce=0xUserAddress  -> issue one-time nonce (for signing)
+ * - /api/gate
+ *     -> health: { ok, hub, chainId }
+ *
+ * - /api/gate?nonce=0xUserAddress[&mode=post|sub][&postId=123][&creator=0x...]
+ *     -> issue one-time nonce (optionally bound to scope)
  */
 export async function GET(req: NextRequest) {
-  const sp = new URL(req.url).searchParams
-  const nonceFor = sp.get('nonce') || ''
+  const url = new URL(req.url)
+  const nonceFor = (url.searchParams.get('nonce') || '').trim()
+  const scopeMode = (url.searchParams.get('mode') || '').trim() as 'post' | 'sub' | ''
+  const scopePostId = (url.searchParams.get('postId') || '').trim()
+  const scopeCreator = (url.searchParams.get('creator') || '').trim()
 
   if (nonceFor) {
-    if (!isAddress(nonceFor)) return json({ ok: false, error: 'Invalid address' }, { status: 400 })
-    const nonce = await issueNonce(nonceFor as Address)
-    return json({ ok: true, nonce, expiresInSeconds: NONCE_TTL })
+    if (!isAddress(nonceFor)) {
+      return json({ ok: false, error: 'Invalid address' }, { status: 400 })
+    }
+
+    // Lightweight rate limit per IP for nonce issuing
+    const ip =
+      req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+      req.headers.get('x-real-ip') ||
+      'unknown'
+    const rlKey = `rl:gate-nonce:${getAddress(nonceFor)}:${ip}`
+    const ok = await kv.set(rlKey, '1', { nx: true, ex: 5 }) // 1 nonce / 5s per IP
+    if (!ok) return json({ ok: false, error: 'Slow down' }, { status: 429 })
+
+    // Optional scope binding
+    let scope: NonceScope | undefined
+    try {
+      if (scopeMode === 'post' || scopeMode === 'sub') {
+        const scoped: NonceScope = { mode: scopeMode }
+        if (scopeMode === 'post') {
+          if (scopePostId) {
+            // Validate postId is a positive bigint-ish string
+            const n = BigInt(scopePostId)
+            if (n <= 0n) throw new Error('postId must be > 0')
+            scoped.postId = n.toString()
+          }
+        }
+        if (scopeCreator) {
+          if (!isAddress(scopeCreator)) throw new Error('Invalid creator')
+          scoped.creator = getAddress(scopeCreator)
+        }
+        scope = scoped
+      }
+    } catch (e: any) {
+      return json({ ok: false, error: e?.message || 'Invalid scope' }, { status: 400 })
+    }
+
+    const nonce = await issueNonce(getAddress(nonceFor), scope)
+    return json({ ok: true, nonce, expiresInSeconds: NONCE_TTL, scoped: !!scope })
   }
 
   const client = getClient()
@@ -160,7 +239,7 @@ export async function GET(req: NextRequest) {
 /* --------------------------------- POST ----------------------------------- */
 /**
  * POST body (choose one mode) and optional proofs:
- * - { mode:"post", user:"0x...", postId:number, sig?, nonce?, message?, fid? }
+ * - { mode:"post", user:"0x...", postId:number|string, sig?, nonce?, message?, fid? }
  * - { mode:"sub",  user:"0x...", creator:"0x...", sig?, nonce?, message?, fid? }
  *
  * Proof options:
@@ -172,27 +251,34 @@ export async function POST(req: NextRequest) {
   let body: any
   try { body = await req.json() } catch { return json({ ok: false, error: 'Invalid JSON' }, { status: 400 }) }
 
-  const mode = (body?.mode || 'post') as 'post' | 'sub'
-  const user = String(body?.user || '') as Address
-  if (!isAddress(user)) return json({ ok: false, error: 'Invalid user address' }, { status: 400 })
+  const rawMode = String(body?.mode || 'post')
+  const mode = rawMode === 'sub' ? 'sub' : 'post'
+
+  const rawUser = String(body?.user || '')
+  if (!isAddress(rawUser)) return json({ ok: false, error: 'Invalid user address' }, { status: 400 })
+  const user = getAddress(rawUser)
 
   const client = getClient()
 
   try {
-    let allowed = false
-    let reason = 'noAccess'
-
-    // ----- On-chain gate
     if (mode === 'post') {
-      const postId = BigInt(body?.postId ?? 0)
-      if (postId <= 0n) return json({ ok: false, error: 'Missing/invalid postId' }, { status: 400 })
-      allowed = (await client.readContract({
+      // Accept postId as number | string, but coerce safely to BigInt
+      const pidRaw = body?.postId
+      const pidStr = typeof pidRaw === 'string' ? pidRaw : String(pidRaw ?? '')
+      let postId: bigint
+      try {
+        postId = BigInt(pidStr)
+        if (postId <= 0n) throw new Error()
+      } catch {
+        return json({ ok: false, error: 'Missing/invalid postId' }, { status: 400 })
+      }
+
+      const allowed = (await client.readContract({
         address: CREATOR_HUB_ADDR,
         abi: CREATOR_HUB_ABI,
         functionName: 'hasPostAccess',
         args: [user, postId],
       })) as boolean
-      reason = allowed ? 'hasAccess' : 'noAccess'
 
       // proofs (optional)
       const sigProof = await verifySig({
@@ -209,7 +295,7 @@ export async function POST(req: NextRequest) {
         user,
         postId: postId.toString(),
         allowed,
-        reason,
+        reason: allowed ? 'hasAccess' : 'noAccess',
         auth: {
           signature: sigProof.ok,
           signatureReason: sigProof.ok ? undefined : sigProof.reason,
@@ -219,43 +305,41 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    if (mode === 'sub') {
-      const creator = String(body?.creator || '') as Address
-      if (!isAddress(creator)) return json({ ok: false, error: 'Invalid creator address' }, { status: 400 })
+    // mode === 'sub'
+    const rawCreator = String(body?.creator || '')
+    if (!isAddress(rawCreator)) return json({ ok: false, error: 'Invalid creator address' }, { status: 400 })
+    const creator = getAddress(rawCreator)
 
-      const active = (await client.readContract({
-        address: CREATOR_HUB_ADDR,
-        abi: CREATOR_HUB_ABI,
-        functionName: 'isActive',
-        args: [user, creator],
-      })) as boolean
+    const active = (await client.readContract({
+      address: CREATOR_HUB_ADDR,
+      abi: CREATOR_HUB_ABI,
+      functionName: 'isActive',
+      args: [user, creator],
+    })) as boolean
 
-      // proofs (optional)
-      const sigProof = await verifySig({
-        mode, user, creator,
-        nonce: body?.nonce, signature: body?.sig, message: body?.message,
-      })
-      const fcProof = typeof body?.fid === 'number'
-        ? await verifyFarcasterCustody(body.fid, user)
-        : { ok: false as const, reason: 'noFid' as const }
+    // proofs (optional)
+    const sigProof = await verifySig({
+      mode, user, creator,
+      nonce: body?.nonce, signature: body?.sig, message: body?.message,
+    })
+    const fcProof = typeof body?.fid === 'number'
+      ? await verifyFarcasterCustody(body.fid, user)
+      : { ok: false as const, reason: 'noFid' as const }
 
-      return json({
-        ok: true,
-        mode,
-        user,
-        creator,
-        allowed: active,
-        reason: active ? 'activeSubscription' : 'inactive',
-        auth: {
-          signature: sigProof.ok,
-          signatureReason: sigProof.ok ? undefined : sigProof.reason,
-          farcaster: fcProof.ok,
-          farcasterReason: fcProof.ok ? undefined : fcProof.reason,
-        },
-      })
-    }
-
-    return json({ ok: false, error: 'Unknown mode' }, { status: 400 })
+    return json({
+      ok: true,
+      mode,
+      user,
+      creator,
+      allowed: active,
+      reason: active ? 'activeSubscription' : 'inactive',
+      auth: {
+        signature: sigProof.ok,
+        signatureReason: sigProof.ok ? undefined : sigProof.reason,
+        farcaster: fcProof.ok,
+        farcasterReason: fcProof.ok ? undefined : fcProof.reason,
+      },
+    })
   } catch (err: any) {
     const msg = err?.shortMessage || err?.message || String(err)
     return json({ ok: false, error: msg }, { status: 500 })
