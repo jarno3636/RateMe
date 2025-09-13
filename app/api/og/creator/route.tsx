@@ -4,20 +4,51 @@ import { NextRequest } from 'next/server'
 import {
   getCreator as _getCreator,
   getCreatorByHandle as _getCreatorByHandle,
+  getRatingSummary as _getRatingSummary,
 } from '@/lib/kv'
 
 export const runtime = 'edge'
 
-// If you want a different size, just change these and the styles below.
+// ---- Canvas size (change if you want a different OG size) ----
 const WIDTH = 1200
 const HEIGHT = 630
+
+// Prefer your own gateway if you have one (e.g., https://gateway.pinata.cloud/ipfs/)
+const IPFS_HTTP_GATEWAY =
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY?.replace(/\/$/, '') || 'https://ipfs.io/ipfs'
 
 function siteUrl() {
   return (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
 }
 
 function normalizeId(s: string) {
-  return String(s || '').trim().replace(/^@/, '').toLowerCase()
+  return String(s || '').trim().replace(/^@+/, '').toLowerCase()
+}
+
+function withVersion(url?: string | null, v?: number | null) {
+  if (!url) return url ?? undefined
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}v=${Number.isFinite(Number(v)) ? Number(v) : Date.now()}`
+}
+
+function ipfsToHttp(u?: string | null) {
+  if (!u) return undefined
+  if (u.startsWith('ipfs://')) {
+    const cid = u.replace('ipfs://', '')
+    return `${IPFS_HTTP_GATEWAY}/${cid}`
+  }
+  return u
+}
+
+function safeHttpUrl(u?: string | null) {
+  if (!u) return undefined
+  try {
+    const url = new URL(u)
+    if (url.protocol === 'http:' || url.protocol === 'https:') return u
+    return undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function getCreator(idOrHandle: string) {
@@ -31,9 +62,10 @@ async function getCreator(idOrHandle: string) {
     handle: id,
     address: null,
     displayName: id,
-    avatarUrl: undefined,
-    bio: undefined,
+    avatarUrl: undefined as string | undefined,
+    bio: undefined as string | undefined,
     createdAt: Date.now(),
+    updatedAt: Date.now(),
   }
 }
 
@@ -68,11 +100,28 @@ export async function GET(req: NextRequest) {
   const title = c.displayName || c.handle || 'Creator'
   const handle = c.handle?.startsWith('@') ? c.handle : `@${c.handle || 'unknown'}`
 
-  const avatarNode = c.avatarUrl ? (
+  // avatar handling: ipfs->http, add ?v=updatedAt, ensure http(s)
+  const avatarProcessed =
+    safeHttpUrl(withVersion(ipfsToHttp(c.avatarUrl), (c as any)?.updatedAt)) ||
+    undefined
+
+  // rating summary (best-effort; don’t block OG if missing)
+  let ratingPill: string | null = null
+  try {
+    const sum = await _getRatingSummary(c.id)
+    if (sum?.count && sum.count > 0) {
+      const avg = (sum.avg || 0).toFixed(2)
+      ratingPill = `★ ${avg} • ${sum.count} rating${sum.count === 1 ? '' : 's'}`
+    }
+  } catch {
+    // ignore rating failures for OG
+  }
+
+  const avatarNode = avatarProcessed ? (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       alt="avatar"
-      src={c.avatarUrl}
+      src={avatarProcessed}
       width={240}
       height={240}
       style={{ objectFit: 'cover', width: '100%', height: '100%' }}
@@ -80,6 +129,12 @@ export async function GET(req: NextRequest) {
   ) : (
     letterAvatar((handle.replace(/^@/, '') || 'U')[0] || 'U')
   )
+
+  const bioShort = c.bio ? String(c.bio) : ''
+  const bioDisplay =
+    bioShort.length > 0
+      ? `${bioShort.slice(0, 150)}${bioShort.length > 150 ? '…' : ''}`
+      : 'Creator on Base — subscriptions, paid posts & ratings.'
 
   return new ImageResponse(
     (
@@ -123,26 +178,36 @@ export async function GET(req: NextRequest) {
 
         <div style={{ display: 'flex', flexDirection: 'column', marginLeft: 40, gap: 16 }}>
           <div style={{ fontSize: 56, fontWeight: 800, letterSpacing: -1 }}>{title}</div>
-          <div style={{ fontSize: 36, color: '#93c5fd' }}>{handle}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ fontSize: 36, color: '#93c5fd' }}>{handle}</div>
+            {ratingPill ? (
+              <div
+                style={{
+                  fontSize: 24,
+                  padding: '6px 14px',
+                  borderRadius: 999,
+                  background: 'rgba(253, 224, 71, 0.12)',
+                  border: '1px solid rgba(253, 224, 71, 0.45)',
+                  color: '#fde047',
+                }}
+              >
+                {ratingPill}
+              </div>
+            ) : null}
+          </div>
 
-          {c.bio ? (
-            <div
-              style={{
-                marginTop: 6,
-                fontSize: 28,
-                maxWidth: 760,
-                color: 'rgba(229,231,235,0.9)',
-                lineHeight: 1.25,
-              }}
-            >
-              {String(c.bio).slice(0, 150)}
-              {String(c.bio).length > 150 ? '…' : ''}
-            </div>
-          ) : (
-            <div style={{ marginTop: 6, fontSize: 28, color: 'rgba(229,231,235,0.6)' }}>
-              Creator on Base — subscriptions, paid posts & ratings.
-            </div>
-          )}
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 28,
+              maxWidth: 760,
+              color: 'rgba(229,231,235,0.9)',
+              lineHeight: 1.25,
+              whiteSpace: 'pre-wrap',
+            }}
+          >
+            {bioDisplay}
+          </div>
 
           <div style={{ marginTop: 28, display: 'flex', gap: 18, alignItems: 'center' }}>
             <div
@@ -165,7 +230,7 @@ export async function GET(req: NextRequest) {
     {
       width: WIDTH,
       height: HEIGHT,
-      // Set headers here (instead of using invalid route exports)
+      // headers here (route export headers are ignored by og responses)
       headers: {
         'Content-Type': 'image/png',
         'Cache-Control': 'public, s-maxage=60, max-age=60, stale-while-revalidate=30',
