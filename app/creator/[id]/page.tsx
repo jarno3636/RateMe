@@ -12,6 +12,7 @@ import ShareBar from '@/components/ShareBar'
 import RateBox from '@/components/RateBox'
 import OnchainSections from '@/components/OnchainSections'
 import SubscriptionBadge from '@/components/SubscriptionBadge'
+import OwnerInline from './OwnerInline'
 import { Star, ExternalLink } from 'lucide-react'
 
 import type { Abi, Address } from 'viem'
@@ -19,9 +20,8 @@ import { createPublicClient, http, isAddress } from 'viem'
 import { base } from 'viem/chains'
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi'
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants'
-import OwnerInline from './OwnerInline'
 
-// 🔒 ensure no stale HTML or data
+// 🔒 make sure we never serve stale HTML/data
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 export const fetchCache = 'force-no-store'
@@ -40,44 +40,57 @@ const pub = createPublicClient({
   ),
 })
 
+/* ---------------- helpers ---------------- */
 const isNumericId = (s: string) => /^\d+$/.test(s)
 const normalizeHandle = (s: string) => s.trim().replace(/^@+/, '').toLowerCase()
 const short = (a?: string | null) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
-// --- helpers for safety/caching ---
 const safeNumber = (v: any, fallback = 0) => {
   const n = typeof v === 'string' ? Number(v) : (v as number)
   return Number.isFinite(n) ? n : fallback
 }
-const withVersion = (url: string, v?: number) => {
-  if (!url) return url
-  if (!/^https?:\/\//i.test(url)) return url
-  const sep = url.includes('?') ? '&' : '?'
-  return `${url}${sep}v=${v ?? Date.now()}`
-}
-const REG_ADDR: Address | undefined =
-  isAddress(REGISTRY_ADDRESS as any) ? (REGISTRY_ADDRESS as Address) : undefined
 const isZeroAddr = (a?: string) =>
   !a || /^0x0{40}$/i.test(a.replace(/^0x/i, ''))
 
+const ipfs = (u?: string) =>
+  u?.startsWith('ipfs://')
+    ? `https://ipfs.io/ipfs/${u.slice('ipfs://'.length)}`
+    : u || ''
+
+const withVersion = (url: string, v?: number) => {
+  const src = ipfs(url)
+  if (!src) return src
+  if (!/^https?:\/\//i.test(src)) return src // allow relative like /icon-192.png
+  const sep = src.includes('?') ? '&' : '?'
+  return `${src}${sep}v=${v ?? Date.now()}`
+}
+
+const REG_ADDR: Address | undefined =
+  isAddress(REGISTRY_ADDRESS as any) ? (REGISTRY_ADDRESS as Address) : undefined
+
+/* ---------------- metadata ---------------- */
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
-  const idParam = params.id.toLowerCase()
-  const kv = await getCreator(idParam).catch(() => null)
-  const title = kv
+  const idParam = (params.id || '').toLowerCase()
+  // best-effort KV lookup for title
+  const kv =
+    (await getCreator(idParam).catch(() => null)) ||
+    (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
+
+  const baseTitle = kv
     ? `${kv.displayName || kv.handle} (@${kv.handle}) — Rate Me`
-    : `@${idParam} — Rate Me`
+    : `@${normalizeHandle(idParam)} — Rate Me`
 
   const url = `${SITE_CLEAN}/creator/${encodeURIComponent(idParam)}`
   const og = `${SITE_CLEAN}/api/og/creator?id=${encodeURIComponent(idParam)}`
   return {
-    title,
+    title: baseTitle,
     alternates: { canonical: url },
-    openGraph: { title, url, images: [{ url: og, width: 1200, height: 630 }] },
-    twitter: { card: 'summary_large_image', images: [og], title },
+    openGraph: { title: baseTitle, url, images: [{ url: og, width: 1200, height: 630 }] },
+    twitter: { card: 'summary_large_image', images: [og], title: baseTitle },
   }
 }
 
-/** On-chain fallbacks (bio usually comes from KV) */
+/* ---------------- on-chain fallbacks ---------------- */
 async function fetchOnchainById(idNum: bigint) {
   if (!REG_ADDR || isZeroAddr(REG_ADDR)) return null
   try {
@@ -94,7 +107,7 @@ async function fetchOnchainById(idNum: bigint) {
     const avatarUrl = String(r[3] || '')
     const bio = String(r[4] || '')
     const fid = Number(BigInt(r[5] || 0))
-    const createdAt = Number(BigInt(r[6] || 0)) * 1000
+    const createdAt = Number(BigInt(r[6] || 0)) * 1000 // ms
     return {
       id: handle || idNum.toString(),
       handle: handle || idNum.toString(),
@@ -127,27 +140,29 @@ async function fetchOnchainByHandle(handle: string) {
       bio: String(r[6] || ''),
       fid: Number(BigInt(r[7] || 0)),
       address: (r[2] || r[3]) as `0x${string}`,
-      createdAt: Number(BigInt(r[8] || 0)) * 1000,
+      createdAt: Number(BigInt(r[8] || 0)) * 1000, // ms
     }
   } catch {
     return null
   }
 }
 
+/* ---------------- page ---------------- */
 export default async function CreatorPage({ params }: Params) {
   const raw = params.id || ''
   const idParam = raw.toLowerCase()
+  const handleParam = normalizeHandle(idParam)
 
-  // 1) KV (authoritative for bio/avatar)
+  // 1) KV first (authoritative for avatar/bio)
   let creator =
     (await getCreator(idParam).catch(() => null)) ||
-    (await getCreatorByHandle(normalizeHandle(idParam)).catch(() => null))
+    (await getCreatorByHandle(handleParam).catch(() => null))
 
-  // 2) Fallback to chain only if KV missing
+  // 2) On-chain fallbacks only if KV missing
   if (!creator) {
-    creator = isNumericId(idParam)
-      ? await fetchOnchainById(BigInt(idParam))
-      : await fetchOnchainByHandle(normalizeHandle(idParam))
+    creator = isNumericId(handleParam)
+      ? await fetchOnchainById(BigInt(handleParam))
+      : await fetchOnchainByHandle(handleParam)
   }
   if (!creator) return notFound()
 
@@ -164,28 +179,27 @@ export default async function CreatorPage({ params }: Params) {
     ? `${rating.avg.toFixed(2)} • ${rating.count} ratings`
     : 'No ratings yet'
 
-  // Cache-bust avatar when updated; coerce updatedAt safely (could be string from KV)
+  // Avatar (cache-busted). Support ipfs:// and absolute/relative URLs.
   const updatedAt = safeNumber((creator as any).updatedAt, 0)
   const avatarBase = creator.avatarUrl || '/icon-192.png'
-  const avatarSrc = avatarBase.startsWith('http')
+  const avatarSrc = avatarBase.startsWith('http') || avatarBase.startsWith('ipfs://')
     ? withVersion(avatarBase, updatedAt || undefined)
     : avatarBase
 
-  // Show bio (truncate to 280, preserve newlines)
+  // Bio (truncate to 280, preserve newlines)
   const rawBio = (creator.bio || '').toString()
-  const bio =
-    rawBio.slice(0, 280) + (rawBio.length > 280 ? '…' : '')
+  const bio = rawBio.slice(0, 280) + (rawBio.length > 280 ? '…' : '')
 
   return (
     <div className="mx-auto max-w-5xl space-y-8 px-4 py-8">
-      {/* ------------------- Polished Header ------------------- */}
+      {/* ------------------- Header ------------------- */}
       <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/[0.04] p-6 md:p-8">
         <div className="pointer-events-none absolute inset-0 rounded-3xl ring-1 ring-white/10" />
         <div className="pointer-events-none absolute -top-24 -left-24 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-24 -right-24 h-72 w-72 rounded-full bg-violet-400/10 blur-3xl" />
 
         <div className="relative flex flex-col items-center text-center gap-5">
-          {/* Avatar with glow */}
+          {/* Avatar */}
           <div className="relative">
             <div className="absolute inset-0 rounded-full bg-cyan-400/20 blur-2xl" aria-hidden />
             <div className="h-40 w-40 overflow-hidden rounded-full ring-2 ring-white/15 shadow-2xl">
@@ -217,7 +231,7 @@ export default async function CreatorPage({ params }: Params) {
             ) : null}
           </div>
 
-          {/* Actions row: share, address, subscription badge */}
+          {/* Actions row */}
           <div className="w-full">
             <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/[0.04] p-2">
               <ShareBar creatorId={creator.id} handle={creator.handle} />
