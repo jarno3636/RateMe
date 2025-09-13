@@ -1,8 +1,8 @@
 // app/creator/CreatorOnboardClient.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
@@ -30,30 +30,35 @@ function isValidHandleId(h: string) {
 
 export default function CreatorOnboardClient() {
   const router = useRouter();
+  const params = useSearchParams();
 
-  // wallet
+  // Wallet
   const { address: wallet, isConnected } = useAccount();
 
-  // form state
-  const [raw, setRaw] = useState('');
+  // Prefill from URL (?prefill= or ?handle=)
+  const initialFromQuery = useMemo(() => {
+    const q = params?.get('prefill') || params?.get('handle') || '';
+    return normalizeHandleId(q);
+  }, [params]);
+
+  // Form state
+  const [raw, setRaw] = useState(initialFromQuery);
   const handleId = useMemo(() => normalizeHandleId(raw), [raw]);
   const okFormat = useMemo(() => isValidHandleId(handleId), [handleId]);
 
-  // availability state
+  // Availability state
   const [checking, setChecking] = useState(false);
   const [avail, setAvail] = useState<Availability | null>(null);
   const debouncedHandleId = useDebouncedValue(handleId, 350);
 
-  // on-chain flow
+  // On-chain flow
   const [busy, setBusy] = useState(false);
   const [feeView, setFeeView] = useState<string>('');
   const [allowanceOk, setAllowanceOk] = useState<boolean | null>(null);
   const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
-  // detect existing on-chain profile(s) for a clearer CTA
+  // Detect existing on-chain profile(s) for the connected wallet
   const [ownedId, setOwnedId] = useState<string | null>(null);
-
-  // If this wallet already owns a registry profile, surface a "Go to my page" button
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -66,7 +71,6 @@ export default function CreatorOnboardClient() {
           functionName: 'getProfilesByOwner',
           args: [wallet as Address],
         })) as bigint[];
-
         if (!alive) return;
         setOwnedId(ids && ids.length > 0 ? String(ids[0]) : null);
       } catch {
@@ -78,7 +82,7 @@ export default function CreatorOnboardClient() {
     };
   }, [isConnected, wallet]);
 
-  // preview creation fee (prefer previewCreate; fallback to feeUnits)
+  // Preview creation fee (prefer previewCreate; fallback to feeUnits)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -92,7 +96,6 @@ export default function CreatorOnboardClient() {
             return;
           }
         }
-        // fallback: just feeUnits
         const fee = await feeUnits();
         if (!alive) return;
         setFeeView(fee ? (Number(fee) / 1e6).toFixed(2) : '');
@@ -108,10 +111,9 @@ export default function CreatorOnboardClient() {
     };
   }, [wallet, feeUnits]);
 
-  // live availability check
+  // Live availability check (KV + on-chain)
   useEffect(() => {
     let canceled = false;
-
     (async () => {
       if (!debouncedHandleId) {
         setAvail(null);
@@ -127,7 +129,6 @@ export default function CreatorOnboardClient() {
         });
         return;
       }
-
       setChecking(true);
       try {
         const res = await checkHandleAvailability(debouncedHandleId);
@@ -147,12 +148,12 @@ export default function CreatorOnboardClient() {
         if (!canceled) setChecking(false);
       }
     })();
-
     return () => {
       canceled = true;
     };
   }, [debouncedHandleId, okFormat]);
 
+  // Submit/create
   const submit = useCallback(
     async (e?: React.FormEvent) => {
       e?.preventDefault();
@@ -173,6 +174,7 @@ export default function CreatorOnboardClient() {
 
       setBusy(true);
       try {
+        // Double-check on-chain taken to avoid a race
         if (await handleTaken(handleId)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
@@ -181,25 +183,28 @@ export default function CreatorOnboardClient() {
 
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
-          toast(
-            `Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`,
-            { icon: '⛓️' }
-          );
+          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
         } else {
           toast('Creating profile…', { icon: '⛓️' });
         }
 
-        // 1) On-chain create
+        // 1) On-chain create (hook handles allowance if necessary)
         const { id } = await createProfile({ handle: handleId });
 
-        // 2) KV registration (server-side Neynar hydration + uniqueness)
-        const reg = await registerCreator({ handle: handleId });
+        // 2) Register in KV (pass wallet so owner index is set immediately)
+        const reg = await registerCreator({
+          handle: handleId,
+          address: (wallet as Address) ?? null,
+        });
         if (!('creator' in reg)) {
           const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
           throw new Error(msg);
         }
 
-        const routeId = reg.creator.id || String(id);
+        // Prefer handle as canonical route (your page resolves by KV first anyway)
+        const routeId = reg.creator?.handle || reg.creator?.id || String(id);
+
+        // Share nudge
         const { cast, tweet, url } = creatorShareLinks(
           routeId,
           `Check out @${routeId} on Rate Me`
@@ -253,7 +258,7 @@ export default function CreatorOnboardClient() {
         setBusy(false);
       }
     },
-    [okFormat, handleId, busy, router, createProfile, feeUnits, handleTaken, avail]
+    [okFormat, handleId, busy, router, createProfile, feeUnits, handleTaken, avail, wallet]
   );
 
   // UI helpers based on unified availability
@@ -304,7 +309,7 @@ export default function CreatorOnboardClient() {
 
       {ownedId && (
         <div className="mb-4 rounded-xl border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-200">
-          You already have a creator profile.{` `}
+          You already have a creator profile.
           <button
             onClick={() => router.push(`/creator/${encodeURIComponent(ownedId)}`)}
             className="ml-2 inline-flex items-center rounded-lg border border-emerald-400/30 px-2 py-1 hover:bg-emerald-400/10"
