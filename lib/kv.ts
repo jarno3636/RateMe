@@ -60,7 +60,6 @@ export async function createCreatorUnique(c: Creator) {
   await kv.hset(CREATOR_KEY(id), row)
   await kv.zadd(CREATOR_LIST, { member: id, score: row.createdAt })
   if (row.address) {
-    // store owner index with checksummed address for consistency
     const owner = isAddress(row.address) ? getAddress(row.address) : row.address
     await kv.set(OWNER_KEY(owner), id)
   }
@@ -123,10 +122,14 @@ export async function updateCreatorKV(input: {
   bio?: string
   fid?: number
 }): Promise<Creator> {
-  const id = lc(input.id)
-  const existing =
-    (await getCreator(id)) ||
+  const idOrHandle = lc(input.id)
+
+  // ✅ Resolve even if `id` is actually a handle
+  let existing =
+    (await getCreator(idOrHandle)) ||
+    (await getCreatorByHandle(idOrHandle)) ||
     (input.handle ? await getCreatorByHandle(input.handle) : null)
+
   if (!existing) throw new Error('creator not found')
 
   // Handle change → update secondary index atomically
