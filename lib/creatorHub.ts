@@ -1,26 +1,57 @@
 // lib/creatorHub.ts
-import type { Abi, Address } from 'viem'
-import { base as BASE } from 'viem/chains'   // ✅ exportable chain object
+import type { Abi, Address } from 'viem';
+import { isAddress } from 'viem';
+import { base as BASE } from 'viem/chains';
 
-/** Re-export the chain so other files can import { BASE } */
-export { BASE }
+// Re-export the chain so other files can import { BASE }
+export { BASE };
 
 /** Base mainnet id (kept for convenience) */
-export const BASE_CHAIN_ID = BASE.id // 8453
+export const BASE_CHAIN_ID = BASE.id; // 8453
 
 /**
- * ✅ Set in Vercel (Project → Settings → Environment Variables):
+ * Raw env var (set this in Vercel Project → Settings → Environment Variables)
  *   NEXT_PUBLIC_CREATOR_HUB_ADDR = 0xYourCreatorHubAddress
  */
-export const CREATOR_HUB_ADDR: Address =
-  (process.env.NEXT_PUBLIC_CREATOR_HUB_ADDR as Address) ??
-  '0x0000000000000000000000000000000000000000'
+const RAW_HUB = (process.env.NEXT_PUBLIC_CREATOR_HUB_ADDR || '').trim();
+
+/** Helper: non-zero, valid EVM address? */
+function isNonZeroAddress(a: string): a is Address {
+  return typeof a === 'string'
+    && /^0x[0-9a-fA-F]{40}$/.test(a)
+    && isAddress(a as Address)
+    && !/^0x0{40}$/i.test(a.slice(2));
+}
+
+/** True if the env var is set to a valid, non-zero address */
+export const HUB_CONFIGURED: boolean = isNonZeroAddress(RAW_HUB);
 
 /**
- * Minimal ABI covering the functions used in useCreatorHub()
+ * Public constant used by client code. Will be ZERO if not configured.
+ * Pair this with a guard in UI (or use HUB_CONFIGURED).
+ */
+export const CREATOR_HUB_ADDR: Address = HUB_CONFIGURED
+  ? (RAW_HUB as Address)
+  : ('0x0000000000000000000000000000000000000000' as Address);
+
+/**
+ * Server-side helper: get a valid hub address or throw with a clear message.
+ * Use in API routes / server code where a missing config should be a hard error.
+ */
+export function requireHubAddress(): Address {
+  if (!HUB_CONFIGURED) {
+    throw new Error(
+      'CreatorHub address not configured. Set NEXT_PUBLIC_CREATOR_HUB_ADDR to a deployed contract address.'
+    );
+  }
+  return CREATOR_HUB_ADDR;
+}
+
+/**
+ * Minimal ABI covering the functions used across the app
  */
 export const CREATOR_HUB_ABI = [
-  // --- views used by the hook ---
+  // --- views ---
   {
     type: 'function',
     stateMutability: 'view',
@@ -85,7 +116,7 @@ export const CREATOR_HUB_ABI = [
     outputs: [{ name: '', type: 'uint256[]' }],
   },
 
-  // --- writes used by the hook ---
+  // --- writes ---
   {
     type: 'function',
     stateMutability: 'nonpayable',
@@ -137,4 +168,4 @@ export const CREATOR_HUB_ABI = [
     inputs: [{ name: 'creator', type: 'address' }],
     outputs: [],
   },
-] as const satisfies Abi
+] as const satisfies Abi;
