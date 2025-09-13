@@ -1,13 +1,23 @@
 // app/page.tsx
 import type { Metadata } from 'next'
 import Link from 'next/link'
+import { Suspense } from 'react'
 import { Sparkles, Shield, Ticket, Timer, Users, Star, ArrowRight, Percent, Zap } from 'lucide-react'
 import CreatorGrid from '@/components/CreatorGrid'
 
 // ---------------- Farcaster config (edge-safe resolution) ----------------
-let SITE = (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '')
+function stripTrailingSlash(u: string) {
+  return u.replace(/\/$/, '')
+}
+
+let SITE = stripTrailingSlash(process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000')
+
 let MINIAPP_DOMAIN = (() => {
-  try { return new URL(SITE).hostname } catch { return 'localhost' }
+  try {
+    return new URL(SITE).hostname
+  } catch {
+    return 'localhost'
+  }
 })()
 
 // Default Mini App descriptor (overridden if lib/farcaster exports it)
@@ -29,13 +39,16 @@ let fcMiniApp: { version: string; imageUrl: string; button: any } = {
 try {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const far = require('@/lib/farcaster')
-  SITE = (far.SITE as string) || SITE
-  MINIAPP_DOMAIN = (far.MINIAPP_DOMAIN as string) || MINIAPP_DOMAIN
-  if (far.fcMiniApp) fcMiniApp = far.fcMiniApp
-} catch { /* optional */ }
+  if (far?.SITE) SITE = stripTrailingSlash(far.SITE as string)
+  if (far?.MINIAPP_DOMAIN) MINIAPP_DOMAIN = far.MINIAPP_DOMAIN as string
+  if (far?.fcMiniApp) fcMiniApp = far.fcMiniApp
+} catch {
+  // optional; ignore if not present
+}
 
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // ----------------------------- Metadata -----------------------------
 export const metadata: Metadata = {
@@ -156,7 +169,17 @@ export default function Home() {
             Discover more →
           </Link>
         </div>
-        <CreatorGrid />
+        <Suspense
+          fallback={
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="h-40 animate-pulse rounded-xl bg-white/5" />
+              ))}
+            </div>
+          }
+        >
+          <CreatorGrid />
+        </Suspense>
       </section>
 
       {/* VALUE STRIP */}
