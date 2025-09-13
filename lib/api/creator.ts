@@ -2,9 +2,13 @@
 
 export type Availability = {
   ok: boolean;
+  /** syntactic validity of the handle (length + charset) */
   valid: boolean;
+  /** present in KV already */
   existsKV: boolean;
+  /** handle already taken on-chain (registry) */
   onchainTaken: boolean;
+  /** convenience flag: valid && !existsKV && !onchainTaken */
   available: boolean;
   error?: string;
 };
@@ -15,8 +19,20 @@ export type RegisterCreatorBody = {
   fid?: number;
 };
 
+export type CreatorMinimal = {
+  id: string;
+  handle: string;
+  address?: `0x${string}` | null;
+  displayName?: string;
+  avatarUrl?: string;
+  bio?: string;
+  fid?: number;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
 export type RegisterCreatorResp =
-  | { ok: true; creator: { id: string; handle: string } }
+  | { ok: true; creator: CreatorMinimal }
   | { ok: false; error: string };
 
 /* --------------------------- helpers --------------------------- */
@@ -25,21 +41,34 @@ function normalizeHandleId(s: string) {
   return String(s || '').trim().replace(/^@+/, '').toLowerCase();
 }
 
+function isHandleSyntaxOK(h: string) {
+  return !!h && h.length >= 3 && h.length <= 32 && /^[a-z0-9._-]+$/.test(h);
+}
+
+async function apiFetch<T = any>(url: string, init?: RequestInit): Promise<{ ok: boolean; status: number; json: T | null }> {
+  const res = await fetch(url, {
+    headers: { accept: 'application/json', ...(init?.headers || {}) },
+    cache: 'no-store',
+    ...init,
+  });
+  const json = await res.json().catch(() => null);
+  return { ok: res.ok, status: res.status, json };
+}
+
 /**
- * Check if a handle is available (KV + onchain check).
+ * Check if a handle is available (KV + on-chain registry).
+ * Uses GET /api/creator/register?handle=...
+ * Expected response shape:
+ *   { ok: true, exists: boolean, onchainTaken: boolean, creator?: {...} }
  */
 export async function checkHandleAvailability(raw: string): Promise<Availability> {
   const handleId = normalizeHandleId(raw);
-  const valid =
-    !!handleId &&
-    handleId.length >= 3 &&
-    handleId.length <= 32 &&
-    /^[a-z0-9._-]+$/.test(handleId);
+  const valid = isHandleSyntaxOK(handleId);
 
   if (!valid) {
     return {
       ok: true,
-      valid: false,
+      valid,
       existsKV: false,
       onchainTaken: false,
       available: false,
@@ -47,27 +76,21 @@ export async function checkHandleAvailability(raw: string): Promise<Availability
   }
 
   try {
-    const res = await fetch(`/api/creator/register?handle=${encodeURIComponent(handleId)}`, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-      cache: 'no-store',
-    });
-
-    const j = await res.json().catch(() => null);
-
-    if (!res.ok || !j) {
+    const { ok, status, json } = await apiFetch(`/api/creator/register?handle=${encodeURIComponent(handleId)}`);
+    if (!ok || !json) {
       return {
         ok: false,
         valid,
         existsKV: false,
         onchainTaken: false,
         available: false,
-        error: j?.error || `check failed (${res.status})`,
+        error: (json as any)?.error || `check failed (${status})`,
       };
     }
 
-    const existsKV = !!j.exists;
-    const onchainTaken = !!j.onchainTaken;
+    // The GET route returns "exists" (KV) and "onchainTaken" (registry)
+    const existsKV = !!(json as any).exists;
+    const onchainTaken = !!(json as any).onchainTaken;
 
     return {
       ok: true,
@@ -90,37 +113,40 @@ export async function checkHandleAvailability(raw: string): Promise<Availability
 
 /**
  * Register a new creator by calling the POST API route.
- * Will hydrate from Neynar and write to KV on the server.
+ * Server validates, hydrates from Neynar (best-effort), and writes to KV.
  *
- * Note: We avoid destructuring `{ handle }` in the signature to prevent any
- * accidental bundler hoisting of a top-level `handle` binding.
+ * Expected success response:
+ *   { ok: true, creator: {...} }
+ *
+ * Common errors:
+ *   400 Bad request (validation)
+ *   409 Handle already registered (KV or on-chain)
  */
 export async function registerCreator(input: RegisterCreatorBody): Promise<RegisterCreatorResp> {
   try {
     const handleId = normalizeHandleId(input.handle);
+    if (!isHandleSyntaxOK(handleId)) {
+      return { ok: false, error: 'Invalid handle' };
+    }
 
-    // Compose an explicit payload so we never spread unexpected keys.
+    // Compose explicit payload; avoid spreading unknown keys.
     const payload: RegisterCreatorBody = {
       handle: handleId,
-      // Preserve optional fields (null is allowed for address)
       ...(input.address !== undefined ? { address: input.address } : {}),
       ...(input.fid !== undefined ? { fid: input.fid } : {}),
     };
 
-    const res = await fetch('/api/creator/register', {
+    const { ok, status, json } = await apiFetch('/api/creator/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      cache: 'no-store',
       body: JSON.stringify(payload),
     });
 
-    const j = await res.json().catch(() => null);
-
-    if (!res.ok || !j) {
-      return { ok: false, error: j?.error || `register failed (${res.status})` };
+    if (!ok || !json) {
+      return { ok: false, error: (json as any)?.error || `register failed (${status})` };
     }
 
-    return { ok: true, creator: j.creator };
+    return { ok: true, creator: (json as any).creator as CreatorMinimal };
   } catch (e: any) {
     return { ok: false, error: e?.message || 'network error' };
   }
