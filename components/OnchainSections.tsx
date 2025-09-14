@@ -1,3 +1,4 @@
+// components/OnchainSections.tsx
 'use client';
 
 import { useEffect, useMemo, useState, useCallback } from 'react';
@@ -5,6 +6,8 @@ import { useAccount } from 'wagmi';
 import { Loader2, Lock, Unlock, CreditCard } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useCreatorHub } from '@/hooks/useCreatorHub';
+import { useGate } from '@/hooks/useGate';
+import { toChecksum } from '@/lib/gate';
 
 type Plan = {
   id: bigint;
@@ -44,8 +47,16 @@ function parseHints(uri: string) {
   }
 }
 
+function msFromSecondsOrMs(v: number): number {
+  // treat values below ~Jan 2002 as seconds; convert to ms
+  return v > 1e12 ? v : v * 1000;
+}
+
 export default function OnchainSections({ creatorAddress }: { creatorAddress: `0x${string}` }) {
   const { address } = useAccount();
+  const eoa = useMemo(() => (address ? toChecksum(address) : null), [address]);
+  const { checkPost, checkSub } = useGate();
+
   const {
     getCreatorPlanIds,
     getCreatorPostIds,
@@ -53,8 +64,8 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     readPost,
     subscribe,
     buyPost,
-    hasPostAccess,
-    isActive,
+    hasPostAccess, // on-chain view (used as warm cache/fallback)
+    isActive,      // on-chain view (used as warm cache/fallback)
     previewSubscribeTotal,
     previewBuyPost,
     getSubExpiry,
@@ -64,7 +75,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
   const [plans, setPlans] = useState<Plan[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [subActive, setSubActive] = useState<boolean>(false);
-  const [subExpiry, setSubExpiry] = useState<number | null>(null);
+  const [subExpiryMs, setSubExpiryMs] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [accessCache, setAccessCache] = useState<Record<string, boolean>>({});
 
@@ -81,52 +92,85 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
         Promise.all(postIds.map((id) => readPost(id))),
       ]);
 
-      setPlans(
-        planRows
-          .map((r, i) => (r ? { id: planIds[i], ...r } as Plan : null))
-          .filter(Boolean) as Plan[]
-      );
+      const nextPlans = planRows
+        .map((r, i) => (r ? ({ id: planIds[i], ...r } as Plan) : null))
+        .filter(Boolean) as Plan[];
 
-      setPosts(
-        postRows
-          .map((r, i) => (r ? { id: postIds[i], ...r } as Post : null))
-          .filter(Boolean) as Post[]
-      );
+      const nextPosts = postRows
+        .map((r, i) => (r ? ({ id: postIds[i], ...r } as Post) : null))
+        .filter(Boolean) as Post[];
 
-      if (address) {
-        const active = await isActive(address, creatorAddress);
-        setSubActive(active);
-        const until = await getSubExpiry(address, creatorAddress).catch(() => 0);
-        setSubExpiry(until > 0 ? until : null);
+      setPlans(nextPlans);
+      setPosts(nextPosts);
 
-        // prefill access cache for posts (optional best-effort)
+      // subscription status
+      if (eoa) {
+        // quick on-chain check to make the UI responsive
+        const active = await isActive(eoa, creatorAddress).catch(() => false);
+        setSubActive(!!active);
+
+        const rawUntil = await getSubExpiry(eoa, creatorAddress).catch(() => 0);
+        setSubExpiryMs(rawUntil ? msFromSecondsOrMs(Number(rawUntil)) : null);
+
+        // best-effort warm the access cache for posts (on-chain view)
         const entries = await Promise.all(
-          postIds.map(async (pid) => [pid.toString(), await hasPostAccess(address, pid)] as const)
+          postIds.map(async (pid) => {
+            const ok = await hasPostAccess(eoa, pid).catch(() => false);
+            return [pid.toString(), ok] as const;
+          })
         );
-        const next: Record<string, boolean> = {};
-        for (const [k, v] of entries) next[k] = v;
-        setAccessCache(next);
+        const warm: Record<string, boolean> = {};
+        for (const [k, v] of entries) warm[k] = v;
+        setAccessCache(warm);
       } else {
         setSubActive(false);
-        setSubExpiry(null);
+        setSubExpiryMs(null);
         setAccessCache({});
       }
     } finally {
       setLoading(false);
     }
-  }, [address, creatorAddress, getCreatorPlanIds, getCreatorPostIds, readPlan, readPost, isActive, getSubExpiry, hasPostAccess]);
+  }, [
+    eoa,
+    creatorAddress,
+    getCreatorPlanIds,
+    getCreatorPostIds,
+    readPlan,
+    readPost,
+    isActive,
+    getSubExpiry,
+    hasPostAccess,
+  ]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
+  // Authoritative gated status via signed API (memoized in lib/gate)
+  const verifySubNow = useCallback(async () => {
+    if (!eoa) return false;
+    try {
+      const ok = await checkSub(creatorAddress);
+      setSubActive(ok);
+      return ok;
+    } catch {
+      return false;
+    }
+  }, [eoa, creatorAddress, checkSub]);
+
   async function doSubscribe(plan: Plan) {
     try {
+      if (!eoa) {
+        toast.error('Connect wallet');
+        return;
+      }
       setBusyId(`plan:${plan.id.toString()}`);
       const total = await previewSubscribeTotal(plan.id, 1);
-      toast(`Approval + subscribe (${fmtUSDC(total)} USDC)…`, { icon: '⛓️' });
+      toast(`Approval + subscribe${total > 0n ? ` (${fmtUSDC(total)} USDC)…` : '…'}`, { icon: '⛓️' });
       await subscribe(plan.id, 1);
       toast.success('Subscribed');
+      // verify via gate & refresh UI
+      await verifySubNow();
       await refresh();
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || 'Failed to subscribe');
@@ -137,15 +181,19 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
   async function doBuy(post: Post) {
     try {
+      if (!eoa) {
+        toast.error('Connect wallet');
+        return;
+      }
       setBusyId(`post:${post.id.toString()}`);
       const total = await previewBuyPost(post.id);
       if (total > 0n) toast(`Approval + buy (${fmtUSDC(total)} USDC)…`, { icon: '⛓️' });
       await buyPost(post.id);
       toast.success('Unlocked');
-      if (address) {
-        const ok = await hasPostAccess(address, post.id);
-        setAccessCache((m) => ({ ...m, [post.id.toString()]: ok }));
-      }
+
+      // double check via gate endpoint (handles both purchase & sub-unlock)
+      const ok = await checkPost(post.id);
+      setAccessCache((m) => ({ ...m, [post.id.toString()]: ok }));
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || 'Failed to buy');
     } finally {
@@ -164,20 +212,23 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     );
   }
 
+  // Only show active plans by default
+  const visiblePlans = plans.filter((p) => p.active);
+
   return (
     <section className="space-y-6">
       {/* Subscription plans */}
       <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium">Subscription</div>
-          {address && (
+          {eoa && (
             <div className="text-xs text-slate-400">
               {subActive ? (
                 <span className="inline-flex items-center gap-1 text-emerald-300">
                   <Unlock className="h-3.5 w-3.5" /> Active
-                  {subExpiry ? (
+                  {subExpiryMs ? (
                     <span className="text-slate-400 ml-1">
-                      until {new Date(subExpiry).toLocaleDateString()}
+                      until {new Date(subExpiryMs).toLocaleDateString()}
                     </span>
                   ) : null}
                 </span>
@@ -189,34 +240,38 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
             </div>
           )}
         </div>
-        {!plans.length ? (
+        {!visiblePlans.length ? (
           <p className="mt-2 text-sm text-slate-400">No plans yet.</p>
         ) : (
           <ul className="mt-3 grid gap-3 sm:grid-cols-2">
-            {plans.map((p) => (
-              <li key={p.id.toString()} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-medium">{p.name || 'Plan'}</div>
-                    <div className="text-xs text-slate-400">
-                      {fmtUSDC(p.pricePerPeriod)} USDC / {p.periodDays}d
+            {visiblePlans.map((p) => {
+              const key = p.id.toString();
+              const disabled = !eoa || busyId === `plan:${key}` || subActive;
+              return (
+                <li key={key} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-medium">{p.name || 'Plan'}</div>
+                      <div className="text-xs text-slate-400">
+                        {fmtUSDC(p.pricePerPeriod)} USDC / {p.periodDays}d
+                      </div>
                     </div>
+                    <button
+                      onClick={() => doSubscribe(p)}
+                      disabled={disabled}
+                      className="btn-secondary inline-flex items-center text-xs disabled:opacity-60"
+                    >
+                      {busyId === `plan:${key}` ? (
+                        <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <CreditCard className="mr-1 h-3.5 w-3.5" />
+                      )}
+                      {subActive ? 'Already active' : 'Subscribe'}
+                    </button>
                   </div>
-                  <button
-                    onClick={() => doSubscribe(p)}
-                    disabled={!address || busyId === `plan:${p.id.toString()}`}
-                    className="btn-secondary inline-flex items-center text-xs disabled:opacity-60"
-                  >
-                    {busyId === `plan:${p.id.toString()}` ? (
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <CreditCard className="mr-1 h-3.5 w-3.5" />
-                    )}
-                    Subscribe
-                  </button>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
@@ -231,7 +286,17 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
             {posts.map((p) => {
               const k = p.id.toString();
               const hints = parseHints(p.uri);
-              const unlocked = accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
+
+              // authoritative unlock state: local cache OR sub unlock OR free
+              const unlocked =
+                accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
+
+              const buying = busyId === `post:${k}`;
+              const disabled = !eoa || buying;
+
+              // Decide how to render media
+              const isVideo = /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(hints.base);
+              const showPreview = !unlocked && !!hints.preview;
 
               return (
                 <li key={k} className="rounded-xl border border-white/10 bg-white/5 p-3">
@@ -246,15 +311,36 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
                   <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
                     {unlocked ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={hints.base} className="w-full object-cover" alt="" />
-                    ) : hints.preview ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={hints.preview}
-                        className={`w-full object-cover ${hints.blur ? 'blur-md' : ''}`}
-                        alt=""
-                      />
+                      isVideo ? (
+                        <video
+                          src={hints.base}
+                          controls
+                          playsInline
+                          className="w-full object-cover"
+                        />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={hints.base} className="w-full object-cover" alt="" />
+                      )
+                    ) : showPreview ? (
+                      isVideo ? (
+                        <video
+                          src={hints.preview}
+                          className={`w-full object-cover ${hints.blur ? 'blur-md' : ''}`}
+                          controls={false}
+                          autoPlay
+                          muted
+                          loop
+                          playsInline
+                        />
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={hints.preview}
+                          className={`w-full object-cover ${hints.blur ? 'blur-md' : ''}`}
+                          alt=""
+                        />
+                      )
                     ) : (
                       <div className="flex h-40 items-center justify-center text-slate-400 text-sm">
                         Locked
@@ -266,10 +352,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
                     <div className="mt-2">
                       <button
                         onClick={() => doBuy(p)}
-                        disabled={!address || busyId === `post:${k}`}
+                        disabled={disabled}
                         className="btn inline-flex items-center text-xs disabled:opacity-60"
                       >
-                        {busyId === `post:${k}` ? (
+                        {buying ? (
                           <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                         ) : (
                           <CreditCard className="mr-1 h-3.5 w-3.5" />
