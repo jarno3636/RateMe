@@ -1,4 +1,3 @@
-// app/api/gate/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import {
   createPublicClient,
@@ -16,12 +15,13 @@ export const dynamic = 'force-dynamic'
 
 /* ------------------------ chain + response helpers ------------------------ */
 
+const RPC =
+  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+  process.env.BASE_RPC_URL ||
+  'https://mainnet.base.org'
+
 function getClient() {
-  const rpc =
-    process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-    process.env.BASE_RPC_URL ||
-    undefined
-  return createPublicClient({ chain: BASE, transport: http(rpc) })
+  return createPublicClient({ chain: BASE, transport: http(RPC) })
 }
 
 function json(data: unknown, init?: ResponseInit) {
@@ -31,18 +31,25 @@ function json(data: unknown, init?: ResponseInit) {
   })
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'cache-control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept, Authorization',
+    },
+  })
+}
+
 /* ------------------------------ nonce helpers ----------------------------- */
-/**
- * We bind nonces to a specific "scope" (mode/postId/creator) to prevent replays
- * across different gating actions. If you issue a nonce without scope, it
- * behaves as a wildcard (backward compatible).
- */
 
 const NONCE_TTL = 60 * 10 // 10 minutes
 
 type NonceScope = {
   mode?: 'post' | 'sub'
-  postId?: string // keep as string to avoid edge bigint serialization gotchas
+  postId?: string
   creator?: Address
 }
 
@@ -50,46 +57,40 @@ function nonceKey(user: Address, nonce: string) {
   return `auth:nonce:${user.toLowerCase()}:${nonce}`
 }
 
-/** Generate a nonce and store in KV with optional scope (one-time use) */
 async function issueNonce(user: Address, scope?: NonceScope) {
   const nonce = crypto.randomUUID().replace(/-/g, '')
   const payload = JSON.stringify({
     t: Date.now(),
-    scope: scope || null, // null means wildcard
+    scope: scope || null,
   })
   await kv.set(nonceKey(user, nonce), payload, { ex: NONCE_TTL })
   return nonce
 }
 
-/** Consume a nonce (returns false if missing/expired or scope-mismatch) */
 async function consumeNonce(user: Address, nonce: string, scope?: NonceScope) {
   const key = nonceKey(user, nonce)
   const raw = await kv.get<string>(key)
   if (!raw) return { ok: false as const, reason: 'badNonce' as const }
   await kv.del(key)
 
-  // If the nonce was unscoped, accept any scope.
   try {
     const parsed = JSON.parse(raw) as { t: number; scope: NonceScope | null }
     if (!parsed.scope) return { ok: true as const }
-    // Compare provided scope to stored scope.
     const a = parsed.scope
     const b = scope || {}
     if (a.mode && a.mode !== b.mode) return { ok: false as const, reason: 'scopeMismatch' as const }
     if (a.postId && a.postId !== b.postId) return { ok: false as const, reason: 'scopeMismatch' as const }
-    if (a.creator && a.creator.toLowerCase() !== (b.creator || '').toLowerCase()) {
+    if (a.creator && a.creator.toLowerCase() !== (b.creator || ('' as Address)).toLowerCase()) {
       return { ok: false as const, reason: 'scopeMismatch' as const }
     }
     return { ok: true as const }
   } catch {
-    // If parsing fails, treat as invalid
     return { ok: false as const, reason: 'badNonce' as const }
   }
 }
 
 /* ------------------------- signature verification ------------------------- */
 
-/** Canonical message that the client must sign */
 function gateMessage(params: {
   mode: 'post' | 'sub'
   user: Address
@@ -115,11 +116,10 @@ async function verifySig(opts: {
   creator?: Address
   nonce?: string
   signature?: `0x${string}`
-  message?: string // optional; if omitted, we build it from the canonical format
+  message?: string
 }) {
   if (!opts.signature || !opts.nonce) return { ok: false, reason: 'missingSig' as const }
 
-  // Bind nonce consumption to the same scope as the message we verify.
   const scope: NonceScope = {
     mode: opts.mode,
     postId: opts.postId ? opts.postId.toString() : undefined,
@@ -154,16 +154,13 @@ async function verifyFarcasterCustody(fid: number, user: Address) {
   try {
     const url = `https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`
     const res = await fetch(url, {
-      headers: { 'api_key': apiKey, 'accept': 'application/json' },
+      headers: { 'api_key': apiKey, accept: 'application/json' },
       cache: 'no-store',
     })
     if (!res.ok) return { ok: false as const, reason: 'neynarError' as const }
     const data = await res.json()
     const u = (data?.users?.[0]) || {}
 
-    // Two ways to match:
-    // 1) current custody address
-    // 2) verified addresses (eth_addresses)
     const custody = (u.custody_address || u.custodyAddress || '').toLowerCase()
     const verified: string[] = (u.verified_addresses?.eth_addresses || u.verified_addresses?.ethAddresses || []) as string[]
     const luv = user.toLowerCase()
@@ -176,14 +173,7 @@ async function verifyFarcasterCustody(fid: number, user: Address) {
 }
 
 /* --------------------------------- GET ------------------------------------ */
-/**
- * GET
- * - /api/gate
- *     -> health: { ok, hub, chainId }
- *
- * - /api/gate?nonce=0xUserAddress[&mode=post|sub][&postId=123][&creator=0x...]
- *     -> issue one-time nonce (optionally bound to scope)
- */
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url)
   const nonceFor = (url.searchParams.get('nonce') || '').trim()
@@ -196,23 +186,20 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: 'Invalid address' }, { status: 400 })
     }
 
-    // Lightweight rate limit per IP for nonce issuing
     const ip =
       req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
       req.headers.get('x-real-ip') ||
       'unknown'
     const rlKey = `rl:gate-nonce:${getAddress(nonceFor)}:${ip}`
-    const ok = await kv.set(rlKey, '1', { nx: true, ex: 5 }) // 1 nonce / 5s per IP
+    const ok = await kv.set(rlKey, '1', { nx: true, ex: 5 })
     if (!ok) return json({ ok: false, error: 'Slow down' }, { status: 429 })
 
-    // Optional scope binding
     let scope: NonceScope | undefined
     try {
       if (scopeMode === 'post' || scopeMode === 'sub') {
         const scoped: NonceScope = { mode: scopeMode }
         if (scopeMode === 'post') {
           if (scopePostId) {
-            // Validate postId is a positive bigint-ish string
             const n = BigInt(scopePostId)
             if (n <= 0n) throw new Error('postId must be > 0')
             scoped.postId = n.toString()
@@ -233,20 +220,11 @@ export async function GET(req: NextRequest) {
   }
 
   const client = getClient()
-  return json({ ok: true, hub: CREATOR_HUB_ADDR, chainId: client.chain?.id })
+  return json({ ok: true, hub: CREATOR_HUB_ADDR, chainId: client.chain?.id ?? BASE.id })
 }
 
 /* --------------------------------- POST ----------------------------------- */
-/**
- * POST body (choose one mode) and optional proofs:
- * - { mode:"post", user:"0x...", postId:number|string, sig?, nonce?, message?, fid? }
- * - { mode:"sub",  user:"0x...", creator:"0x...", sig?, nonce?, message?, fid? }
- *
- * Proof options:
- *  A) Signature: include `sig` + `nonce` (+ optional `message` if not using the canonical format)
- *  B) Farcaster: include `fid` (we’ll verify custody/verified address via Neynar)
- *  Either proof is accepted; if both provided, both are checked and surfaced.
- */
+
 export async function POST(req: NextRequest) {
   let body: any
   try { body = await req.json() } catch { return json({ ok: false, error: 'Invalid JSON' }, { status: 400 }) }
@@ -262,7 +240,6 @@ export async function POST(req: NextRequest) {
 
   try {
     if (mode === 'post') {
-      // Accept postId as number | string, but coerce safely to BigInt
       const pidRaw = body?.postId
       const pidStr = typeof pidRaw === 'string' ? pidRaw : String(pidRaw ?? '')
       let postId: bigint
@@ -280,7 +257,6 @@ export async function POST(req: NextRequest) {
         args: [user, postId],
       })) as boolean
 
-      // proofs (optional)
       const sigProof = await verifySig({
         mode, user, postId,
         nonce: body?.nonce, signature: body?.sig, message: body?.message,
@@ -305,7 +281,6 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // mode === 'sub'
     const rawCreator = String(body?.creator || '')
     if (!isAddress(rawCreator)) return json({ ok: false, error: 'Invalid creator address' }, { status: 400 })
     const creator = getAddress(rawCreator)
@@ -317,7 +292,6 @@ export async function POST(req: NextRequest) {
       args: [user, creator],
     })) as boolean
 
-    // proofs (optional)
     const sigProof = await verifySig({
       mode, user, creator,
       nonce: body?.nonce, signature: body?.sig, message: body?.message,
