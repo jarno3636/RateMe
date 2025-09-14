@@ -1,4 +1,4 @@
-// lib/profileRegistry/reads.ts
+// // lib/profileRegistry/reads.ts
 import {
   createPublicClient,
   http,
@@ -19,6 +19,9 @@ const pub = createPublicClient({
   chain: BASE,
   transport: http(rpc),
 });
+
+/** Export the public client for legacy callers (e.g. CreatorOnboardClient) */
+export const readClient = pub;
 
 export type ProfileFlat = {
   id: bigint;
