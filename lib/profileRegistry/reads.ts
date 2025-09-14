@@ -4,7 +4,6 @@ import { readClient } from './constants'
 import { PROFILE_REGISTRY_ABI } from './abi'
 import { BASE_USDC, REGISTRY_ADDRESS } from './constants'
 
-/** Minimal ERC20 ABI for allowance */
 const ERC20_MINI = [
   {
     type: 'function',
@@ -18,20 +17,16 @@ const ERC20_MINI = [
   },
 ] as const satisfies Abi
 
-/** Utility: is zero address */
-const isZero = (a?: string) => !a || /^0x0{40}$/i.test(a)
+const isZero = (a?: string) => !a || /^0x0{40}$/i.test(a?.slice(2) ?? '')
 
-/** Normalize handle */
 export function normalizeHandle(h = '') {
   return h.trim().replace(/^@+/, '').toLowerCase()
 }
 
-/** True if registry is configured */
 export function registryAvailable(): boolean {
   return !isZero(REGISTRY_ADDRESS)
 }
 
-/** read: handleTaken(handle) */
 export async function readHandleTaken(handle: string): Promise<boolean> {
   if (!registryAvailable()) return false
   try {
@@ -47,7 +42,6 @@ export async function readHandleTaken(handle: string): Promise<boolean> {
   }
 }
 
-/** read (best-effort): getIdByHandle(handle) -> bigint | 0n */
 export async function readIdByHandle(handle: string): Promise<bigint> {
   if (!registryAvailable()) return 0n
   const h = normalizeHandle(handle)
@@ -60,7 +54,6 @@ export async function readIdByHandle(handle: string): Promise<bigint> {
     })) as bigint
     return id ?? 0n
   } catch {
-    // Some contracts don’t expose getIdByHandle; emulate via getProfileByHandle
     try {
       const r = (await readClient.readContract({
         address: REGISTRY_ADDRESS,
@@ -68,7 +61,6 @@ export async function readIdByHandle(handle: string): Promise<bigint> {
         functionName: 'getProfileByHandle',
         args: [h],
       })) as any[]
-      // Common shape: [exists, id, ...]
       const exists = Boolean(r?.[0])
       const idMaybe = exists ? BigInt(r?.[1] || 0) : 0n
       return idMaybe
@@ -78,7 +70,6 @@ export async function readIdByHandle(handle: string): Promise<bigint> {
   }
 }
 
-/** read: getProfilesByOwner(owner) -> bigint[] (ids) */
 export async function readProfilesByOwner(owner: Address): Promise<bigint[]> {
   if (!registryAvailable()) return []
   try {
@@ -94,7 +85,6 @@ export async function readProfilesByOwner(owner: Address): Promise<bigint[]> {
   }
 }
 
-/** read: getProfile(id) -> flat object */
 export async function readProfileFlat(id: bigint) {
   if (!registryAvailable() || !id) return null
   try {
@@ -128,24 +118,19 @@ export async function readProfileFlat(id: bigint) {
   }
 }
 
-/** Bulk read profiles -> flat structs */
 export async function readProfilesFlat(ids: readonly bigint[]) {
   const tasks = (ids || []).map((id) => readProfileFlat(id))
   const out = await Promise.all(tasks)
   return out.filter(Boolean) as NonNullable<Awaited<ReturnType<typeof readProfileFlat>>>[]
 }
 
-/**
- * Preview creation fee and whether the wallet already has USDC allowance
- * sufficient to cover it. (Avoids relying on a custom contract view.)
- */
-export async function readPreviewCreate(owner: Address): Promise<{
-  fee: bigint
-  okAllowance: boolean
-} | null> {
+/** Back-compat alias expected by /app/api/creators/route.ts */
+export const listProfilesFlat = readProfilesFlat
+
+/** Creation fee + USDC allowance preview */
+export async function readPreviewCreate(owner: Address): Promise<{ fee: bigint; okAllowance: boolean } | null> {
   if (!registryAvailable()) return null
   try {
-    // feeUnits in "USDC base units" (assuming contract uses 6 decimals)
     const fee = (await readClient.readContract({
       address: REGISTRY_ADDRESS,
       abi: PROFILE_REGISTRY_ABI,
@@ -153,12 +138,8 @@ export async function readPreviewCreate(owner: Address): Promise<{
       args: [],
     })) as bigint
 
-    // If fee is zero, allowance not needed
-    if (!fee || fee === 0n) {
-      return { fee: 0n, okAllowance: true }
-    }
+    if (!fee || fee === 0n) return { fee: 0n, okAllowance: true }
 
-    // Allowance(owner -> registry) on USDC
     const allowance = (await readClient.readContract({
       address: BASE_USDC,
       abi: ERC20_MINI,
@@ -166,10 +147,7 @@ export async function readPreviewCreate(owner: Address): Promise<{
       args: [owner, REGISTRY_ADDRESS],
     })) as bigint
 
-    return {
-      fee,
-      okAllowance: (allowance ?? 0n) >= fee,
-    }
+    return { fee, okAllowance: (allowance ?? 0n) >= fee }
   } catch {
     return null
   }
