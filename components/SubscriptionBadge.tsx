@@ -1,59 +1,24 @@
-// components/SubscriptionBadge.tsx
-'use client';
+/// components/SubscriptionBadge.tsx (sketch)
+'use client'
+import { useEffect, useState } from 'react'
+import { useGate } from '@/hooks/useGate'
 
-import { useEffect, useState } from 'react';
-import { useAccount } from 'wagmi';
-import { CheckCircle } from 'lucide-react';
-import { useCreatorHub } from '@/hooks/useCreatorHub';
-
-function fmt(ts: number) {
-  try {
-    return new Date(ts).toLocaleDateString(undefined, {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
-  } catch {
-    return '';
-  }
-}
-
-export default function SubscriptionBadge({
-  creatorAddress,
-}: {
-  creatorAddress: `0x${string}` | null;
-}) {
-  const { address } = useAccount();
-  const { getSubExpiry } = useCreatorHub();
-  const [expiry, setExpiry] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
+export default function SubscriptionBadge({ creatorAddress }: { creatorAddress: `0x${string}` }) {
+  const { user, checkSub } = useGate()
+  const [active, setActive] = useState<boolean | null>(null)
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!address || !creatorAddress) return setExpiry(null);
-      try {
-        setLoading(true);
-        const ts = await getSubExpiry?.(creatorAddress, address);
-        if (!alive) return;
-        setExpiry(ts && ts > Date.now() ? ts : null);
-      } catch {
-        if (alive) setExpiry(null);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [address, creatorAddress, getSubExpiry]);
+    let done = false
+    ;(async () => {
+      if (!user || !creatorAddress) return
+      const ok = await checkSub(creatorAddress)
+      if (!done) setActive(ok)
+    })()
+    return () => { done = true }
+  }, [user, creatorAddress, checkSub])
 
-  if (!address || !creatorAddress || !expiry) return null;
-
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-1 text-emerald-200 text-xs ring-1 ring-emerald-500/30">
-      <CheckCircle className="h-3.5 w-3.5" />
-      Subscribed ✓ until {fmt(expiry)}
-    </span>
-  );
+  if (active === null) return <span className="text-xs text-slate-400">Checking…</span>
+  return active
+    ? <span className="rounded-full border border-emerald-400/30 bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-200">Subscribed</span>
+    : <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-xs text-slate-300">Not subscribed</span>
 }
