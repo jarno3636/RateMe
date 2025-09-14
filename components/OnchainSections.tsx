@@ -1,20 +1,16 @@
-// components/OnchainSections.tsx
 'use client';
 
-import { useEffect, useState, useCallback, useMemo } from 'react';
-import type { Address, Abi } from 'viem';
-import { isAddress as viemIsAddress } from 'viem';
-import { usePublicClient } from 'wagmi';
-import { CREATOR_HUB_ABI, CREATOR_HUB_ADDR } from '@/lib/creatorHub';
-import SubscribeButton from './SubscribeButton';
-import BuyPostButton from './BuyPostButton';
-import SafeMedia from './SafeMedia';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useAccount } from 'wagmi';
+import { Loader2, Lock, Unlock, CreditCard } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { useCreatorHub } from '@/hooks/useCreatorHub';
 
 type Plan = {
   id: bigint;
-  token: Address;
-  pricePerPeriod: bigint;
+  creator: `0x${string}`;
+  token: `0x${string}`;
+  pricePerPeriod: bigint; // 6dp USDC
   periodDays: number;
   active: boolean;
   name: string;
@@ -23,345 +19,271 @@ type Plan = {
 
 type Post = {
   id: bigint;
-  token: Address;
-  price: bigint;
+  creator: `0x${string}`;
+  token: `0x${string}`;
+  price: bigint; // 6dp USDC
   active: boolean;
   accessViaSub: boolean;
   uri: string;
 };
 
-type TokenMeta = {
-  decimals: number;
-  symbol?: string;
-};
+function fmtUSDC(x: bigint) {
+  const n = Number(x) / 1e6;
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
-// Minimal ERC20 ABI for decimals/symbol
-const ERC20_MINI_ABI = [
-  { type: 'function', name: 'decimals', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint8' }] },
-  { type: 'function', name: 'symbol', stateMutability: 'view', inputs: [], outputs: [{ type: 'string' }] },
-] as const satisfies Abi;
-
-function parseContentHints(u: string) {
+function parseHints(uri: string) {
   try {
-    const [base, hash = ''] = u.split('#');
-    const qs = new URLSearchParams(hash);
-    const previewUri = (qs.get('rm_preview') || '').trim();
-    const blur = qs.get('rm_blur') === '1';
-    return { base: base.trim(), previewUri, blur };
+    const [base, frag] = uri.split('#');
+    const sp = new URLSearchParams(frag || '');
+    const preview = sp.get('rm_preview') || '';
+    const blur = sp.get('rm_blur') === '1';
+    return { base, preview, blur };
   } catch {
-    return { base: u, previewUri: '', blur: false };
+    return { base: uri, preview: '', blur: false };
   }
 }
 
-// ---- Safe helpers (avoid viem throwing on undefined) ----
-function safeIsAddress(a: unknown): a is Address {
-  return typeof a === 'string' && /^0x[0-9a-fA-F]{40}$/.test(a) && viemIsAddress(a as Address);
-}
-
-export default function OnchainSections({ creatorAddress }: { creatorAddress?: Address | null }) {
-  const pub = usePublicClient();
+export default function OnchainSections({ creatorAddress }: { creatorAddress: `0x${string}` }) {
+  const { address } = useAccount();
+  const {
+    getCreatorPlanIds,
+    getCreatorPostIds,
+    readPlan,
+    readPost,
+    subscribe,
+    buyPost,
+    hasPostAccess,
+    isActive,
+    previewSubscribeTotal,
+    previewBuyPost,
+    getSubExpiry,
+  } = useCreatorHub();
 
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const [plans, setPlans] = useState<Plan[] | null>(null);
-  const [posts, setPosts] = useState<Post[] | null>(null);
-  const [tokenMeta, setTokenMeta] = useState<Record<string, TokenMeta>>({});
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [subActive, setSubActive] = useState<boolean>(false);
+  const [subExpiry, setSubExpiry] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [accessCache, setAccessCache] = useState<Record<string, boolean>>({});
 
-  const hubAddr = CREATOR_HUB_ADDR as Address | undefined;
-
-  // Resilient multicall wrapper with fallback to per-call reads
-  const multicall = useCallback(
-    async (contracts: Array<{ address: Address; abi: Abi; functionName: string; args?: any[] }>) => {
-      if (!contracts.length || !pub) return [];
-      // viem public client may or may not have multicall available in some envs
-      const hasMulti = typeof (pub as any)?.multicall === 'function';
-      if (hasMulti) {
-        const res = await (pub as any).multicall({
-          allowFailure: true,
-          contracts,
-        }).catch(() => null);
-        if (Array.isArray(res)) return res;
-      }
-      // Fallback: do individual reads
-      const out: any[] = [];
-      for (const c of contracts) {
-        try {
-          const result = await pub.readContract({
-            address: c.address,
-            abi: c.abi,
-            functionName: c.functionName as any,
-            args: (c as any).args ?? [],
-          });
-          out.push({ result });
-        } catch {
-          out.push({ error: true });
-        }
-      }
-      return out;
-    },
-    [pub]
-  );
-
-  const load = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
-    setErr(null);
-    setPlans(null);
-    setPosts(null);
-    setTokenMeta({});
-
     try {
-      if (!pub) throw new Error('Public client unavailable');
-
-      // Guard: creator wallet missing
-      if (!creatorAddress || !safeIsAddress(creatorAddress)) {
-        setPlans([]);
-        setPosts([]);
-        return;
-      }
-
-      // Guard: hub address misconfigured
-      if (!safeIsAddress(hubAddr)) {
-        // This was the crash cause: calling isAddress(undefined)
-        throw new Error('CreatorHub address not configured. Set CREATOR_HUB_ADDR to a non-zero 0x… address.');
-      }
-
-      // Read plan & post ids
       const [planIds, postIds] = await Promise.all([
-        pub.readContract({
-          address: hubAddr,
-          abi: CREATOR_HUB_ABI as Abi,
-          functionName: 'getCreatorPlanIds',
-          args: [creatorAddress],
-        }).catch(() => []) as Promise<bigint[]>,
-        pub.readContract({
-          address: hubAddr,
-          abi: CREATOR_HUB_ABI as Abi,
-          functionName: 'getCreatorPostIds',
-          args: [creatorAddress],
-        }).catch(() => []) as Promise<bigint[]>,
+        getCreatorPlanIds(creatorAddress),
+        getCreatorPostIds(creatorAddress),
       ]);
 
-      // Build detail calls
-      const planCalls = planIds.map((id) => ({
-        address: hubAddr!,
-        abi: CREATOR_HUB_ABI as Abi,
-        functionName: 'plans',
-        args: [id],
-      }));
-      const postCalls = postIds.map((id) => ({
-        address: hubAddr!,
-        abi: CREATOR_HUB_ABI as Abi,
-        functionName: 'posts',
-        args: [id],
-      }));
+      const [planRows, postRows] = await Promise.all([
+        Promise.all(planIds.map((id) => readPlan(id))),
+        Promise.all(postIds.map((id) => readPost(id))),
+      ]);
 
-      const [planRes, postRes] = await Promise.all([multicall(planCalls), multicall(postCalls)]);
+      setPlans(
+        planRows
+          .map((r, i) => (r ? { id: planIds[i], ...r } as Plan : null))
+          .filter(Boolean) as Plan[]
+      );
 
-      const plansParsed: Plan[] = planIds.map((id, i) => {
-        const entry: any = planRes?.[i];
-        const r: any = entry?.result ?? [];
-        // Defensive indexing: r could be tuple or empty
-        const token = (r?.[1] || '0x0000000000000000000000000000000000000000') as Address;
-        const pricePerPeriod = BigInt(r?.[2] ?? 0n);
-        const periodDays = Number(r?.[3] ?? 0);
-        const active = Boolean(r?.[4]);
-        const name = String(r?.[5] ?? '');
-        const metadataURI = String(r?.[6] ?? '');
-        return { id, token, pricePerPeriod, periodDays, active, name, metadataURI };
-      });
+      setPosts(
+        postRows
+          .map((r, i) => (r ? { id: postIds[i], ...r } as Post : null))
+          .filter(Boolean) as Post[]
+      );
 
-      const postsParsed: Post[] = postIds.map((id, i) => {
-        const entry: any = postRes?.[i];
-        const r: any = entry?.result ?? [];
-        const token = (r?.[1] || '0x0000000000000000000000000000000000000000') as Address;
-        const price = BigInt(r?.[2] ?? 0n);
-        const active = Boolean(r?.[3]);
-        const accessViaSub = Boolean(r?.[4]);
-        const uri = String(r?.[5] ?? '');
-        return { id, token, price, active, accessViaSub, uri };
-      });
+      if (address) {
+        const active = await isActive(address, creatorAddress);
+        setSubActive(active);
+        const until = await getSubExpiry(address, creatorAddress).catch(() => 0);
+        setSubExpiry(until > 0 ? until : null);
 
-      const activePlans = plansParsed.filter((p) => p.active);
-      const activePosts = postsParsed.filter((p) => p.active);
-
-      setPlans(activePlans);
-      setPosts(activePosts);
-
-      // Token metadata
-      const tokenSet = new Set<string>();
-      for (const t of [...activePlans.map((p) => p.token), ...activePosts.map((p) => p.token)]) {
-        if (safeIsAddress(t)) tokenSet.add(t.toLowerCase());
+        // prefill access cache for posts (optional best-effort)
+        const entries = await Promise.all(
+          postIds.map(async (pid) => [pid.toString(), await hasPostAccess(address, pid)] as const)
+        );
+        const next: Record<string, boolean> = {};
+        for (const [k, v] of entries) next[k] = v;
+        setAccessCache(next);
+      } else {
+        setSubActive(false);
+        setSubExpiry(null);
+        setAccessCache({});
       }
-      const uniqueTokens = Array.from(tokenSet) as Address[];
-
-      if (uniqueTokens.length) {
-        const decCalls = uniqueTokens.map((t) => ({ address: t, abi: ERC20_MINI_ABI, functionName: 'decimals' as const }));
-        const symCalls = uniqueTokens.map((t) => ({ address: t, abi: ERC20_MINI_ABI, functionName: 'symbol' as const }));
-        const [decRes, symRes] = await Promise.all([multicall(decCalls), multicall(symCalls)]);
-
-        const meta: Record<string, TokenMeta> = {};
-        uniqueTokens.forEach((t, i) => {
-          const dec = Number(decRes?.[i]?.result ?? 18);
-          const sym = symRes?.[i]?.result as string | undefined;
-          meta[t.toLowerCase()] = {
-            decimals: Number.isFinite(dec) ? dec : 18,
-            symbol: typeof sym === 'string' && sym ? sym : undefined,
-          };
-        });
-        setTokenMeta(meta);
-      }
-    } catch (e: any) {
-      setErr(e?.message || 'Failed to load on-chain data');
-      setPlans([]);
-      setPosts([]);
     } finally {
       setLoading(false);
     }
-  }, [pub, creatorAddress, hubAddr, multicall]);
+  }, [address, creatorAddress, getCreatorPlanIds, getCreatorPostIds, readPlan, readPost, isActive, getSubExpiry, hasPostAccess]);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      if (!alive) return;
-      await load();
-    })();
-    return () => { alive = false; };
-  }, [load]);
+    refresh();
+  }, [refresh]);
 
-  const fmtAmount = useCallback(
-    (amount: bigint, token: Address) => {
-      const meta = tokenMeta[token?.toLowerCase?.() as string];
-      const decimals = meta?.decimals ?? 6;
-      const sym = meta?.symbol ?? '';
-      const asNum = Number(amount) / Math.pow(10, decimals);
-      return `${asNum.toLocaleString(undefined, { maximumFractionDigits: Math.min(6, decimals) })}${sym ? ` ${sym}` : ''}`;
-    },
-    [tokenMeta]
-  );
+  async function doSubscribe(plan: Plan) {
+    try {
+      setBusyId(`plan:${plan.id.toString()}`);
+      const total = await previewSubscribeTotal(plan.id, 1);
+      toast(`Approval + subscribe (${fmtUSDC(total)} USDC)…`, { icon: '⛓️' });
+      await subscribe(plan.id, 1);
+      toast.success('Subscribed');
+      await refresh();
+    } catch (e: any) {
+      toast.error(e?.shortMessage || e?.message || 'Failed to subscribe');
+    } finally {
+      setBusyId(null);
+    }
+  }
 
-  const hasWallet = Boolean(creatorAddress && safeIsAddress(creatorAddress));
-  const parsedPosts = useMemo(() => {
-    return (posts || []).map((p) => ({ ...p, hints: parseContentHints(p.uri || '') }));
-  }, [posts]);
+  async function doBuy(post: Post) {
+    try {
+      setBusyId(`post:${post.id.toString()}`);
+      const total = await previewBuyPost(post.id);
+      if (total > 0n) toast(`Approval + buy (${fmtUSDC(total)} USDC)…`, { icon: '⛓️' });
+      await buyPost(post.id);
+      toast.success('Unlocked');
+      if (address) {
+        const ok = await hasPostAccess(address, post.id);
+        setAccessCache((m) => ({ ...m, [post.id.toString()]: ok }));
+      }
+    } catch (e: any) {
+      toast.error(e?.shortMessage || e?.message || 'Failed to buy');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  if (loading) {
+    return (
+      <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-center gap-2 text-sm text-slate-400">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading on-chain content…
+        </div>
+      </section>
+    );
+  }
 
   return (
-    <div className="space-y-8">
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-400">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-          Loading on-chain sections…
+    <section className="space-y-6">
+      {/* Subscription plans */}
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium">Subscription</div>
+          {address && (
+            <div className="text-xs text-slate-400">
+              {subActive ? (
+                <span className="inline-flex items-center gap-1 text-emerald-300">
+                  <Unlock className="h-3.5 w-3.5" /> Active
+                  {subExpiry ? (
+                    <span className="text-slate-400 ml-1">
+                      until {new Date(subExpiry).toLocaleDateString()}
+                    </span>
+                  ) : null}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 text-slate-300">
+                  <Lock className="h-3.5 w-3.5" /> Not active
+                </span>
+              )}
+            </div>
+          )}
         </div>
-      )}
-      {err && !loading && (
-        <div className="flex items-center justify-between rounded-xl border border-rose-400/30 bg-rose-400/10 p-3 text-rose-200">
-          <span className="text-sm">Error: {err}</span>
-          <button
-            onClick={load}
-            className="inline-flex items-center gap-1 rounded-lg border border-rose-300/30 px-2.5 py-1.5 text-xs hover:bg-rose-400/10"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Retry
-          </button>
-        </div>
-      )}
-
-      {/* Plans */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Subscription Plans</h2>
-        {loading && !plans ? (
-          <div className="text-sm text-slate-400">Loading…</div>
-        ) : !hasWallet ? (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-            Creator has not linked a wallet address yet.
-          </div>
-        ) : (plans?.length ?? 0) === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-            No active plans.
-          </div>
+        {!plans.length ? (
+          <p className="mt-2 text-sm text-slate-400">No plans yet.</p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2">
-            {plans!.map((p) => (
-              <div key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+            {plans.map((p) => (
+              <li key={p.id.toString()} className="rounded-xl border border-white/10 bg-white/5 p-3">
                 <div className="flex items-center justify-between">
-                  <div className="truncate font-medium" title={p.name || 'Plan'}>
-                    {p.name || 'Plan'}
+                  <div>
+                    <div className="font-medium">{p.name || 'Plan'}</div>
+                    <div className="text-xs text-slate-400">
+                      {fmtUSDC(p.pricePerPeriod)} USDC / {p.periodDays}d
+                    </div>
                   </div>
-                  <div className="whitespace-nowrap text-sm text-slate-300">
-                    {fmtAmount(p.pricePerPeriod, p.token)} / {p.periodDays}d
-                  </div>
+                  <button
+                    onClick={() => doSubscribe(p)}
+                    disabled={!address || busyId === `plan:${p.id.toString()}`}
+                    className="btn-secondary inline-flex items-center text-xs disabled:opacity-60"
+                  >
+                    {busyId === `plan:${p.id.toString()}` ? (
+                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="mr-1 h-3.5 w-3.5" />
+                    )}
+                    Subscribe
+                  </button>
                 </div>
-                {p.metadataURI ? (
-                  <div className="mt-2 line-clamp-2 text-sm text-slate-300" title={p.metadataURI}>
-                    {p.metadataURI}
-                  </div>
-                ) : null}
-                <div className="mt-3">
-                  <SubscribeButton planId={p.id} />
-                </div>
-              </div>
+              </li>
             ))}
-          </div>
+          </ul>
         )}
-      </section>
+      </div>
 
       {/* Posts */}
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Paid Posts</h2>
-        {loading && !posts ? (
-          <div className="text-sm text-slate-400">Loading…</div>
-        ) : !hasWallet ? (
-          <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-            Creator has not linked a wallet address yet.
-          </div>
-        ) : (parsedPosts?.length ?? 0) === 0 ? (
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-            No active paid posts.
-          </div>
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+        <div className="text-sm font-medium">Posts</div>
+        {!posts.length ? (
+          <p className="mt-2 text-sm text-slate-400">No posts yet.</p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {parsedPosts.map((p) => {
-              const { base, previewUri, blur } = p.hints;
-              const displaySrc = previewUri || base;
-              const shouldBlur = !previewUri && blur;
+          <ul className="mt-3 grid gap-3 sm:grid-cols-2">
+            {posts.map((p) => {
+              const k = p.id.toString();
+              const hints = parseHints(p.uri);
+              const unlocked = accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
 
               return (
-                <article key={String(p.id)} className="rounded-xl border border-white/10 bg-white/5 p-3">
-                  <div className="relative">
-                    <div className={`relative ${shouldBlur ? 'blur-4xl select-none' : ''}`}>
-                      <SafeMedia
-                        src={displaySrc}
-                        className="aspect-video w-full overflow-hidden"
-                        rounded="rounded-lg"
-                      />
+                <li key={k} className="rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-slate-400">
+                      #{k} • {p.accessViaSub ? 'Sub unlock' : 'One-off'}
                     </div>
+                    {!unlocked && (
+                      <div className="text-xs text-slate-300">{fmtUSDC(p.price)} USDC</div>
+                    )}
+                  </div>
 
-                    {shouldBlur && (
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="rounded-full bg-black/60 px-2 py-1 text-[10px] uppercase tracking-wide">
-                          Locked
-                        </span>
+                  <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
+                    {unlocked ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={hints.base} className="w-full object-cover" alt="" />
+                    ) : hints.preview ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={hints.preview}
+                        className={`w-full object-cover ${hints.blur ? 'blur-md' : ''}`}
+                        alt=""
+                      />
+                    ) : (
+                      <div className="flex h-40 items-center justify-center text-slate-400 text-sm">
+                        Locked
                       </div>
                     )}
                   </div>
 
-                  <span className="sr-only">{p.uri}</span>
-
-                  <div className="mt-2 text-xs text-slate-400">
-                    {fmtAmount(p.price, p.token)}{p.accessViaSub ? ' • also via subscription' : ''}
-                  </div>
-
-                  <div className="mt-2 flex items-center gap-2">
-                    <BuyPostButton postId={p.id} />
-                    {p.accessViaSub ? (
-                      <span className="text-[11px] text-slate-400">Subscribers unlock automatically</span>
-                    ) : null}
-                  </div>
-                </article>
+                  {!unlocked && (
+                    <div className="mt-2">
+                      <button
+                        onClick={() => doBuy(p)}
+                        disabled={!address || busyId === `post:${k}`}
+                        className="btn inline-flex items-center text-xs disabled:opacity-60"
+                      >
+                        {busyId === `post:${k}` ? (
+                          <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <CreditCard className="mr-1 h-3.5 w-3.5" />
+                        )}
+                        Buy to unlock
+                      </button>
+                    </div>
+                  )}
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
-      </section>
-    </div>
+      </div>
+    </section>
   );
 }
