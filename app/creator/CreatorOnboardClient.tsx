@@ -17,7 +17,7 @@ import {
 import { useDebouncedValue } from '@/lib/useDebouncedValue';
 import { creatorShareLinks } from '@/lib/farcaster';
 
-import { readPreviewCreate } from '@/lib/profileRegistry/reads';
+import { readPreviewCreate, readProfilesByOwner } from '@/lib/profileRegistry/reads';
 
 function normalizeHandleId(s: string) {
   return s.trim().replace(/^@+/, '').toLowerCase();
@@ -53,8 +53,9 @@ export default function CreatorOnboardClient() {
   const [busy, setBusy] = useState(false);
   const [feeView, setFeeView] = useState<string>('');
   const [allowanceOk, setAllowanceOk] = useState<boolean | null>(null);
-  const { createProfile, handleTaken, feeUnits, getProfilesByOwner } =
-    useProfileRegistry();
+
+  // From the hook (no getProfilesByOwner here)
+  const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
   // Detect existing on-chain profile(s) for the connected wallet
   const [ownedId, setOwnedId] = useState<string | null>(null);
@@ -63,7 +64,7 @@ export default function CreatorOnboardClient() {
     (async () => {
       try {
         if (!isConnected || !wallet) return;
-        const ids = await getProfilesByOwner(wallet as Address);
+        const ids = await readProfilesByOwner(wallet as `0x${string}`);
         if (!alive) return;
         setOwnedId(ids && ids.length > 0 ? String(ids[0]) : null);
       } catch {
@@ -73,9 +74,9 @@ export default function CreatorOnboardClient() {
     return () => {
       alive = false;
     };
-  }, [isConnected, wallet, getProfilesByOwner]);
+  }, [isConnected, wallet]);
 
-  // Preview creation fee
+  // Preview creation fee (prefer previewCreate; fallback to feeUnits)
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -167,7 +168,7 @@ export default function CreatorOnboardClient() {
 
       setBusy(true);
       try {
-        // Double-check on-chain taken
+        // Double-check on-chain taken to avoid a race
         if (await handleTaken(handleId)) {
           toast.error('Handle already registered on-chain');
           setBusy(false);
@@ -176,36 +177,28 @@ export default function CreatorOnboardClient() {
 
         const fee = await feeUnits().catch(() => 0n);
         if (fee && fee > 0n) {
-          toast(
-            `Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`,
-            { icon: '⛓️' }
-          );
+          toast(`Approving USDC & creating (fee: ${(Number(fee) / 1e6).toFixed(2)} USDC)…`, { icon: '⛓️' });
         } else {
           toast('Creating profile…', { icon: '⛓️' });
         }
 
-        // 1) On-chain create
-        const id = await createProfile({
-          handle: handleId,
-          displayName: '',
-          avatarURI: '',
-          bio: '',
-          fid: 0n,
-        });
+        // 1) On-chain create (hook handles allowance if necessary)
+        const id = await createProfile({ handle: handleId }); // your hook returns bigint
 
-        // 2) Register in KV
+        // 2) Register in KV (pass wallet so owner index is set immediately)
         const reg = await registerCreator({
           handle: handleId,
           address: (wallet as Address) ?? null,
         });
         if (!('creator' in reg)) {
-          const msg =
-            'error' in reg && reg.error ? reg.error : 'Failed to register';
+          const msg = 'error' in reg && reg.error ? reg.error : 'Failed to register';
           throw new Error(msg);
         }
 
+        // Prefer handle as canonical route (your page resolves by KV first anyway)
         const routeId = reg.creator?.handle || reg.creator?.id || String(id);
 
+        // Share nudge
         const { cast, tweet, url } = creatorShareLinks(
           routeId,
           `Check out @${routeId} on Rate Me`
