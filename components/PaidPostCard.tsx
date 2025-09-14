@@ -7,6 +7,7 @@ import { useAccount } from 'wagmi';
 import { getAddress, isAddress } from 'viem';
 import SafeMedia from './SafeMedia';
 import { useCreatorHub } from '@/hooks/useCreatorHub';
+import { useGate } from '@/hooks/useGate';
 
 function ipfsToHttp(u?: string) {
   if (!u) return '';
@@ -29,30 +30,13 @@ function parseHints(uri: string) {
   }
 }
 
-/** POST /api/gate { mode:'post', user, postId } → { ok, allowed } */
-async function gateCheckPost(user: `0x${string}`, postId: bigint) {
-  try {
-    const res = await fetch('/api/gate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', accept: 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify({ mode: 'post', user, postId: postId.toString() }),
-    });
-    const j = await res.json().catch(() => null);
-    if (!res.ok || !j?.ok) return false;
-    return !!j.allowed;
-  } catch {
-    return false;
-  }
-}
-
 export default function PaidPostCard({
   creatorAddress,
   postId,
-  priceUSDC,               // human  e.g., 1.00
-  rawUri,                  // may contain rm_preview / rm_blur
+  priceUSDC,
+  rawUri,
   alsoViaSub,
-  onChanged,               // after successful purchase
+  onChanged,
 }: {
   creatorAddress: `0x${string}`;
   postId: bigint;
@@ -63,6 +47,7 @@ export default function PaidPostCard({
 }) {
   const { address, isConnected } = useAccount();
   const { buyPost, hasPostAccess } = useCreatorHub();
+  const { checkPost } = useGate();
 
   const hints = useMemo(() => parseHints(rawUri), [rawUri]);
 
@@ -84,7 +69,7 @@ export default function PaidPostCard({
   const [buying, setBuying] = useState(false);
   const [canAccess, setCanAccess] = useState(false);
   const cancelRef = useRef(false);
-  const pollGen = useRef(0); // token to cancel older polls
+  const pollGen = useRef(0);
 
   const refreshAccess = useCallback(async () => {
     if (!user || pid <= 0n) {
@@ -94,21 +79,20 @@ export default function PaidPostCard({
     cancelRef.current = false;
     setChecking(true);
     try {
-      // 1) Authoritative check via /api/gate (server can apply extra logic)
-      const gate = await gateCheckPost(user, pid);
-      if (!cancelRef.current && gate) {
+      // 1) Signed, scoped check via /api/gate
+      const signed = await checkPost(user, pid).catch(() => false);
+      if (!cancelRef.current && signed) {
         setCanAccess(true);
         return;
       }
       // 2) Fallback: direct on-chain view
-      const onchain = await hasPostAccess(user, pid).catch(() => false);
-      if (!cancelRef.current) setCanAccess(!!onchain);
+      const chain = await hasPostAccess(user, pid).catch(() => false);
+      if (!cancelRef.current) setCanAccess(!!chain);
     } finally {
       if (!cancelRef.current) setChecking(false);
     }
-  }, [user, pid, hasPostAccess]);
+  }, [user, pid, checkPost, hasPostAccess]);
 
-  // Initial & dependency-based checks
   useEffect(() => {
     cancelRef.current = false;
     refreshAccess();
@@ -117,7 +101,6 @@ export default function PaidPostCard({
     };
   }, [refreshAccess]);
 
-  // Re-check when the tab becomes visible again (wallet reconnects, etc.)
   useEffect(() => {
     function onVis() {
       if (document.visibilityState === 'visible') refreshAccess();
@@ -126,7 +109,6 @@ export default function PaidPostCard({
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [refreshAccess]);
 
-  // Poll briefly post-tx to absorb indexer lag (both gate + on-chain)
   async function pollUntilUnlocked(maxMs = 6000) {
     const token = ++pollGen.current;
     const start = Date.now();
@@ -138,8 +120,8 @@ export default function PaidPostCard({
 
       try {
         if (!user || pid <= 0n) break;
-        const gate = await gateCheckPost(user, pid);
-        if (gate) {
+        const signed = await checkPost(user, pid).catch(() => false);
+        if (signed) {
           setCanAccess(true);
           return;
         }
@@ -148,9 +130,7 @@ export default function PaidPostCard({
           setCanAccess(true);
           return;
         }
-      } catch {
-        // ignore transient read errors
-      }
+      } catch { /* ignore */ }
     }
     await refreshAccess();
   }
@@ -159,7 +139,7 @@ export default function PaidPostCard({
     if (!isConnected || !user || pid <= 0n) return;
     try {
       setBuying(true);
-      await buyPost(pid);       // hook should throw on reject
+      await buyPost(pid);   // throws on reject
       onChanged?.();
       await pollUntilUnlocked();
     } finally {
@@ -212,15 +192,12 @@ export default function PaidPostCard({
         )}
       </div>
 
-      {/* Footer */}
       <div className="mt-3">
         <span className="sr-only">{hints.base}</span>
-
         <div className="text-xs text-slate-400">
           {priceLabel}
           {alsoViaSub ? ' • also via subscription' : ''}
         </div>
-
         {!canAccess && (
           <button
             className="btn mt-3"
