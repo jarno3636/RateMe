@@ -3,8 +3,6 @@ import {
   createPublicClient,
   http,
   type Address,
-  type Abi,
-  getAddress,
 } from 'viem';
 import { base as BASE } from 'viem/chains';
 import {
@@ -34,23 +32,21 @@ export type ProfileFlat = {
 };
 
 export async function readIdByHandle(handle: string): Promise<bigint> {
-  const id = (await pub.readContract({
+  return (await pub.readContract({
     address: PROFILE_REGISTRY_ADDR,
     abi: PROFILE_REGISTRY_ABI,
     functionName: 'getIdByHandle',
     args: [handle],
   })) as bigint;
-  return id;
 }
 
 export async function handleTaken(handle: string): Promise<boolean> {
-  const ok = (await pub.readContract({
+  return (await pub.readContract({
     address: PROFILE_REGISTRY_ADDR,
     abi: PROFILE_REGISTRY_ABI,
     functionName: 'handleTaken',
     args: [handle],
   })) as boolean;
-  return ok;
 }
 
 export async function feeUnits(): Promise<bigint> {
@@ -68,14 +64,13 @@ export async function readPreviewCreate(user: Address): Promise<{
   okBalance: boolean;
   okAllowance: boolean;
 }> {
-  const [balance, allowance_, fee, okBalance, okAllowance] = (await pub.readContract(
-    {
+  const [balance, allowance_, fee, okBalance, okAllowance] =
+    (await pub.readContract({
       address: PROFILE_REGISTRY_ADDR,
       abi: PROFILE_REGISTRY_ABI,
       functionName: 'previewCreate',
       args: [user],
-    }
-  )) as readonly [bigint, bigint, bigint, boolean, boolean];
+    })) as readonly [bigint, bigint, bigint, boolean, boolean];
 
   return { balance, allowance: allowance_, fee, okBalance, okAllowance };
 }
@@ -141,16 +136,7 @@ export async function readProfilesByOwner(owner: Address): Promise<bigint[]> {
 
 /** Paged chain read */
 export async function listProfilesFlat(cursor: bigint, size: bigint): Promise<{
-  items: {
-    id: bigint;
-    owner: Address;
-    handle: string;
-    displayName: string;
-    avatarURI: string;
-    bio: string;
-    fid: bigint;
-    createdAt: number; // ms
-  }[];
+  items: ProfileFlat[];
   nextCursor: bigint;
 }> {
   const [
@@ -180,7 +166,7 @@ export async function listProfilesFlat(cursor: bigint, size: bigint): Promise<{
     bigint
   ];
 
-  const items = outIds.map((id, i) => ({
+  const items: ProfileFlat[] = outIds.map((id, i) => ({
     id,
     owner: owners[i],
     handle: handles[i],
@@ -193,3 +179,6 @@ export async function listProfilesFlat(cursor: bigint, size: bigint): Promise<{
 
   return { items, nextCursor };
 }
+
+/** Legacy alias kept for older imports */
+export const readProfilesFlat = listProfilesFlat;
