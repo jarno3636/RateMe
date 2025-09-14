@@ -9,10 +9,10 @@ import type { Address } from 'viem';
 import Link from 'next/link';
 import { USDC_ADDRESS as BASE_USDC } from '@/lib/profileRegistry/constants';
 
-// ---- infer types from the hook (so we don't need type exports)
+// ---- infer types from the hook (based on *getPlan* / *getPost*)
 type Hub = ReturnType<typeof useCreatorHub>;
-type Plan = Awaited<ReturnType<Hub['readPlan']>>;
-type Post = Awaited<ReturnType<Hub['readPost']>>;
+type Plan = Awaited<ReturnType<Hub['getPlan']>>;
+type Post = Awaited<ReturnType<Hub['getPost']>>;
 
 function shortAddr(a: Address) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -55,11 +55,11 @@ export default function ClientSubscribe({
   const {
     // plans
     getCreatorPlanIds,
-    readPlan,
+    getPlan,
     subscribe,
     // posts
     getCreatorPostIds,
-    readPost,
+    getPost,
     buyPost,
   } = useCreatorHub();
 
@@ -93,7 +93,7 @@ export default function ClientSubscribe({
         const ids = await getCreatorPlanIds(creatorAddress);
         const out: Plan[] = [];
         for (const id of ids) {
-          const p = await readPlan(id);
+          const p = await getPlan(id);
           if (p.active) out.push(p);
         }
         if (!alive) return;
@@ -111,7 +111,7 @@ export default function ClientSubscribe({
     return () => {
       alive = false;
     };
-  }, [creatorAddress, getCreatorPlanIds, readPlan]);
+  }, [creatorAddress, getCreatorPlanIds, getPlan]);
 
   // Load posts
   useEffect(() => {
@@ -122,7 +122,7 @@ export default function ClientSubscribe({
         const ids = await getCreatorPostIds(creatorAddress);
         const out: Post[] = [];
         for (const id of ids) {
-          const p = await readPost(id);
+          const p = await getPost(id);
           if (p.active) out.push(p);
         }
         if (!alive) return;
@@ -137,7 +137,7 @@ export default function ClientSubscribe({
     return () => {
       alive = false;
     };
-  }, [creatorAddress, getCreatorPostIds, readPost]);
+  }, [creatorAddress, getCreatorPostIds, getPost]);
 
   const changePeriods = (planId: bigint, v: string) => {
     const n = Math.max(1, Math.min(36, Number(v || 1)));
@@ -258,7 +258,7 @@ export default function ClientSubscribe({
               {plans.map((p, i) => {
                 const planId = planIds[i];
                 const periods = periodsById[planId.toString()] || 1;
-                const total = p.pricePerPeriod * BigInt(Math.max(1, periods)); // no useMemo in a loop
+                const total = p.pricePerPeriod * BigInt(Math.max(1, periods));
                 const busy = busyPlanId !== null && planId === busyPlanId;
                 return (
                   <li
