@@ -1,4 +1,3 @@
-// app/creator/[id]/page.tsx
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { SITE } from '@/lib/config'
@@ -328,7 +327,7 @@ export default async function CreatorPage({ params }: Params) {
 
 /** Small inline client component for expandable bio */
 function BioBlock({ text }: { text: string }) {
-  // `use client` not needed; we keep it purely server-rendered with details/summary
+  // purely server-rendered with <details>/<summary>
   const trimmed = text.trim()
   if (trimmed.length <= 320) {
     return (
