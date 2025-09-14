@@ -1,222 +1,183 @@
-// app/creator/DashboardClient.tsx
+// // app/creator/DashboardClient.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { useAccount, usePublicClient } from 'wagmi';
-import type { Address } from 'viem';
-import { readProfilesByOwner, readProfilesFlat } from '@/lib/profileRegistry/reads';
-import { Plus, Loader2, RefreshCw } from 'lucide-react';
-import PlanManager from './PlanManager';
-import PostManager from './PostManager';
+import { useEffect, useMemo, useState } from 'react';
+import { useAccount } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
+import type { Abi, Address } from 'viem';
+import { createPublicClient, http } from 'viem';
+import { base as BASE } from 'viem/chains';
+
+import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
+import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
 
 type Profile = {
-  id: string;
-  owner: Address;
+  id: bigint;
+  owner: `0x${string}`;
   handle: string;
   displayName: string;
-  avatarUrl: string;
+  avatarURI: string;
   bio: string;
-  fid: number;
-  createdAt: number;
+  fid: bigint;
+  createdAtMs: number;
 };
 
-function bust(url: string) {
-  if (!url) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}t=${Date.now()}`;
-}
-
 export default function DashboardClient() {
-  const { address } = useAccount();
-  const pub = usePublicClient();
-
+  const { address, isConnected } = useAccount();
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const abortRef = useRef<AbortController | null>(null);
-
-  const selectedProfile = useMemo(
-    () => profiles.find((p) => p.id === selected) || null,
-    [profiles, selected]
+  const owner = useMemo(
+    () => (isConnected && address ? (address as `0x${string}`) : null),
+    [isConnected, address]
   );
 
-  async function load() {
-    if (!address || !pub) return;
-    setLoading(true);
-    setErr(null);
-
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-
-    try {
-      // 1) Get profile ids for this owner
-      const ids = await readProfilesByOwner(address as Address);
-      if (ac.signal.aborted) return;
-
-      if (!ids.length) {
-        setProfiles([]);
-        setSelected(null);
-        return;
-      }
-
-      // 2) Flatten details for those ids
-      const rows = await readProfilesFlat(ids);
-      if (ac.signal.aborted) return;
-
-      const mapped: Profile[] = rows.map((r) => ({
-        id: r.id.toString(),
-        owner: r.owner,
-        handle: r.handle,
-        displayName: r.displayName,
-        avatarUrl: r.avatarURI || '/icon-192.png',
-        bio: r.bio,
-        fid: Number(r.fid),
-        createdAt: Number(r.createdAt), // assume seconds or ms as provided by your reads()
-      }));
-
-      // newest first
-      mapped.sort((a, b) => Number(b.id) - Number(a.id));
-
-      setProfiles(mapped);
-      setSelected((curr) => curr && mapped.some((m) => m.id === curr) ? curr : (mapped[0]?.id || null));
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') {
-        setErr(e?.message || 'Failed to load your profiles');
-      }
-    } finally {
-      setLoading(false);
-    }
-  }
-
   useEffect(() => {
-    load();
-    return () => abortRef.current?.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, pub]);
+    let aborted = false;
 
-  if (!address) {
-    return (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-        <p className="text-sm text-slate-300">
-          Connect your wallet to manage your creator profiles.
-        </p>
-      </div>
-    );
-  }
+    async function run() {
+      setLoading(true);
+      setError(null);
+      try {
+        if (!owner) {
+          setProfiles([]);
+          return;
+        }
 
-  if (loading && !profiles.length) {
-    return (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-400 flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        Loading your profiles…
-      </div>
-    );
-  }
+        const rpc =
+          process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+          process.env.BASE_RPC_URL ||
+          undefined;
 
-  if (err && !profiles.length) {
-    return (
-      <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 p-4 text-rose-200 flex items-center justify-between">
-        <p className="text-sm">Error: {err}</p>
-        <button
-          onClick={load}
-          className="inline-flex items-center gap-1 rounded-lg border border-rose-300/30 px-3 py-1.5 text-sm hover:bg-rose-400/10"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Retry
-        </button>
-      </div>
-    );
-  }
+        const client = createPublicClient({
+          chain: BASE,
+          transport: http(rpc),
+        });
 
-  if (!profiles.length) {
-    return (
-      <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-        <p className="text-sm text-slate-300">No profiles yet.</p>
-        <Link href="/creator/register" className="btn mt-3 inline-flex items-center">
-          <Plus className="mr-2 h-4 w-4" />
-          Create your first profile
-        </Link>
-      </div>
-    );
-  }
+        // 1) Get IDs owned by this wallet
+        const ids = (await client.readContract({
+          address: REGISTRY_ADDRESS as Address,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'getProfilesByOwner',
+          args: [owner],
+        })) as bigint[];
+
+        if (aborted) return;
+
+        if (!ids || ids.length === 0) {
+          setProfiles([]);
+          return;
+        }
+
+        // 2) Flatten details for those ids (single on-chain call)
+        const tuple = (await client.readContract({
+          address: REGISTRY_ADDRESS as Address,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'getProfilesFlat',
+          args: [ids],
+        })) as [
+          bigint[],            // outIds
+          `0x${string}`[],     // owners
+          string[],            // handles
+          string[],            // displayNames
+          string[],            // avatarURIs
+          string[],            // bios
+          bigint[],            // fids
+          bigint[]             // createdAts (seconds)
+        ];
+
+        if (aborted) return;
+
+        const rows = {
+          outIds: tuple[0],
+          owners: tuple[1],
+          handles: tuple[2],
+          displayNames: tuple[3],
+          avatarURIs: tuple[4],
+          bios: tuple[5],
+          fids: tuple[6],
+          createdAts: tuple[7],
+        };
+
+        const mapped: Profile[] = rows.outIds.map((id, i) => ({
+          id,
+          owner: rows.owners[i],
+          handle: rows.handles[i] || '',
+          displayName: rows.displayNames[i] || '',
+          avatarURI: rows.avatarURIs[i] || '',
+          bio: rows.bios[i] || '',
+          fid: rows.fids[i] ?? 0n,
+          createdAtMs: Number(rows.createdAts[i] ?? 0n) * 1000,
+        }));
+
+        setProfiles(mapped);
+      } catch (e: any) {
+        setError(e?.message || 'Failed to load profiles');
+        setProfiles([]);
+      } finally {
+        if (!aborted) setLoading(false);
+      }
+    }
+
+    run();
+    return () => {
+      aborted = true;
+    };
+  }, [owner]);
 
   return (
-    <div className="space-y-6">
-      {/* Switcher + refresh */}
-      <div className="flex flex-wrap items-center gap-2">
-        {profiles.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => setSelected(p.id)}
-            className={`rounded-xl border px-3 py-2 text-sm transition ${
-              selected === p.id
-                ? 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100'
-                : 'border-white/10 bg-white/5 text-slate-200 hover:bg-white/10'
-            }`}
-            title={`@${p.handle}`}
-          >
-            @{p.handle}
-          </button>
-        ))}
-        <button
-          onClick={load}
-          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 hover:bg-white/10"
-          title="Refresh"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-          Refresh
-        </button>
+    <div className="mx-auto max-w-3xl px-4 py-8">
+      <div className="mb-4 flex items-center justify-between">
+        <div className="text-sm text-slate-400">
+          {isConnected ? (
+            <>Connected as <span className="text-slate-200">{address}</span></>
+          ) : (
+            <>Connect your wallet to view your profiles</>
+          )}
+        </div>
+        <ConnectButton chainStatus="none" showBalance={false} />
       </div>
 
-      {/* Selected profile header */}
-      {selectedProfile && (
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={bust(selectedProfile.avatarUrl || '/icon-192.png')}
-              alt={selectedProfile.displayName || selectedProfile.handle}
-              className="h-12 w-12 rounded-full ring-1 ring-white/10 object-cover"
-            />
-            <div className="min-w-0">
-              <div className="font-semibold truncate">
-                {selectedProfile.displayName || `@${selectedProfile.handle}`}
-              </div>
-              <div className="text-xs text-slate-400 truncate">@{selectedProfile.handle}</div>
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <Link
-                href={`/creator/${encodeURIComponent(selectedProfile.id)}`}
-                className="btn-secondary"
-              >
-                View public page
-              </Link>
-              <Link
-                href={`/creator/${encodeURIComponent(selectedProfile.id)}#edit`}
-                className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10"
-                title="Edit profile"
-              >
-                Edit
-              </Link>
-            </div>
-          </div>
-          {selectedProfile.bio && (
-            <p className="mt-2 text-sm text-slate-300">{selectedProfile.bio}</p>
-          )}
+      {loading && (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+          Loading…
         </div>
       )}
 
-      {/* Managers */}
-      {selected && (
-        <>
-          <PlanManager creatorId={selected} />
-          <PostManager creatorId={selected} />
-        </>
+      {error && (
+        <div className="rounded-xl border border-rose-400/20 bg-rose-400/10 p-4 text-sm text-rose-200">
+          {error}
+        </div>
+      )}
+
+      {!loading && !error && profiles.length === 0 && (
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+          No profiles found for this wallet.
+        </div>
+      )}
+
+      {!loading && !error && profiles.length > 0 && (
+        <ul className="grid gap-4 sm:grid-cols-2">
+          {profiles.map((p) => (
+            <li key={p.id.toString()} className="rounded-xl border border-white/10 bg-white/5 p-4">
+              <div className="text-sm text-slate-400">#{p.id.toString()}</div>
+              <div className="mt-1 text-lg font-medium">{p.displayName || p.handle || '(no name)'}</div>
+              <div className="text-xs text-slate-400">@{p.handle}</div>
+              <div className="mt-2 line-clamp-3 text-sm text-slate-300">{p.bio}</div>
+              <div className="mt-3 text-xs text-slate-400">
+                Created:{' '}
+                {p.createdAtMs ? new Date(p.createdAtMs).toLocaleString() : '—'}
+              </div>
+              <a
+                className="mt-3 inline-block text-sm text-cyan-300 underline decoration-cyan-300/40 underline-offset-2 hover:text-cyan-200"
+                href={`/creator/${encodeURIComponent(p.handle || p.id.toString())}`}
+              >
+                Open page →
+              </a>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
