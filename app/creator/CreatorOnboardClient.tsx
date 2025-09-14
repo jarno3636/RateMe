@@ -3,8 +3,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useAccount } from 'wagmi';
-import type { Abi, Address } from 'viem';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
+import type { Abi, Address } from 'viem';
+import { createPublicClient, http } from 'viem';
+import { base as BASE } from 'viem/chains';
 
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
@@ -34,7 +36,7 @@ export default function DashboardClient() {
   useEffect(() => {
     let aborted = false;
 
-    async function load() {
+    async function run() {
       setLoading(true);
       setError(null);
       try {
@@ -43,32 +45,18 @@ export default function DashboardClient() {
           return;
         }
 
-        // Prefer your shared read client (if exported).
-        // Fallback: create a public client on the fly.
-        let readClient: any;
-        try {
-          const mod: any = await import('@/lib/profileRegistry/reads');
-          readClient = mod.readClient ?? mod.client ?? null;
-          // If a helper exists to init, use it.
-          if (!readClient && typeof mod.getReadClient === 'function') {
-            readClient = await mod.getReadClient();
-          }
-        } catch {
-          /* ignore */
-        }
+        const rpc =
+          process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+          process.env.BASE_RPC_URL ||
+          undefined;
 
-        if (!readClient) {
-          const { createPublicClient, http } = await import('viem');
-          const { base: BASE } = await import('viem/chains');
-          const rpc =
-            process.env.NEXT_PUBLIC_BASE_RPC_URL ||
-            process.env.BASE_RPC_URL ||
-            undefined;
-          readClient = createPublicClient({ chain: BASE, transport: http(rpc) });
-        }
+        const client = createPublicClient({
+          chain: BASE,
+          transport: http(rpc),
+        });
 
-        // 1) Fetch ids owned by the connected wallet
-        const ids = (await readClient.readContract({
+        // 1) Get ids owned by the connected wallet
+        const ids = (await client.readContract({
           address: REGISTRY_ADDRESS as Address,
           abi: PROFILE_REGISTRY_ABI as Abi,
           functionName: 'getProfilesByOwner',
@@ -76,82 +64,51 @@ export default function DashboardClient() {
         })) as bigint[];
 
         if (aborted) return;
+
         if (!ids || ids.length === 0) {
           setProfiles([]);
           return;
         }
 
-        // 2) Get flat rows for those ids
-        let rows:
-          | {
-              outIds: bigint[];
-              owners: `0x${string}`[];
-              handles: string[];
-              displayNames: string[];
-              avatarURIs: string[];
-              bios: string[];
-              fids: bigint[];
-              createdAts: bigint[];
-            }
-          | null = null;
-
-        // Try helper first (it may require 2 args now).
-        try {
-          const mod: any = await import('@/lib/profileRegistry/reads');
-          if (typeof mod.readProfilesFlat === 'function') {
-            // Some versions want (ids, client), others (ids) — try both.
-            try {
-              rows = await mod.readProfilesFlat(ids, readClient);
-            } catch {
-              rows = await mod.readProfilesFlat(ids);
-            }
-          }
-        } catch {
-          /* ignore; we'll just call the contract directly */
-        }
-
-        // Fallback: direct contract read for getProfilesFlat
-        if (!rows) {
-          const tuple = (await readClient.readContract({
-            address: REGISTRY_ADDRESS as Address,
-            abi: PROFILE_REGISTRY_ABI as Abi,
-            functionName: 'getProfilesFlat',
-            args: [ids],
-          })) as [
-            bigint[], // outIds
-            `0x${string}`[], // owners
-            string[], // handles
-            string[], // displayNames
-            string[], // avatarURIs
-            string[], // bios
-            bigint[], // fids
-            bigint[] // createdAts (seconds)
-          ];
-
-          rows = {
-            outIds: tuple[0],
-            owners: tuple[1],
-            handles: tuple[2],
-            displayNames: tuple[3],
-            avatarURIs: tuple[4],
-            bios: tuple[5],
-            fids: tuple[6],
-            createdAts: tuple[7],
-          };
-        }
+        // 2) Fetch flat details for those ids
+        const tuple = (await client.readContract({
+          address: REGISTRY_ADDRESS as Address,
+          abi: PROFILE_REGISTRY_ABI as Abi,
+          functionName: 'getProfilesFlat',
+          args: [ids],
+        })) as [
+          bigint[],            // outIds
+          `0x${string}`[],     // owners
+          string[],            // handles
+          string[],            // displayNames
+          string[],            // avatarURIs
+          string[],            // bios
+          bigint[],            // fids
+          bigint[]             // createdAts (seconds)
+        ];
 
         if (aborted) return;
 
-        // 3) Map into Profile[]
+        const rows = {
+          outIds: tuple[0],
+          owners: tuple[1],
+          handles: tuple[2],
+          displayNames: tuple[3],
+          avatarURIs: tuple[4],
+          bios: tuple[5],
+          fids: tuple[6],
+          createdAts: tuple[7],
+        };
+
         const mapped: Profile[] = rows.outIds.map((id, i) => ({
           id,
-          owner: rows!.owners[i],
-          handle: rows!.handles[i] || '',
-          displayName: rows!.displayNames[i] || '',
-          avatarURI: rows!.avatarURIs[i] || '',
-          bio: rows!.bios[i] || '',
-          fid: rows!.fids[i] ?? 0n,
-          createdAtMs: Number(rows!.createdAts[i] ?? 0n) * 1000,
+          owner: rows.owners[i],
+          handle: rows.handles[i] || '',
+          displayName: rows.displayNames[i] || '',
+          avatarURI: rows.avatarURIs[i] || '',
+          bio: rows.bios[i] || '',
+          fid: rows.fids[i] ?? 0n,
+          createdAtMs: Number(rows.createdAts[i] ?? 0n) * 1000,
         }));
 
         setProfiles(mapped);
@@ -163,7 +120,7 @@ export default function DashboardClient() {
       }
     }
 
-    load();
+    run();
     return () => {
       aborted = true;
     };
@@ -210,9 +167,7 @@ export default function DashboardClient() {
               <div className="mt-2 line-clamp-3 text-sm text-slate-300">{p.bio}</div>
               <div className="mt-3 text-xs text-slate-400">
                 Created:{' '}
-                {p.createdAtMs
-                  ? new Date(p.createdAtMs).toLocaleString()
-                  : '—'}
+                {p.createdAtMs ? new Date(p.createdAtMs).toLocaleString() : '—'}
               </div>
               <a
                 className="mt-3 inline-block text-sm text-cyan-300 underline decoration-cyan-300/40 underline-offset-2 hover:text-cyan-200"
