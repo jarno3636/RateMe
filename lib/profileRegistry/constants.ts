@@ -1,56 +1,275 @@
-// lib/profileRegistry/constants.ts
-import { getAddress } from 'viem';
+// app/creator/[id]/EditProfileBox.tsx
+'use client';
 
-/**
- * Small env helpers
- */
-const env = (k: string) => process.env[k]?.trim();
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import toast from 'react-hot-toast';
 
-/**
- * Chain
- * - Allows override via NEXT_PUBLIC_BASE_CHAIN_ID (or BASE_CHAIN_ID) at build time.
- */
-export const BASE_CHAIN_ID: number = (() => {
-  const raw = env('NEXT_PUBLIC_BASE_CHAIN_ID') ?? env('BASE_CHAIN_ID');
-  const n = raw ? Number(raw) : 8453; // Base mainnet default
-  return Number.isFinite(n) ? n : 8453;
-})();
+const MAX_BIO_WORDS = 250;
+const MAX_AVATAR_MB = 10;
 
-/**
- * Addresses
- * - Prefer env overrides; fall back to known mainnet addresses.
- * - Use getAddress() to checksum + validate length.
- * - Expose a ZERO address and a tiny guard.
- */
-export const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const;
-
-function parseAddress(raw?: string, fallback?: `0x${string}`): `0x${string}` {
-  try {
-    const v = raw ?? fallback ?? ZERO_ADDRESS;
-    return getAddress(v as `0x${string}`);
-  } catch {
-    return ZERO_ADDRESS;
-  }
+// Turn ipfs:// into a gateway URL for previewing
+function ipfsToHttp(u?: string | null) {
+  if (!u) return '';
+  if (u.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${u.slice('ipfs://'.length)}`;
+  return u;
 }
 
-/** ProfileRegistry proxy/impl (your deployed address) */
-export const REGISTRY_ADDRESS: `0x${string}` = parseAddress(
-  env('NEXT_PUBLIC_PROFILE_REGISTRY_ADDR') ?? env('PROFILE_REGISTRY_ADDR'),
-  '0x4769667dC49A8E05018729108fD98521F4EbC53a'
-);
+// Append a cache-busting version param
+function withVersion(url: string, v?: number) {
+  if (!url) return url;
+  const src = url.startsWith('ipfs://') ? ipfsToHttp(url) : url;
+  if (!/^https?:\/\//i.test(src)) return src; // allow relative /icon-192.png
+  const sep = src.includes('?') ? '&' : '?';
+  return `${src}${sep}v=${v ?? Date.now()}`;
+}
 
-/** Base USDC (native) – 6 decimals */
-export const USDC_ADDRESS: `0x${string}` = parseAddress(
-  env('NEXT_PUBLIC_USDC_ADDRESS') ?? env('USDC_ADDRESS'),
-  '0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913'
-);
+function wordCountOf(s: string) {
+  return s.trim().split(/\s+/).filter(Boolean).length;
+}
 
-/** Handy constant for display math; on-chain reads should still use decimals() */
-export const USDC_DECIMALS = 6;
+export default function EditProfileBox({
+  creatorId,
+  currentAvatar,
+  currentBio,
+  onSaved,
+}: {
+  creatorId: string;
+  currentAvatar?: string | null;
+  currentBio?: string | null;
+  onSaved?: () => void;
+}) {
+  const router = useRouter();
 
-/** Quick guards you can import elsewhere */
-export const isZeroAddress = (a?: string) =>
-  !a || a.toLowerCase() === ZERO_ADDRESS.toLowerCase();
+  // Collapsed by default
+  const [open, setOpen] = useState(false);
 
-export const registryConfigured = !isZeroAddress(REGISTRY_ADDRESS);
-export const usdcConfigured = !isZeroAddress(USDC_ADDRESS);
+  // Editable state (seeded from props)
+  const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
+  const [bio, setBio] = useState(currentBio || '');
+
+  // Keep a snapshot to detect dirty state
+  const [initialAvatar, setInitialAvatar] = useState(currentAvatar || '');
+  const [initialBio, setInitialBio] = useState(currentBio || '');
+
+  // Ops state
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [avatarVersion, setAvatarVersion] = useState<number | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Keep local state in sync when the panel re-opens (user might have saved elsewhere)
+  useEffect(() => {
+    if (!open) return;
+    setAvatarUrl(currentAvatar || '');
+    setBio(currentBio || '');
+    setInitialAvatar(currentAvatar || '');
+    setInitialBio(currentBio || '');
+    // bump a small local version so preview updates if the props changed
+    setAvatarVersion(Date.now());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentAvatar, currentBio]);
+
+  const wc = useMemo(() => wordCountOf(bio), [bio]);
+  const previewSrc = useMemo(
+    () => withVersion(avatarUrl || '/icon-192.png', avatarVersion),
+    [avatarUrl, avatarVersion]
+  );
+
+  const isDirty = (avatarUrl || '') !== (initialAvatar || '') || (bio || '') !== (initialBio || '');
+  const disableSave = saving || uploading || wc > MAX_BIO_WORDS || !isDirty;
+
+  async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      toast.error('Avatar must be an image');
+      e.target.value = '';
+      return;
+    }
+    if (file.size > MAX_AVATAR_MB * 1024 * 1024) {
+      toast.error(`Max ${MAX_AVATAR_MB} MB`);
+      e.target.value = '';
+      return;
+    }
+
+    try {
+      setUploading(true);
+      const fd = new FormData();
+      fd.append('file', file);
+
+      const res = await fetch('/api/upload?kind=avatar', {
+        method: 'POST',
+        body: fd,
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok || !j?.url) {
+        throw new Error(j?.error || `upload failed (${res.status})`);
+      }
+
+      setAvatarUrl(j.url);
+      setAvatarVersion(Date.now()); // local cache-bust while editing
+      toast.success('Avatar uploaded');
+    } catch (err: any) {
+      toast.error(err?.message || 'Upload failed');
+    } finally {
+      setUploading(false);
+      if (e.target) e.target.value = '';
+    }
+  }
+
+  const save = async () => {
+    try {
+      const wcNow = wordCountOf(bio);
+      if (wcNow > MAX_BIO_WORDS) {
+        throw new Error(`Bio must be ${MAX_BIO_WORDS} words or less`);
+      }
+      if (!isDirty) {
+        toast('No changes to save');
+        return;
+      }
+
+      setSaving(true);
+
+      // ✅ canonical API path
+      const res = await fetch(`/api/creator/${encodeURIComponent(creatorId)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ avatarUrl, bio }),
+      });
+
+      const j = await res.json().catch(() => null);
+      if (!res.ok || !j?.ok) {
+        throw new Error(j?.error || `save failed (${res.status})`);
+      }
+
+      // If API returned the updated creator, use it for instant UI update
+      const updated = j.creator as
+        | { avatarUrl?: string; bio?: string; updatedAt?: number }
+        | undefined;
+
+      if (updated?.avatarUrl !== undefined) {
+        setAvatarUrl(updated.avatarUrl || '');
+        setInitialAvatar(updated.avatarUrl || '');
+      }
+      if (typeof updated?.bio === 'string') {
+        setBio(updated.bio);
+        setInitialBio(updated.bio);
+      }
+      if (updated?.updatedAt) setAvatarVersion(Number(updated.updatedAt)); // server-driven cache-bust
+
+      toast.success('Profile updated');
+      setOpen(false);
+
+      // Refresh RSC view + notify parent if needed
+      router.refresh();
+      onSaved?.();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
+      {/* Header row with toggle */}
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-cyan-200">Manage your profile</div>
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="rounded-lg border border-cyan-300/20 bg-cyan-300/10 px-3 py-1.5 text-xs text-cyan-50 hover:bg-cyan-300/20"
+        >
+          {open ? 'Close' : 'Edit profile'}
+        </button>
+      </div>
+
+      {!open ? null : (
+        <div className="mt-4 space-y-3">
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Avatar upload & URL */}
+            <div>
+              <label className="text-xs text-slate-300">Profile photo</label>
+              <div className="mt-2 flex items-center gap-3">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={previewSrc}
+                  alt="avatar preview"
+                  className="h-16 w-16 rounded-full object-cover ring-1 ring-white/10"
+                />
+                <div className="flex-1">
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading || saving}
+                      className="btn-secondary text-xs disabled:opacity-60"
+                    >
+                      {uploading ? 'Uploading…' : 'Upload from device'}
+                    </button>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarFile}
+                    />
+                  </div>
+
+                  <input
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
+                    placeholder="https://... or ipfs://..."
+                    value={avatarUrl}
+                    onChange={(e) => setAvatarUrl(e.target.value)}
+                  />
+                  <p className="mt-1 text-[11px] text-slate-400">
+                    Use a direct image link or upload (PNG/JPG/GIF/WebP ≤ {MAX_AVATAR_MB} MB).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Bio */}
+            <div>
+              <label className="text-xs text-slate-300">Bio (max {MAX_BIO_WORDS} words)</label>
+              <textarea
+                className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 p-2 text-sm outline-none"
+                rows={4}
+                placeholder="Tell fans what you offer"
+                value={bio}
+                onChange={(e) => setBio(e.target.value)}
+              />
+              <p
+                className={`mt-1 text-[11px] ${
+                  wc > MAX_BIO_WORDS ? 'text-red-400' : 'text-slate-400'
+                }`}
+              >
+                {wc}/{MAX_BIO_WORDS} words
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={save}
+              disabled={disableSave}
+              className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? 'Saving…' : isDirty ? 'Save changes' : 'No changes'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-200 hover:bg-white/10"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
