@@ -1,4 +1,3 @@
-// app/api/gate/check/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createPublicClient, http, getAddress, isAddress } from 'viem';
 import { BASE } from '@/lib/creatorHub';
@@ -11,10 +10,27 @@ function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, { headers: { 'cache-control': 'no-store' }, ...init });
 }
 
+const RPC =
+  process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+  process.env.BASE_RPC_URL ||
+  'https://mainnet.base.org';
+
 const client = createPublicClient({
   chain: BASE,
-  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || process.env.BASE_RPC_URL),
+  transport: http(RPC),
 });
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'cache-control': 'no-store',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Accept',
+    },
+  });
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -65,7 +81,7 @@ export async function GET(req: NextRequest) {
       postId: postId ? postId.toString() : null,
       subActive,
       hasAccess,
-      chainId: client.chain?.id,
+      chainId: client.chain?.id ?? BASE.id,
       hub: CREATOR_HUB_ADDR,
     });
   } catch (e: any) {
