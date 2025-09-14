@@ -10,6 +10,10 @@ export const BASE_CHAIN_ID = base.id
 /** Base native USDC (not bridged) */
 export const BASE_USDC: Address = '0x833589fCD6EDb6E08f4c7C32D4f71b54bdA02913'
 
+/** Back-compat aliases expected elsewhere */
+export const USDC_ADDRESS: Address = BASE_USDC
+export const ZERO_ADDRESS: Address = '0x0000000000000000000000000000000000000000'
+
 /** Resolve env */
 function env(name: string) {
   const v = process.env[name]?.trim()
@@ -28,10 +32,12 @@ export const REGISTRY_ADDRESS: Address = (() => {
     if (!isAddress(RAW as Address)) throw new Error('invalid')
     return getAddress(RAW) as Address
   } catch {
-    // Zero means "not configured"
-    return '0x0000000000000000000000000000000000000000'
+    return ZERO_ADDRESS
   }
 })()
+
+/** Boolean helper used by some hooks */
+export const registryConfigured = REGISTRY_ADDRESS !== ZERO_ADDRESS
 
 /** Public RPC (prefer env, fallback to Base) */
 const BASE_RPC =
