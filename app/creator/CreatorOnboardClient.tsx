@@ -1,7 +1,7 @@
 // app/creator/CreatorOnboardClient.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import toast from 'react-hot-toast';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
@@ -189,7 +189,15 @@ export default function CreatorOnboardClient() {
         }
 
         // 1) On-chain create (hook handles allowance if necessary)
-        const id = await createProfile({ handle: handleId }); // ← returns bigint
+        //    The contract requires displayName, avatarURI, bio, fid.
+        //    Use safe defaults here; you can enrich later from Neynar.
+        const id = await createProfile({
+          handle: handleId,
+          displayName: handleId,
+          avatarURI: '',
+          bio: '',
+          fid: 0,
+        });
 
         // 2) Register in KV (pass wallet so owner index is set immediately)
         const reg = await registerCreator({
