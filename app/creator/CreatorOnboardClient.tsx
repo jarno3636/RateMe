@@ -70,7 +70,7 @@ export default function DashboardClient() {
           return;
         }
 
-        // 2) Flatten details for those ids
+        // 2) Flatten details for those ids (single on-chain call)
         const tuple = (await client.readContract({
           address: REGISTRY_ADDRESS as Address,
           abi: PROFILE_REGISTRY_ABI as Abi,
