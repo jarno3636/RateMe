@@ -1,4 +1,4 @@
-// components/Header.tsx (or wherever this file lives)
+// components/Header.tsx
 'use client';
 
 import Link from 'next/link';
@@ -7,6 +7,9 @@ import { Menu, X } from 'lucide-react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount } from 'wagmi';
 import type { Abi, Address } from 'viem';
+import { createPublicClient, http } from 'viem';
+import { base as BASE } from 'viem/chains';
+
 import { PROFILE_REGISTRY_ABI } from '@/lib/profileRegistry/abi';
 import { REGISTRY_ADDRESS } from '@/lib/profileRegistry/constants';
 
@@ -34,8 +37,17 @@ export default function Header() {
         setOwnedId(null);
         if (!address) return;
 
-        const { readClient } = await import('@/lib/profileRegistry/reads');
-        const ids = (await readClient.readContract({
+        const rpc =
+          process.env.NEXT_PUBLIC_BASE_RPC_URL ||
+          process.env.BASE_RPC_URL ||
+          undefined;
+
+        const client = createPublicClient({
+          chain: BASE,
+          transport: http(rpc),
+        });
+
+        const ids = (await client.readContract({
           address: REGISTRY_ADDRESS as Address,
           abi: PROFILE_REGISTRY_ABI as Abi,
           functionName: 'getProfilesByOwner',
@@ -43,14 +55,9 @@ export default function Header() {
         })) as bigint[];
 
         if (!alive) return;
-        if (ids && ids.length > 0) {
-          setOwnedId(String(ids[0]));
-        } else {
-          setOwnedId(null);
-        }
+        setOwnedId(ids && ids.length > 0 ? String(ids[0]) : null);
       } catch {
-        // ignore RPC hiccups
-        if (alive) setOwnedId(null);
+        if (alive) setOwnedId(null); // ignore RPC hiccups
       } finally {
         if (alive) setCheckingOwned(false);
       }
@@ -78,17 +85,12 @@ export default function Header() {
         {/* Desktop nav */}
         <nav className="ml-6 hidden items-center gap-5 md:flex">
           {nav.map((n) => (
-            <Link
-              key={n.href}
-              href={n.href}
-              className="text-sm text-slate-300 hover:text-white"
-            >
+            <Link key={n.href} href={n.href} className="text-sm text-slate-300 hover:text-white">
               {n.label}
             </Link>
           ))}
         </nav>
 
-        {/* Spacer */}
         <div className="flex-1" />
 
         {/* Quick link to creator page (desktop) */}
@@ -119,7 +121,6 @@ export default function Header() {
       {/* Mobile drawer */}
       <div id="mobile-nav" className={`md:hidden ${open ? 'block' : 'hidden'}`}>
         <div className="space-y-1 border-t border-white/10 px-4 py-3">
-          {/* Conditionally show creator link first on mobile */}
           <Link
             href={creatorHref}
             onClick={() => setOpen(false)}
@@ -129,7 +130,6 @@ export default function Header() {
           </Link>
 
           {nav
-            // avoid duplicating the generic “Become a Creator” item since we already put a contextual one above
             .filter((n) => n.href !== '/creator')
             .map((n) => (
               <Link
