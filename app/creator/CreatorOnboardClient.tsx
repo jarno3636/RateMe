@@ -189,7 +189,7 @@ export default function CreatorOnboardClient() {
         }
 
         // 1) On-chain create (hook handles allowance if necessary)
-        const { id } = await createProfile({ handle: handleId });
+        const id = await createProfile({ handle: handleId }); // ← returns bigint
 
         // 2) Register in KV (pass wallet so owner index is set immediately)
         const reg = await registerCreator({
