@@ -55,7 +55,7 @@ export default function DashboardClient() {
           transport: http(rpc),
         });
 
-        // 1) Get ids owned by the connected wallet
+        // 1) IDs owned by this wallet
         const ids = (await client.readContract({
           address: REGISTRY_ADDRESS as Address,
           abi: PROFILE_REGISTRY_ABI as Abi,
@@ -70,7 +70,7 @@ export default function DashboardClient() {
           return;
         }
 
-        // 2) Fetch flat details for those ids
+        // 2) Flatten details for those ids
         const tuple = (await client.readContract({
           address: REGISTRY_ADDRESS as Address,
           abi: PROFILE_REGISTRY_ABI as Abi,
