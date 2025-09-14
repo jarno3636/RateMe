@@ -1,4 +1,3 @@
-// components/CreatorGrid.tsx
 'use client';
 
 import useSWRInfinite from 'swr/infinite';
@@ -8,14 +7,8 @@ import { Star, Share2, RefreshCw } from 'lucide-react';
 import { creatorShareLinks } from '@/lib/farcaster';
 
 type RatingSummary = { count?: number; sum?: number; avg?: number };
-type ApiCreator = Creator & {
-  rating?: RatingSummary;
-};
-
-type ApiResponse = {
-  creators: ApiCreator[];
-  nextCursor: number | null;
-};
+type ApiCreator = Creator & { rating?: RatingSummary };
+type ApiResponse = { creators: ApiCreator[]; nextCursor: number | null };
 
 const fetcher = async (url: string) => {
   const res = await fetch(url, { headers: { accept: 'application/json' }, cache: 'no-store' });
@@ -29,7 +22,7 @@ const fetcher = async (url: string) => {
 function withVersion(url?: string | null, v?: number) {
   if (!url) return '/icon-192.png';
   const u = url.toString();
-  if (!/^https?:\/\//i.test(u)) return u; // don't add query to non-http(s)
+  if (!/^https?:\/\//i.test(u)) return u;
   const sep = u.includes('?') ? '&' : '?';
   return `${u}${sep}v=${typeof v === 'number' && Number.isFinite(v) ? v : Date.now()}`;
 }
@@ -38,9 +31,10 @@ const PAGE_SIZE = 12;
 
 export default function CreatorGrid() {
   const getKey = (index: number, prev: ApiResponse | null) => {
-    if (prev && prev.nextCursor === null) return null; // reached end
+    if (prev && prev.nextCursor === null) return null;
     const cursor = index === 0 ? 0 : prev?.nextCursor ?? 0;
     return `/api/creators?limit=${PAGE_SIZE}&cursor=${cursor}&include=rating`;
+    // requires your /api/creators route to support include=rating
   };
 
   const {
@@ -58,7 +52,6 @@ export default function CreatorGrid() {
   const nextCursor = pages.length ? pages[pages.length - 1].nextCursor : null;
   const canLoadMore = nextCursor !== null;
 
-  /* ---------- loading ---------- */
   if (isLoading && !data?.length) {
     return (
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -82,7 +75,6 @@ export default function CreatorGrid() {
     );
   }
 
-  /* ---------- error ---------- */
   if (error && !creators.length) {
     return (
       <div className="flex items-center justify-between rounded-xl border border-rose-400/30 bg-rose-400/10 p-4 text-rose-200">
@@ -115,14 +107,11 @@ export default function CreatorGrid() {
     <>
       <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {creators.map((c) => {
-          // map rating summary (from API include=rating)
           const ratingCount = Number(c.rating?.count ?? 0);
           const avgRating = ratingCount ? Number(c.rating?.avg ?? 0) : 0;
 
           const viewUrl = `/creator/${encodeURIComponent(c.id)}`;
           const share = creatorShareLinks(c.id, `Check out @${c.handle} on Rate Me`);
-
-          // fresh avatar (cache-busted by updatedAt if http(s) url)
           const avatarSrc = withVersion(c.avatarUrl || '/icon-192.png', c.updatedAt);
 
           return (
