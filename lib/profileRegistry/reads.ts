@@ -1,247 +1,176 @@
 // lib/profileRegistry/reads.ts
-import type { Abi, Address } from 'viem';
-import { PROFILE_REGISTRY_ABI } from './abi';
-import { REGISTRY_ADDRESS } from './constants';
-import {
-  registryClient as readClient,
-  readFeeUnits,
-  readHandleTaken,
-  readIdByHandle,
-  getReadProvider,     // legacy shim
-  getRegistryContract, // legacy shim
-} from './contract';
+import type { Abi, Address } from 'viem'
+import { readClient } from './constants'
+import { PROFILE_REGISTRY_ABI } from './abi'
+import { BASE_USDC, REGISTRY_ADDRESS } from './constants'
 
-/* ------------------------------------------------------------------ */
-/* Re-exports (back-compat)                                            */
-/* ------------------------------------------------------------------ */
-export {
-  readClient,
-  readFeeUnits,
-  readHandleTaken,
-  readIdByHandle,
-  getReadProvider,
-  getRegistryContract,
-};
+/** Minimal ERC20 ABI for allowance */
+const ERC20_MINI = [
+  {
+    type: 'function',
+    name: 'allowance',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'spender', type: 'address' },
+    ],
+    outputs: [{ type: 'uint256' }],
+  },
+] as const satisfies Abi
 
-/* ------------------------------------------------------------------ */
-/* Types                                                               */
-/* ------------------------------------------------------------------ */
-export type CanRegister = { ok: boolean; reason: string };
+/** Utility: is zero address */
+const isZero = (a?: string) => !a || /^0x0{40}$/i.test(a)
 
-export type PreviewCreate = {
-  balance: bigint;
-  allowance: bigint;
-  fee: bigint;
-  okBalance: boolean;
-  okAllowance: boolean;
-};
-
-export type ProfileFlat = {
-  id: bigint;
-  owner: Address;
-  handle: string;
-  displayName: string;
-  avatarURI: string;
-  bio: string;
-  fid: bigint;
-  createdAt: bigint; // unix seconds
-};
-
-export type ListProfilesResult = {
-  items: ProfileFlat[];
-  nextCursor: bigint;
-};
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-const REG = REGISTRY_ADDRESS as Address;
-const ABI = PROFILE_REGISTRY_ABI as Abi;
-
-function normalizeHandle(h: string) {
-  return h.trim().replace(/^@+/, '').toLowerCase();
+/** Normalize handle */
+export function normalizeHandle(h = '') {
+  return h.trim().replace(/^@+/, '').toLowerCase()
 }
 
-/* ------------------------------------------------------------------ */
-/* New, richer reads                                                   */
-/* ------------------------------------------------------------------ */
-
-/** canRegister(handle) -> { ok, reason } for great UX during signup */
-export async function readCanRegister(rawHandle: string): Promise<CanRegister> {
-  const handle = normalizeHandle(rawHandle);
-  const [ok, reason] = (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'canRegister',
-    args: [handle],
-  })) as unknown as [boolean, string];
-  return { ok, reason };
+/** True if registry is configured */
+export function registryAvailable(): boolean {
+  return !isZero(REGISTRY_ADDRESS)
 }
 
-/** previewCreate(user) -> fee/allowance/balance checks (null if absent on old deployments) */
-export async function readPreviewCreate(user: Address): Promise<PreviewCreate | null> {
+/** read: handleTaken(handle) */
+export async function readHandleTaken(handle: string): Promise<boolean> {
+  if (!registryAvailable()) return false
   try {
-    const [balance, allowance, fee, okBalance, okAllowance] = (await readClient.readContract({
-      address: REG,
-      abi: ABI,
-      functionName: 'previewCreate',
-      args: [user],
-    })) as unknown as [bigint, bigint, bigint, boolean, boolean];
-
-    return { balance, allowance, fee, okBalance, okAllowance };
+    const ok = (await readClient.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: PROFILE_REGISTRY_ABI,
+      functionName: 'handleTaken',
+      args: [normalizeHandle(handle)],
+    })) as boolean
+    return !!ok
   } catch {
-    return null;
+    return false
   }
 }
 
-/** getProfileByHandle(handle) mapped to a clean object (null if not found) */
-export async function readProfileByHandle(rawHandle: string): Promise<ProfileFlat | null> {
-  const handle = normalizeHandle(rawHandle);
-  const res = (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'getProfileByHandle',
-    args: [handle],
-  })) as unknown as [
-    boolean,      // exists
-    bigint,       // id
-    Address,      // owner
-    string,       // handle
-    string,       // displayName
-    string,       // avatarURI
-    string,       // bio
-    bigint,       // fid
-    bigint        // createdAt
-  ];
-
-  const exists = res?.[0];
-  if (!exists) return null;
-
-  return {
-    id: res[1],
-    owner: res[2],
-    handle: res[3],
-    displayName: res[4],
-    avatarURI: res[5],
-    bio: res[6],
-    fid: res[7],
-    createdAt: res[8],
-  };
+/** read (best-effort): getIdByHandle(handle) -> bigint | 0n */
+export async function readIdByHandle(handle: string): Promise<bigint> {
+  if (!registryAvailable()) return 0n
+  const h = normalizeHandle(handle)
+  try {
+    const id = (await readClient.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: PROFILE_REGISTRY_ABI,
+      functionName: 'getIdByHandle',
+      args: [h],
+    })) as bigint
+    return id ?? 0n
+  } catch {
+    // Some contracts don’t expose getIdByHandle; emulate via getProfileByHandle
+    try {
+      const r = (await readClient.readContract({
+        address: REGISTRY_ADDRESS,
+        abi: PROFILE_REGISTRY_ABI,
+        functionName: 'getProfileByHandle',
+        args: [h],
+      })) as any[]
+      // Common shape: [exists, id, ...]
+      const exists = Boolean(r?.[0])
+      const idMaybe = exists ? BigInt(r?.[1] || 0) : 0n
+      return idMaybe
+    } catch {
+      return 0n
+    }
+  }
 }
 
-/** ids owned by a wallet address */
+/** read: getProfilesByOwner(owner) -> bigint[] (ids) */
 export async function readProfilesByOwner(owner: Address): Promise<bigint[]> {
-  return (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'getProfilesByOwner',
-    args: [owner],
-  })) as bigint[];
+  if (!registryAvailable()) return []
+  try {
+    const ids = (await readClient.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: PROFILE_REGISTRY_ABI,
+      functionName: 'getProfilesByOwner',
+      args: [owner],
+    })) as bigint[]
+    return Array.isArray(ids) ? ids : []
+  } catch {
+    return []
+  }
 }
 
-/** getProfilesFlat(ids[]) -> array of flat profiles in the same order as ids */
-export async function readProfilesFlat(ids: bigint[]): Promise<ProfileFlat[]> {
-  if (!ids?.length) return [];
-  const r = (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'getProfilesFlat',
-    args: [ids],
-  })) as unknown as [
-    bigint[],   // outIds
-    Address[],  // owners
-    string[],   // handles
-    string[],   // displayNames
-    string[],   // avatarURIs
-    string[],   // bios
-    bigint[],   // fids
-    bigint[]    // createdAts
-  ];
+/** read: getProfile(id) -> flat object */
+export async function readProfileFlat(id: bigint) {
+  if (!registryAvailable() || !id) return null
+  try {
+    const r = (await readClient.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: PROFILE_REGISTRY_ABI,
+      functionName: 'getProfile',
+      args: [id],
+    })) as any
+    if (!r) return null
+    const owner = r[0] as Address
+    const handle = String(r[1] || '')
+    const displayName = String(r[2] || '')
+    const avatarURI = String(r[3] || '')
+    const bio = String(r[4] || '')
+    const fid = BigInt(r[5] || 0n)
+    const createdAtSec = BigInt(r[6] || 0n)
 
-  const outIds = r[0] || [];
-  const owners = r[1] || [];
-  const handles = r[2] || [];
-  const displayNames = r[3] || [];
-  const avatarURIs = r[4] || [];
-  const bios = r[5] || [];
-  const fids = r[6] || [];
-  const createdAts = r[7] || [];
-
-  const n = outIds.length;
-  const items: ProfileFlat[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    items[i] = {
-      id: outIds[i],
-      owner: owners[i],
-      handle: handles[i],
-      displayName: displayNames[i],
-      avatarURI: avatarURIs[i],
-      bio: bios[i],
-      fid: fids[i],
-      createdAt: createdAts[i],
-    };
+    return {
+      id,
+      owner,
+      handle,
+      displayName,
+      avatarURI,
+      bio,
+      fid,
+      createdAt: Number(createdAtSec) * 1000,
+    }
+  } catch {
+    return null
   }
-  return items;
+}
+
+/** Bulk read profiles -> flat structs */
+export async function readProfilesFlat(ids: readonly bigint[]) {
+  const tasks = (ids || []).map((id) => readProfileFlat(id))
+  const out = await Promise.all(tasks)
+  return out.filter(Boolean) as NonNullable<Awaited<ReturnType<typeof readProfileFlat>>>[]
 }
 
 /**
- * listProfilesFlat(cursor,size) -> mapped objects + nextCursor
- * Use size ~ 12–50 for UI pages. Pass cursor=0n for the first page.
+ * Preview creation fee and whether the wallet already has USDC allowance
+ * sufficient to cover it. (Avoids relying on a custom contract view.)
  */
-export async function listProfilesFlat(
-  cursor: bigint,
-  size: bigint
-): Promise<ListProfilesResult> {
-  const [
-    outIds,
-    owners,
-    handles,
-    displayNames,
-    avatarURIs,
-    bios,
-    fids,
-    createdAts,
-    nextCursor,
-  ] = (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'listProfilesFlat',
-    args: [cursor, size],
-  })) as unknown as [
-    bigint[],     // outIds
-    Address[],    // owners
-    string[],     // handles
-    string[],     // displayNames
-    string[],     // avatarURIs
-    string[],     // bios
-    bigint[],     // fids
-    bigint[],     // createdAts
-    bigint        // nextCursor
-  ];
+export async function readPreviewCreate(owner: Address): Promise<{
+  fee: bigint
+  okAllowance: boolean
+} | null> {
+  if (!registryAvailable()) return null
+  try {
+    // feeUnits in "USDC base units" (assuming contract uses 6 decimals)
+    const fee = (await readClient.readContract({
+      address: REGISTRY_ADDRESS,
+      abi: PROFILE_REGISTRY_ABI,
+      functionName: 'feeUnits',
+      args: [],
+    })) as bigint
 
-  const n = outIds.length;
-  const items: ProfileFlat[] = new Array(n);
-  for (let i = 0; i < n; i++) {
-    items[i] = {
-      id: outIds[i],
-      owner: owners[i],
-      handle: handles[i],
-      displayName: displayNames[i],
-      avatarURI: avatarURIs[i],
-      bio: bios[i],
-      fid: fids[i],
-      createdAt: createdAts[i],
-    };
+    // If fee is zero, allowance not needed
+    if (!fee || fee === 0n) {
+      return { fee: 0n, okAllowance: true }
+    }
+
+    // Allowance(owner -> registry) on USDC
+    const allowance = (await readClient.readContract({
+      address: BASE_USDC,
+      abi: ERC20_MINI,
+      functionName: 'allowance',
+      args: [owner, REGISTRY_ADDRESS],
+    })) as bigint
+
+    return {
+      fee,
+      okAllowance: (allowance ?? 0n) >= fee,
+    }
+  } catch {
+    return null
   }
-
-  return { items, nextCursor };
-}
-
-/** Convenience: return all profile IDs (if you ever need to fan-out) */
-export async function readAllIds(): Promise<bigint[]> {
-  return (await readClient.readContract({
-    address: REG,
-    abi: ABI,
-    functionName: 'allIds',
-  })) as bigint[];
 }
