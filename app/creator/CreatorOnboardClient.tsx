@@ -54,7 +54,7 @@ export default function CreatorOnboardClient() {
   const [feeView, setFeeView] = useState<string>('');
   const [allowanceOk, setAllowanceOk] = useState<boolean | null>(null);
 
-  // From the hook (no getProfilesByOwner here)
+  // From the hook
   const { createProfile, handleTaken, feeUnits } = useProfileRegistry();
 
   // Detect existing on-chain profile(s) for the connected wallet
@@ -183,7 +183,14 @@ export default function CreatorOnboardClient() {
         }
 
         // 1) On-chain create (hook handles allowance if necessary)
-        const id = await createProfile({ handle: handleId }); // your hook returns bigint
+        //    Hook requires all fields; we pass minimal values now.
+        const id = await createProfile({
+          handle: handleId,
+          displayName: '',
+          avatarURI: '',
+          bio: '',
+          fid: 0,
+        });
 
         // 2) Register in KV (pass wallet so owner index is set immediately)
         const reg = await registerCreator({
