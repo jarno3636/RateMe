@@ -48,6 +48,10 @@ export default function EditProfileBox({
   const [avatarUrl, setAvatarUrl] = useState(currentAvatar || '');
   const [bio, setBio] = useState(currentBio || '');
 
+  // Keep a snapshot to detect dirty state
+  const [initialAvatar, setInitialAvatar] = useState(currentAvatar || '');
+  const [initialBio, setInitialBio] = useState(currentBio || '');
+
   // Ops state
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -59,6 +63,8 @@ export default function EditProfileBox({
     if (!open) return;
     setAvatarUrl(currentAvatar || '');
     setBio(currentBio || '');
+    setInitialAvatar(currentAvatar || '');
+    setInitialBio(currentBio || '');
     // bump a small local version so preview updates if the props changed
     setAvatarVersion(Date.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -69,6 +75,9 @@ export default function EditProfileBox({
     () => withVersion(avatarUrl || '/icon-192.png', avatarVersion),
     [avatarUrl, avatarVersion]
   );
+
+  const isDirty = (avatarUrl || '') !== (initialAvatar || '') || (bio || '') !== (initialBio || '');
+  const disableSave = saving || uploading || wc > MAX_BIO_WORDS || !isDirty;
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -116,14 +125,21 @@ export default function EditProfileBox({
       if (wcNow > MAX_BIO_WORDS) {
         throw new Error(`Bio must be ${MAX_BIO_WORDS} words or less`);
       }
+      if (!isDirty) {
+        toast('No changes to save');
+        return;
+      }
 
       setSaving(true);
-      const res = await fetch('/api/creator/update', {
-        method: 'POST',
+
+      // ✅ canonical API path
+      const res = await fetch(`/api/creator/${encodeURIComponent(creatorId)}`, {
+        method: 'PATCH',
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         cache: 'no-store',
-        body: JSON.stringify({ id: creatorId, avatarUrl, bio }),
+        body: JSON.stringify({ avatarUrl, bio }),
       });
+
       const j = await res.json().catch(() => null);
       if (!res.ok || !j?.ok) {
         throw new Error(j?.error || `save failed (${res.status})`);
@@ -134,8 +150,14 @@ export default function EditProfileBox({
         | { avatarUrl?: string; bio?: string; updatedAt?: number }
         | undefined;
 
-      if (updated?.avatarUrl) setAvatarUrl(updated.avatarUrl);
-      if (typeof updated?.bio === 'string') setBio(updated.bio);
+      if (updated?.avatarUrl !== undefined) {
+        setAvatarUrl(updated.avatarUrl || '');
+        setInitialAvatar(updated.avatarUrl || '');
+      }
+      if (typeof updated?.bio === 'string') {
+        setBio(updated.bio);
+        setInitialBio(updated.bio);
+      }
       if (updated?.updatedAt) setAvatarVersion(Number(updated.updatedAt)); // server-driven cache-bust
 
       toast.success('Profile updated');
@@ -150,8 +172,6 @@ export default function EditProfileBox({
       setSaving(false);
     }
   };
-
-  const disableSave = saving || uploading || wc > MAX_BIO_WORDS;
 
   return (
     <section className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4">
@@ -238,7 +258,7 @@ export default function EditProfileBox({
               disabled={disableSave}
               className="btn inline-flex items-center disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {saving ? 'Saving…' : 'Save changes'}
+              {saving ? 'Saving…' : isDirty ? 'Save changes' : 'No changes'}
             </button>
             <button
               type="button"
