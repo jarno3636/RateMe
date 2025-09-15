@@ -1,7 +1,13 @@
 // /hooks/useCreatorHub.ts
 "use client"
 
-import { usePublicClient, useReadContract, useWriteContract } from "wagmi"
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi"
+import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 
 const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}`
@@ -66,34 +72,48 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`)
   })
 }
 
+/** Subscribe (awaits receipt internally) */
 export function useSubscribe() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
   const subscribe = async (planId: bigint, periods: number) => {
+    if (!address) throw new Error("Connect your wallet to subscribe.")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "subscribe",
       args: [planId, periods],
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
+
   return { subscribe, isPending, error }
 }
 
+/** Buy a one-off post (awaits receipt internally) */
 export function useBuyPost() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
   const buy = async (postId: bigint) => {
+    if (!address) throw new Error("Connect your wallet to buy this post.")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "buyPost",
       args: [postId],
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
+
   return { buy, isPending, error }
 }
