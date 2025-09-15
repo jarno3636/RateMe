@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { --bg: #0b0b0f; --fg: #e5e7eb; }
+html, body { background: var(--bg); color: var(--fg); }
+a { text-decoration: none; }
+
+.container { @apply mx-auto max-w-6xl px-4; }
+.card { @apply rounded-2xl border border-white/10 bg-white/5 p-6 shadow; }
+.btn { @apply inline-flex items-center gap-2 rounded-xl px-4 py-2 font-medium border border-white/10 hover:bg-white/10; }
+input, textarea { @apply w-full rounded-xl border border-white/10 bg-black/40 p-3; }
+label { @apply text-sm opacity-80; }
