@@ -1,8 +1,8 @@
+// /hooks/useCreatorHub.ts
 "use client"
 
-import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi"
+import { usePublicClient, useReadContract, useWriteContract } from "wagmi"
 import CreatorHub from "@/abi/CreatorHub.json"
-import { Address } from "viem"
 
 const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}`
 
@@ -67,21 +67,33 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`)
 }
 
 export function useSubscribe() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
-  return {
-    subscribe: (planId: bigint, periods: number) =>
-      writeContract({ abi: CreatorHub as any, address: HUB, functionName: "subscribe", args: [planId, periods] }),
-    hash, isPending, wait, error,
+  const client = usePublicClient()
+  const { writeContractAsync, isPending, error } = useWriteContract()
+  const subscribe = async (planId: bigint, periods: number) => {
+    const hash = await writeContractAsync({
+      abi: CreatorHub as any,
+      address: HUB,
+      functionName: "subscribe",
+      args: [planId, periods],
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+  return { subscribe, isPending, error }
 }
 
 export function useBuyPost() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
-  return {
-    buy: (postId: bigint) =>
-      writeContract({ abi: CreatorHub as any, address: HUB, functionName: "buyPost", args: [postId] }),
-    hash, isPending, wait, error,
+  const client = usePublicClient()
+  const { writeContractAsync, isPending, error } = useWriteContract()
+  const buy = async (postId: bigint) => {
+    const hash = await writeContractAsync({
+      abi: CreatorHub as any,
+      address: HUB,
+      functionName: "buyPost",
+      args: [postId],
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+  return { buy, isPending, error }
 }
