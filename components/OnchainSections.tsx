@@ -9,7 +9,7 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { useGate } from '@/hooks/useGate';
 import { toChecksum } from '@/lib/gate';
 
-// Infer shapes from the hook to avoid drift
+// Infer shapes from the hook to avoid drift with type exports
 type Hub = ReturnType<typeof useCreatorHub>;
 type Plan = Awaited<ReturnType<Hub['getPlan']>>;
 type Post = Awaited<ReturnType<Hub['getPost']>>;
@@ -18,6 +18,7 @@ function fmtUSDC(x: bigint) {
   const n = Number(x) / 1e6;
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
 function parseHints(uri: string) {
   try {
     const [base, frag] = uri.split('#');
@@ -28,9 +29,6 @@ function parseHints(uri: string) {
   } catch {
     return { base: uri, preview: '', blur: false };
   }
-}
-function msFromSecondsOrMs(v: number): number {
-  return v > 1e12 ? v : v * 1000;
 }
 
 export default function OnchainSections({ creatorAddress }: { creatorAddress: `0x${string}` }) {
@@ -45,16 +43,14 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     getPost,
     subscribe,
     buyPost,
-    hasPostAccess,
-    isActive,
-    getSubExpiry,
+    hasPostAccess, // on-chain view (warm cache/fallback)
+    isActive,      // on-chain view (warm cache/fallback)
   } = useCreatorHub();
 
   const [loading, setLoading] = useState(true);
   const [plans, setPlans] = useState<Plan[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [subActive, setSubActive] = useState<boolean>(false);
-  const [subExpiryMs, setSubExpiryMs] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [accessCache, setAccessCache] = useState<Record<string, boolean>>({});
 
@@ -79,12 +75,11 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
       );
 
       if (eoa) {
+        // quick on-chain check to make the UI responsive
         const active = await isActive(eoa, creatorAddress).catch(() => false);
         setSubActive(!!active);
 
-        const rawUntil = await getSubExpiry(eoa, creatorAddress).catch(() => 0);
-        setSubExpiryMs(rawUntil ? msFromSecondsOrMs(Number(rawUntil)) : null);
-
+        // best-effort warm the access cache for posts (on-chain view)
         const entries = await Promise.all(
           postIds.map(async (pid) => {
             const ok = await hasPostAccess(eoa, pid).catch(() => false);
@@ -94,7 +89,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
         setAccessCache(Object.fromEntries(entries));
       } else {
         setSubActive(false);
-        setSubExpiryMs(null);
         setAccessCache({});
       }
     } finally {
@@ -108,7 +102,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     getPlan,
     getPost,
     isActive,
-    getSubExpiry,
     hasPostAccess,
   ]);
 
@@ -116,6 +109,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     refresh();
   }, [refresh]);
 
+  // Authoritative gated status via signed API (memoized in lib/gate)
   const verifySubNow = useCallback(async () => {
     if (!eoa) return false;
     try {
@@ -129,7 +123,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
   async function doSubscribe(plan: Plan) {
     try {
-      if (!eoa) { toast.error('Connect wallet'); return; }
+      if (!eoa) {
+        toast.error('Connect wallet');
+        return;
+      }
       setBusyId(`plan:${plan.id.toString()}`);
       await subscribe(plan.id, 1);
       toast.success('Subscribed');
@@ -144,7 +141,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
   async function doBuy(post: Post) {
     try {
-      if (!eoa) { toast.error('Connect wallet'); return; }
+      if (!eoa) {
+        toast.error('Connect wallet');
+        return;
+      }
       setBusyId(`post:${post.id.toString()}`);
       await buyPost(post.id);
       toast.success('Unlocked');
@@ -181,7 +181,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
               {subActive ? (
                 <span className="inline-flex items-center gap-1 text-emerald-300">
                   <Unlock className="h-3.5 w-3.5" /> Active
-                  {subExpiryMs ? <span className="ml-1 text-slate-400">until {new Date(subExpiryMs).toLocaleDateString()}</span> : null}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-slate-300">
@@ -238,7 +237,8 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
             {posts.map((p) => {
               const k = p.id.toString();
               const hints = parseHints(p.uri);
-              const unlocked = accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
+              const unlocked =
+                accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
               const buying = busyId === `post:${k}`;
               const disabled = !eoa || buying;
               const isVideo = /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(hints.base);
@@ -250,7 +250,9 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
                     <div className="text-xs text-slate-400">
                       #{k} • {p.accessViaSub ? 'Sub unlock' : 'One-off'}
                     </div>
-                    {!unlocked && <div className="text-xs text-slate-300">{fmtUSDC(p.price)} USDC</div>}
+                    {!unlocked && (
+                      <div className="text-xs text-slate-300">{fmtUSDC(p.price)} USDC</div>
+                    )}
                   </div>
 
                   <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
@@ -281,7 +283,9 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
                         />
                       )
                     ) : (
-                      <div className="flex h-40 items-center justify-center text-slate-400 text-sm">Locked</div>
+                      <div className="flex h-40 items-center justify-center text-slate-400 text-sm">
+                        Locked
+                      </div>
                     )}
                   </div>
 
