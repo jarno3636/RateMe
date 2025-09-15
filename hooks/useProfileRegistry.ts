@@ -1,14 +1,28 @@
-"use client"
-import { useReadContract } from "wagmi"
-import ProfileRegistry from "@/abi/ProfileRegistry.json"
+// /app/layout.tsx
+import "./globals.css"
+import Providers from "./providers"
+import Nav from "@/components/Nav"
 
-const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
+export const metadata = {
+  title: "OnlyStars",
+  description: "Creator subscriptions + paid posts + on-chain ratings (Base + USDC)",
+}
 
-export function useListProfiles(cursor: bigint = 0n, size: bigint = 12n) {
-  return useReadContract({
-    abi: ProfileRegistry as any,
-    address: REGISTRY,
-    functionName: "listProfilesFlat",
-    args: [cursor, size],
-  })
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en">
+      <body>
+        <Providers>
+          {/* Global navigation bar */}
+          <Nav />
+          {/* Main container for page content */}
+          <main className="container py-8">{children}</main>
+        </Providers>
+      </body>
+    </html>
+  )
 }
