@@ -9,7 +9,7 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { useGate } from '@/hooks/useGate';
 import { toChecksum } from '@/lib/gate';
 
-// ---- infer types from the hook to avoid export drift
+// Infer shapes from the hook to avoid drift
 type Hub = ReturnType<typeof useCreatorHub>;
 type Plan = Awaited<ReturnType<Hub['getPlan']>>;
 type Post = Awaited<ReturnType<Hub['getPost']>>;
@@ -18,7 +18,6 @@ function fmtUSDC(x: bigint) {
   const n = Number(x) / 1e6;
   return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
 function parseHints(uri: string) {
   try {
     const [base, frag] = uri.split('#');
@@ -30,9 +29,7 @@ function parseHints(uri: string) {
     return { base: uri, preview: '', blur: false };
   }
 }
-
 function msFromSecondsOrMs(v: number): number {
-  // treat values below ~Jan 2002 as seconds; convert to ms
   return v > 1e12 ? v : v * 1000;
 }
 
@@ -44,15 +41,12 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
   const {
     getCreatorPlanIds,
     getCreatorPostIds,
-    // ⬇️ use the current API
     getPlan,
     getPost,
     subscribe,
     buyPost,
-    hasPostAccess, // on-chain view (used as warm cache/fallback)
-    isActive,      // on-chain view (used as warm cache/fallback)
-    previewSubscribeTotal,
-    previewBuyPost,
+    hasPostAccess,
+    isActive,
     getSubExpiry,
   } = useCreatorHub();
 
@@ -77,36 +71,27 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
         Promise.all(postIds.map((id) => getPost(id))),
       ]);
 
-      const nextPlans = planRows
-        .map((r, i) => (r ? ({ id: planIds[i], ...r } as Plan) : null))
-        .filter(Boolean) as Plan[];
+      setPlans(
+        planRows.map((r, i) => (r ? ({ id: planIds[i], ...r } as Plan) : null)).filter(Boolean) as Plan[],
+      );
+      setPosts(
+        postRows.map((r, i) => (r ? ({ id: postIds[i], ...r } as Post) : null)).filter(Boolean) as Post[],
+      );
 
-      const nextPosts = postRows
-        .map((r, i) => (r ? ({ id: postIds[i], ...r } as Post) : null))
-        .filter(Boolean) as Post[];
-
-      setPlans(nextPlans);
-      setPosts(nextPosts);
-
-      // subscription status
       if (eoa) {
-        // quick on-chain check to make the UI responsive
         const active = await isActive(eoa, creatorAddress).catch(() => false);
         setSubActive(!!active);
 
         const rawUntil = await getSubExpiry(eoa, creatorAddress).catch(() => 0);
         setSubExpiryMs(rawUntil ? msFromSecondsOrMs(Number(rawUntil)) : null);
 
-        // best-effort warm the access cache for posts (on-chain view)
         const entries = await Promise.all(
           postIds.map(async (pid) => {
             const ok = await hasPostAccess(eoa, pid).catch(() => false);
             return [pid.toString(), ok] as const;
-          })
+          }),
         );
-        const warm: Record<string, boolean> = {};
-        for (const [k, v] of entries) warm[k] = v;
-        setAccessCache(warm);
+        setAccessCache(Object.fromEntries(entries));
       } else {
         setSubActive(false);
         setSubExpiryMs(null);
@@ -131,7 +116,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     refresh();
   }, [refresh]);
 
-  // Authoritative gated status via signed API (memoized in lib/gate)
   const verifySubNow = useCallback(async () => {
     if (!eoa) return false;
     try {
@@ -145,16 +129,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
   async function doSubscribe(plan: Plan) {
     try {
-      if (!eoa) {
-        toast.error('Connect wallet');
-        return;
-      }
+      if (!eoa) { toast.error('Connect wallet'); return; }
       setBusyId(`plan:${plan.id.toString()}`);
-      const total = await previewSubscribeTotal(plan.id, 1);
-      toast(`Approval + subscribe${total > 0n ? ` (${fmtUSDC(total)} USDC)…` : '…'}`, { icon: '⛓️' });
       await subscribe(plan.id, 1);
       toast.success('Subscribed');
-      // verify via gate & refresh UI
       await verifySubNow();
       await refresh();
     } catch (e: any) {
@@ -166,17 +144,10 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
 
   async function doBuy(post: Post) {
     try {
-      if (!eoa) {
-        toast.error('Connect wallet');
-        return;
-      }
+      if (!eoa) { toast.error('Connect wallet'); return; }
       setBusyId(`post:${post.id.toString()}`);
-      const total = await previewBuyPost(post.id);
-      if (total > 0n) toast(`Approval + buy (${fmtUSDC(total)} USDC)…`, { icon: '⛓️' });
       await buyPost(post.id);
       toast.success('Unlocked');
-
-      // double check via gate endpoint (handles both purchase & sub-unlock)
       const ok = await checkPost(post.id);
       setAccessCache((m) => ({ ...m, [post.id.toString()]: ok }));
     } catch (e: any) {
@@ -197,7 +168,6 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     );
   }
 
-  // Only show active plans by default
   const visiblePlans = plans.filter((p) => p.active);
 
   return (
@@ -211,11 +181,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
               {subActive ? (
                 <span className="inline-flex items-center gap-1 text-emerald-300">
                   <Unlock className="h-3.5 w-3.5" /> Active
-                  {subExpiryMs ? (
-                    <span className="text-slate-400 ml-1">
-                      until {new Date(subExpiryMs).toLocaleDateString()}
-                    </span>
-                  ) : null}
+                  {subExpiryMs ? <span className="ml-1 text-slate-400">until {new Date(subExpiryMs).toLocaleDateString()}</span> : null}
                 </span>
               ) : (
                 <span className="inline-flex items-center gap-1 text-slate-300">
@@ -225,6 +191,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
             </div>
           )}
         </div>
+
         {!visiblePlans.length ? (
           <p className="mt-2 text-sm text-slate-400">No plans yet.</p>
         ) : (
@@ -271,15 +238,9 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
             {posts.map((p) => {
               const k = p.id.toString();
               const hints = parseHints(p.uri);
-
-              // authoritative unlock state: local cache OR sub unlock OR free
-              const unlocked =
-                accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
-
+              const unlocked = accessCache[k] || (subActive && p.accessViaSub) || p.price === 0n;
               const buying = busyId === `post:${k}`;
               const disabled = !eoa || buying;
-
-              // Decide how to render media
               const isVideo = /\.(mp4|mov|m4v|webm)(\?|#|$)/i.test(hints.base);
               const showPreview = !unlocked && !!hints.preview;
 
@@ -289,20 +250,13 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
                     <div className="text-xs text-slate-400">
                       #{k} • {p.accessViaSub ? 'Sub unlock' : 'One-off'}
                     </div>
-                    {!unlocked && (
-                      <div className="text-xs text-slate-300">{fmtUSDC(p.price)} USDC</div>
-                    )}
+                    {!unlocked && <div className="text-xs text-slate-300">{fmtUSDC(p.price)} USDC</div>}
                   </div>
 
                   <div className="mt-2 overflow-hidden rounded-lg border border-white/10">
                     {unlocked ? (
                       isVideo ? (
-                        <video
-                          src={hints.base}
-                          controls
-                          playsInline
-                          className="w-full object-cover"
-                        />
+                        <video src={hints.base} controls playsInline className="w-full object-cover" />
                       ) : (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={hints.base} className="w-full object-cover" alt="" />
@@ -327,9 +281,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
                         />
                       )
                     ) : (
-                      <div className="flex h-40 items-center justify-center text-slate-400 text-sm">
-                        Locked
-                      </div>
+                      <div className="flex h-40 items-center justify-center text-slate-400 text-sm">Locked</div>
                     )}
                   </div>
 
