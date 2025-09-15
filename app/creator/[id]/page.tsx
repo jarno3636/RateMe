@@ -1,36 +1,42 @@
+// /app/creator/[id]/page.tsx
 "use client"
 
 import { useParams } from "next/navigation"
 import { useAccount } from "wagmi"
 import Link from "next/link"
-import { useEffect, useMemo, useState } from "react"
+import { useState } from "react"
 import { useGetProfile } from "@/hooks/useProfileRegistry"
-import { useCreatorPlanIds, useCreatorPostIds, usePlan, usePost, useIsActive, useHasPostAccess, useSubscribe, useBuyPost } from "@/hooks/useCreatorHub"
+import {
+  useCreatorPlanIds,
+  useCreatorPostIds,
+  usePlan,
+  usePost,
+  useIsActive,
+  useHasPostAccess,
+  useSubscribe,
+  useBuyPost,
+} from "@/hooks/useCreatorHub"
 import { useSpendApproval } from "@/hooks/useSpendApproval"
-import { useUSDCAllowance } from "@/hooks/useUsdc"
 import RatingWidget from "@/components/RatingWidget"
 
-const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}`
-const HUB  = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}`
+const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}`
 
 function PlanRow({ id }: { id: bigint }) {
   const { data: plan } = usePlan(id)
   // expect tuple like: [token, pricePerPeriod, periodDays, name, metadataURI, creator, active]
-  const token   = plan?.[0] as `0x${string}` | undefined
   const price   = plan?.[1] as bigint | undefined
   const days    = Number(plan?.[2] ?? 30)
   const name    = String(plan?.[3] ?? "Plan")
   const active  = Boolean(plan?.[6] ?? true)
 
   const { approveExact, hasAllowance, isPending } = useSpendApproval(HUB, price ?? 0n)
-  const { subscribe, wait } = useSubscribe()
+  const { subscribe } = useSubscribe()
   const [periods, setPeriods] = useState(1)
 
   const subscribeFlow = async () => {
     if (!price || !active) return
     if (!hasAllowance) await approveExact()
-    const tx = await subscribe(id, periods)
-    await wait.wait
+    await subscribe(id, periods) // waits internally in the hook
   }
 
   return (
@@ -42,8 +48,10 @@ function PlanRow({ id }: { id: bigint }) {
         </div>
       </div>
       <input
-        type="number" min={1} value={periods}
-        onChange={(e)=>setPeriods(Math.max(1, Number(e.target.value)))}
+        type="number"
+        min={1}
+        value={periods}
+        onChange={(e) => setPeriods(Math.max(1, Number(e.target.value)))}
         className="w-20"
       />
       <button className="btn" onClick={subscribeFlow} disabled={!active || isPending}>
@@ -53,11 +61,10 @@ function PlanRow({ id }: { id: bigint }) {
   )
 }
 
-function PostCard({ id, creator }: { id: bigint, creator: `0x${string}` }) {
+function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const { address } = useAccount()
   const { data: post } = usePost(id)
   // expect: [token, price, accessViaSub, uri, creator, active] (adjust as per ABI)
-  const token   = post?.[0] as `0x${string}` | undefined
   const price   = post?.[1] as bigint | undefined
   const subGate = Boolean(post?.[2] ?? false)
   const uri     = String(post?.[3] ?? "")
@@ -69,13 +76,12 @@ function PostCard({ id, creator }: { id: bigint, creator: `0x${string}` }) {
   const canView = !!hasAccess || (!!hasSub && subGate) || (!subGate && (price ?? 0n) === 0n)
 
   const { approveExact, hasAllowance, isPending } = useSpendApproval(HUB, price ?? 0n)
-  const { buy, wait } = useBuyPost()
+  const { buy } = useBuyPost()
 
   const buyFlow = async () => {
     if (!price || !active) return
     if (!hasAllowance) await approveExact()
-    const tx = await buy(id)
-    await wait.wait
+    await buy(id) // waits internally in the hook
   }
 
   return (
@@ -144,9 +150,7 @@ export default function CreatorPublicPage() {
       </section>
 
       {/* Bio */}
-      {bio && (
-        <section className="card whitespace-pre-wrap">{bio}</section>
-      )}
+      {bio && <section className="card whitespace-pre-wrap">{bio}</section>}
 
       {/* Ratings */}
       <RatingWidget creator={creator} />
