@@ -3,12 +3,11 @@
 
 import {
   useAccount,
+  usePublicClient,
   useReadContract,
   useWriteContract,
-  useWaitForTransactionReceipt,
 } from "wagmi"
-import { base } from "viem/chains"
-import RatingsAbi from "@/abi/Ratings" // <-- use your typed TS ABI (as const)
+import RatingsAbi from "@/abi/Ratings"
 
 const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
 
@@ -58,52 +57,46 @@ export function useHasRated(ratee?: `0x${string}`) {
   })
 }
 
-/** Submit a new rating */
+/** Submit a new rating (awaits receipt internally) */
 export function useRate() {
+  const client = usePublicClient()
   const { address } = useAccount()
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    rate: (ratee: `0x${string}`, score: number, comment: string) => {
-      if (!address) throw new Error("Connect your wallet to rate.")
-      return writeContract({
-        abi: RatingsAbi,
-        address: RATINGS,
-        functionName: "rate",
-        account: address,   // required by wagmi v2 union
-        chain: base,        // <-- satisfies the required 'chain: Chain'
-        args: [ratee, score, comment],
-      })
-    },
-    hash,
-    isPending,
-    wait,
-    error,
+  const rate = async (ratee: `0x${string}`, score: number, comment: string) => {
+    if (!address) throw new Error("Connect your wallet to rate.")
+    const hash = await writeContractAsync({
+      abi: RatingsAbi,
+      address: RATINGS,
+      functionName: "rate",
+      args: [ratee, score, comment],
+      // account: address, // optional; wagmi will infer from connector
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { rate, isPending, error }
 }
 
-/** Update an existing rating */
+/** Update an existing rating (awaits receipt internally) */
 export function useUpdateRating() {
+  const client = usePublicClient()
   const { address } = useAccount()
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    update: (ratee: `0x${string}`, newScore: number, newComment: string) => {
-      if (!address) throw new Error("Connect your wallet to update a rating.")
-      return writeContract({
-        abi: RatingsAbi,
-        address: RATINGS,
-        functionName: "updateRating",
-        account: address,
-        chain: base, // <-- required
-        args: [ratee, newScore, newComment],
-      })
-    },
-    hash,
-    isPending,
-    wait,
-    error,
+  const update = async (ratee: `0x${string}`, newScore: number, newComment: string) => {
+    if (!address) throw new Error("Connect your wallet to update a rating.")
+    const hash = await writeContractAsync({
+      abi: RatingsAbi,
+      address: RATINGS,
+      functionName: "updateRating",
+      args: [ratee, newScore, newComment],
+      // account: address, // optional; wagmi will infer from connector
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { update, isPending, error }
 }
