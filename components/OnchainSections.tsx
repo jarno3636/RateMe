@@ -9,26 +9,10 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { useGate } from '@/hooks/useGate';
 import { toChecksum } from '@/lib/gate';
 
-type Plan = {
-  id: bigint;
-  creator: `0x${string}`;
-  token: `0x${string}`;
-  pricePerPeriod: bigint; // 6dp USDC
-  periodDays: number;
-  active: boolean;
-  name: string;
-  metadataURI: string;
-};
-
-type Post = {
-  id: bigint;
-  creator: `0x${string}`;
-  token: `0x${string}`;
-  price: bigint; // 6dp USDC
-  active: boolean;
-  accessViaSub: boolean;
-  uri: string;
-};
+// ---- infer types from the hook to avoid export drift
+type Hub = ReturnType<typeof useCreatorHub>;
+type Plan = Awaited<ReturnType<Hub['getPlan']>>;
+type Post = Awaited<ReturnType<Hub['getPost']>>;
 
 function fmtUSDC(x: bigint) {
   const n = Number(x) / 1e6;
@@ -60,8 +44,9 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
   const {
     getCreatorPlanIds,
     getCreatorPostIds,
-    readPlan,
-    readPost,
+    // ⬇️ use the current API
+    getPlan,
+    getPost,
     subscribe,
     buyPost,
     hasPostAccess, // on-chain view (used as warm cache/fallback)
@@ -88,8 +73,8 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
       ]);
 
       const [planRows, postRows] = await Promise.all([
-        Promise.all(planIds.map((id) => readPlan(id))),
-        Promise.all(postIds.map((id) => readPost(id))),
+        Promise.all(planIds.map((id) => getPlan(id))),
+        Promise.all(postIds.map((id) => getPost(id))),
       ]);
 
       const nextPlans = planRows
@@ -135,8 +120,8 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     creatorAddress,
     getCreatorPlanIds,
     getCreatorPostIds,
-    readPlan,
-    readPost,
+    getPlan,
+    getPost,
     isActive,
     getSubExpiry,
     hasPostAccess,
