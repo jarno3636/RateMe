@@ -9,10 +9,13 @@ import { useCreatorHub } from '@/hooks/useCreatorHub';
 import { useGate } from '@/hooks/useGate';
 import { toChecksum } from '@/lib/gate';
 
-// Infer shapes from the hook to avoid drift with type exports
+// Infer base shapes from the hook…
 type Hub = ReturnType<typeof useCreatorHub>;
-type Plan = Awaited<ReturnType<Hub['getPlan']>>;
-type Post = Awaited<ReturnType<Hub['getPost']>>;
+type PlanBase = Awaited<ReturnType<Hub['getPlan']>>;
+type PostBase = Awaited<ReturnType<Hub['getPost']>>;
+// …and extend them with the on-chain id we attach when listing
+type PlanRow = PlanBase & { id: bigint };
+type PostRow = PostBase & { id: bigint };
 
 function fmtUSDC(x: bigint) {
   const n = Number(x) / 1e6;
@@ -48,8 +51,8 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
   } = useCreatorHub();
 
   const [loading, setLoading] = useState(true);
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [plans, setPlans] = useState<PlanRow[]>([]);
+  const [posts, setPosts] = useState<PostRow[]>([]);
   const [subActive, setSubActive] = useState<boolean>(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [accessCache, setAccessCache] = useState<Record<string, boolean>>({});
@@ -68,18 +71,21 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
       ]);
 
       setPlans(
-        planRows.map((r, i) => (r ? ({ id: planIds[i], ...r } as Plan) : null)).filter(Boolean) as Plan[],
+        planRows
+          .map((r, i) => (r ? ({ id: planIds[i], ...r } as PlanRow) : null))
+          .filter(Boolean) as PlanRow[],
       );
       setPosts(
-        postRows.map((r, i) => (r ? ({ id: postIds[i], ...r } as Post) : null)).filter(Boolean) as Post[],
+        postRows
+          .map((r, i) => (r ? ({ id: postIds[i], ...r } as PostRow) : null))
+          .filter(Boolean) as PostRow[],
       );
 
       if (eoa) {
-        // quick on-chain check to make the UI responsive
         const active = await isActive(eoa, creatorAddress).catch(() => false);
         setSubActive(!!active);
 
-        // best-effort warm the access cache for posts (on-chain view)
+        // warm post access cache using the on-chain view
         const entries = await Promise.all(
           postIds.map(async (pid) => {
             const ok = await hasPostAccess(eoa, pid).catch(() => false);
@@ -121,7 +127,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     }
   }, [eoa, creatorAddress, checkSub]);
 
-  async function doSubscribe(plan: Plan) {
+  async function doSubscribe(plan: PlanRow) {
     try {
       if (!eoa) {
         toast.error('Connect wallet');
@@ -139,7 +145,7 @@ export default function OnchainSections({ creatorAddress }: { creatorAddress: `0
     }
   }
 
-  async function doBuy(post: Post) {
+  async function doBuy(post: PostRow) {
     try {
       if (!eoa) {
         toast.error('Connect wallet');
