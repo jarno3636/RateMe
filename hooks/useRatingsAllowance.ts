@@ -15,21 +15,19 @@ export function useRatingsAllowance() {
   })
 
   const { data: allowance } = useUSDCAllowance(RATINGS)
-  const { approve, isPending, wait } = useUSDCApprove()
+  const { approve, isPending } = useUSDCApprove()
 
   const fee = (feeUnits ?? 0n) as bigint
   const hasAllowance = (allowance ?? 0n) >= fee
 
+  const approveForFee = async () => {
+    if (fee > 0n) return approve(RATINGS, fee) // waits for receipt internally
+  }
+
   return {
     fee,
     hasAllowance,
-    approveForFee: async () => {
-      if (fee > 0n) {
-        const tx = await approve(RATINGS, fee)
-        await wait.wait
-        return tx
-      }
-    },
+    approveForFee,
     states: { loading: feeUnits === undefined, approving: isPending },
     errors: {},
   }
