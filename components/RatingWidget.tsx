@@ -1,3 +1,4 @@
+// /components/RatingWidget.tsx
 "use client"
 
 import { useState, useMemo } from "react"
@@ -19,8 +20,8 @@ export default function RatingWidget({ creator }: { creator: `0x${string}` }) {
   const hasExisting = useMemo(() => (myScore ?? 0) > 0, [myScore])
 
   const { fee, hasAllowance, approveForFee, states } = useRatingsAllowance()
-  const { rate, wait: waitRate } = useRate()
-  const { update, wait: waitUpdate } = useUpdateRating()
+  const { rate } = useRate()
+  const { update } = useUpdateRating()
 
   const submit = async () => {
     if (!address) return toast.error("Connect a wallet first.")
@@ -32,11 +33,9 @@ export default function RatingWidget({ creator }: { creator: `0x${string}` }) {
       }
       const doing = toast.loading(hasExisting ? "Updating rating…" : "Submitting rating…")
       if (hasExisting) {
-        const tx = await update(creator, score, comment || myComment)
-        await waitUpdate.wait
+        await update(creator, score, comment || myComment)
       } else {
-        const tx = await rate(creator, score, comment)
-        await waitRate.wait
+        await rate(creator, score, comment)
       }
       toast.dismiss(doing); toast.success("Rating saved")
     } catch (e: any) {
@@ -50,13 +49,17 @@ export default function RatingWidget({ creator }: { creator: `0x${string}` }) {
       <div className="text-sm opacity-70">Fee: {(Number(fee) / 1e6).toFixed(2)} USDC</div>
       <div className="flex flex-wrap items-center gap-3">
         <input
-          type="number" min={1} max={5}
-          value={score} onChange={(e)=>setScore(Math.max(1, Math.min(5, Number(e.target.value))))}
+          type="number"
+          min={1}
+          max={5}
+          value={score}
+          onChange={(e) => setScore(Math.max(1, Math.min(5, Number(e.target.value))))}
           className="w-24"
         />
         <input
           placeholder="Comment (optional)"
-          value={comment} onChange={(e)=>setComment(e.target.value)}
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
           className="flex-1"
         />
         <button className="btn" onClick={submit} disabled={states.loading || states.approving}>
