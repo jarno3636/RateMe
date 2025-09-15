@@ -7,16 +7,16 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi"
+import type { Abi } from "viem"
+import RatingsAbiJson from "@/abi/Ratings.json"
 
-// If your ABI file is JSON, import it directly so TS can infer types:
-import RatingsAbi from "@/abi/Ratings.json"
-
+const RATINGS_ABI = RatingsAbiJson as unknown as Abi
 const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
 
 /** Average score x100 (e.g., 423 => 4.23) */
 export function useAverage(ratee?: `0x${string}`) {
   return useReadContract({
-    abi: RatingsAbi as const,
+    abi: RATINGS_ABI,
     address: RATINGS,
     functionName: "getAverage",
     args: ratee ? [ratee] : undefined,
@@ -27,7 +27,7 @@ export function useAverage(ratee?: `0x${string}`) {
 /** Count + totalScore */
 export function useRatingStats(ratee?: `0x${string}`) {
   return useReadContract({
-    abi: RatingsAbi as const,
+    abi: RATINGS_ABI,
     address: RATINGS,
     functionName: "getStats",
     args: ratee ? [ratee] : undefined,
@@ -39,7 +39,7 @@ export function useRatingStats(ratee?: `0x${string}`) {
 export function useMyRating(ratee?: `0x${string}`) {
   const { address } = useAccount()
   return useReadContract({
-    abi: RatingsAbi as const,
+    abi: RATINGS_ABI,
     address: RATINGS,
     functionName: "getRating",
     args: address && ratee ? [address, ratee] : undefined,
@@ -51,7 +51,7 @@ export function useMyRating(ratee?: `0x${string}`) {
 export function useHasRated(ratee?: `0x${string}`) {
   const { address } = useAccount()
   return useReadContract({
-    abi: RatingsAbi as const,
+    abi: RATINGS_ABI,
     address: RATINGS,
     functionName: "hasRated",
     args: address && ratee ? [address, ratee] : undefined,
@@ -68,10 +68,9 @@ export function useRate() {
   return {
     rate: (ratee: `0x${string}`, score: number, comment: string) =>
       writeContract({
-        abi: RatingsAbi as const,
+        abi: RATINGS_ABI,
         address: RATINGS,
         functionName: "rate",
-        // wagmi v2 types expect an account in this branch of the union
         account: address,
         args: [ratee, score, comment],
       }),
@@ -91,7 +90,7 @@ export function useUpdateRating() {
   return {
     update: (ratee: `0x${string}`, newScore: number, newComment: string) =>
       writeContract({
-        abi: RatingsAbi as const,
+        abi: RATINGS_ABI,
         address: RATINGS,
         functionName: "updateRating",
         account: address,
