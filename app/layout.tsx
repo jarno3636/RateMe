@@ -2,6 +2,7 @@
 import "./globals.css"
 import Providers from "./providers"
 import Nav from "@/components/Nav"
+import { Toaster } from "react-hot-toast"
 
 export const metadata = {
   title: "OnlyStars",
@@ -15,12 +16,14 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
+      <body className="bg-black text-white">
         <Providers>
           {/* Global navigation bar */}
           <Nav />
           {/* Main container for page content */}
           <main className="container py-8">{children}</main>
+          {/* Toast notifications */}
+          <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
         </Providers>
       </body>
     </html>
