@@ -7,16 +7,15 @@ import {
   useWriteContract,
   useWaitForTransactionReceipt,
 } from "wagmi"
-import type { Abi } from "viem"
-import RatingsAbiJson from "@/abi/Ratings.json"
+import { base } from "viem/chains"
+import RatingsAbi from "@/abi/Ratings" // <-- use your typed TS ABI (as const)
 
-const RATINGS_ABI = RatingsAbiJson as unknown as Abi
 const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
 
 /** Average score x100 (e.g., 423 => 4.23) */
 export function useAverage(ratee?: `0x${string}`) {
   return useReadContract({
-    abi: RATINGS_ABI,
+    abi: RatingsAbi,
     address: RATINGS,
     functionName: "getAverage",
     args: ratee ? [ratee] : undefined,
@@ -27,7 +26,7 @@ export function useAverage(ratee?: `0x${string}`) {
 /** Count + totalScore */
 export function useRatingStats(ratee?: `0x${string}`) {
   return useReadContract({
-    abi: RATINGS_ABI,
+    abi: RatingsAbi,
     address: RATINGS,
     functionName: "getStats",
     args: ratee ? [ratee] : undefined,
@@ -39,7 +38,7 @@ export function useRatingStats(ratee?: `0x${string}`) {
 export function useMyRating(ratee?: `0x${string}`) {
   const { address } = useAccount()
   return useReadContract({
-    abi: RATINGS_ABI,
+    abi: RatingsAbi,
     address: RATINGS,
     functionName: "getRating",
     args: address && ratee ? [address, ratee] : undefined,
@@ -51,7 +50,7 @@ export function useMyRating(ratee?: `0x${string}`) {
 export function useHasRated(ratee?: `0x${string}`) {
   const { address } = useAccount()
   return useReadContract({
-    abi: RATINGS_ABI,
+    abi: RatingsAbi,
     address: RATINGS,
     functionName: "hasRated",
     args: address && ratee ? [address, ratee] : undefined,
@@ -66,14 +65,17 @@ export function useRate() {
   const wait = useWaitForTransactionReceipt({ hash })
 
   return {
-    rate: (ratee: `0x${string}`, score: number, comment: string) =>
-      writeContract({
-        abi: RATINGS_ABI,
+    rate: (ratee: `0x${string}`, score: number, comment: string) => {
+      if (!address) throw new Error("Connect your wallet to rate.")
+      return writeContract({
+        abi: RatingsAbi,
         address: RATINGS,
         functionName: "rate",
-        account: address,
+        account: address,   // required by wagmi v2 union
+        chain: base,        // <-- satisfies the required 'chain: Chain'
         args: [ratee, score, comment],
-      }),
+      })
+    },
     hash,
     isPending,
     wait,
@@ -88,14 +90,17 @@ export function useUpdateRating() {
   const wait = useWaitForTransactionReceipt({ hash })
 
   return {
-    update: (ratee: `0x${string}`, newScore: number, newComment: string) =>
-      writeContract({
-        abi: RATINGS_ABI,
+    update: (ratee: `0x${string}`, newScore: number, newComment: string) => {
+      if (!address) throw new Error("Connect your wallet to update a rating.")
+      return writeContract({
+        abi: RatingsAbi,
         address: RATINGS,
         functionName: "updateRating",
         account: address,
+        chain: base, // <-- required
         args: [ratee, newScore, newComment],
-      }),
+      })
+    },
     hash,
     isPending,
     wait,
