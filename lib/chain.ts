@@ -1,5 +1,5 @@
 // /lib/chain.ts
-import { createPublicClient, http, type PublicClient } from "viem"
+import { createPublicClient, http } from "viem"
 import { base } from "viem/chains"
 
 /**
@@ -10,10 +10,12 @@ import { base } from "viem/chains"
  */
 const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL
 if (!rpcUrl) {
-  console.warn("[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using default viem RPC (slower, rate limited)")
+  console.warn(
+    "[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using default viem RPC (slower, rate limited)"
+  )
 }
 
-export const publicClient: PublicClient<typeof base> = createPublicClient({
+export const publicClient = createPublicClient({
   chain: base,
   transport: rpcUrl ? http(rpcUrl) : http(),
   batch: { multicall: true },
