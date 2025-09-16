@@ -1,7 +1,13 @@
 // /hooks/useProfileRegistry.ts
 "use client"
 
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from "wagmi"
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+} from "wagmi"
+import { base } from "viem/chains"
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
 
 export const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
@@ -133,8 +139,8 @@ export function useProfileCount() {
 
 /** Preview create for connected user -> (balance, allowance_, fee, okBalance, okAllowance) */
 export function usePreviewCreate(user?: `0x${string}`) {
-  const fallback = useAccount()
-  const who = user ?? (fallback.address as `0x${string}` | undefined)
+  const { address } = useAccount()
+  const who = user ?? (address as `0x${string}` | undefined)
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
@@ -145,80 +151,105 @@ export function usePreviewCreate(user?: `0x${string}`) {
 }
 
 /* ---------------------------- WRITE HOOKS ----------------------------- */
+/* All writes: require account + chain, and await receipt via public client. */
 
 export function useCreateProfile() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const client = usePublicClient()
+  const { address } = useAccount()
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    create: (handle: string, displayName: string, avatarURI: string, bio: string, fid: bigint) =>
-      writeContract({
-        abi: ProfileRegistry as any,
-        address: REGISTRY,
-        functionName: "createProfile",
-        args: [handle, displayName, avatarURI, bio, fid],
-      }),
-    hash,
-    isPending,
-    wait,
-    error,
+  const create = async (
+    handle: string,
+    displayName: string,
+    avatarURI: string,
+    bio: string,
+    fid: bigint
+  ) => {
+    if (!address) throw new Error("Connect your wallet to create a profile.")
+    const hash = await writeContractAsync({
+      abi: ProfileRegistry as any,
+      address: REGISTRY,
+      functionName: "createProfile",
+      args: [handle, displayName, avatarURI, bio, fid],
+      account: address,
+      chain: base,
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { create, isPending, error }
 }
 
 export function useUpdateProfile() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const client = usePublicClient()
+  const { address } = useAccount()
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    update: (id: bigint, displayName: string, avatarURI: string, bio: string, fid: bigint) =>
-      writeContract({
-        abi: ProfileRegistry as any,
-        address: REGISTRY,
-        functionName: "updateProfile",
-        args: [id, displayName, avatarURI, bio, fid],
-      }),
-    hash,
-    isPending,
-    wait,
-    error,
+  const update = async (
+    id: bigint,
+    displayName: string,
+    avatarURI: string,
+    bio: string,
+    fid: bigint
+  ) => {
+    if (!address) throw new Error("Connect your wallet to update a profile.")
+    const hash = await writeContractAsync({
+      abi: ProfileRegistry as any,
+      address: REGISTRY,
+      functionName: "updateProfile",
+      args: [id, displayName, avatarURI, bio, fid],
+      account: address,
+      chain: base,
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { update, isPending, error }
 }
 
 export function useChangeHandle() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const client = usePublicClient()
+  const { address } = useAccount()
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    change: (id: bigint, newHandle: string) =>
-      writeContract({
-        abi: ProfileRegistry as any,
-        address: REGISTRY,
-        functionName: "changeHandle",
-        args: [id, newHandle],
-      }),
-    hash,
-    isPending,
-    wait,
-    error,
+  const change = async (id: bigint, newHandle: string) => {
+    if (!address) throw new Error("Connect your wallet to change handle.")
+    const hash = await writeContractAsync({
+      abi: ProfileRegistry as any,
+      address: REGISTRY,
+      functionName: "changeHandle",
+      args: [id, newHandle],
+      account: address,
+      chain: base,
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { change, isPending, error }
 }
 
 /** Optional: transfer a profile to another address */
 export function useTransferProfile() {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const wait = useWaitForTransactionReceipt({ hash })
+  const client = usePublicClient()
+  const { address } = useAccount()
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  return {
-    transfer: (id: bigint, to: `0x${string}`) =>
-      writeContract({
-        abi: ProfileRegistry as any,
-        address: REGISTRY,
-        functionName: "transferProfile",
-        args: [id, to],
-      }),
-    hash,
-    isPending,
-    wait,
-    error,
+  const transfer = async (id: bigint, to: `0x${string}`) => {
+    if (!address) throw new Error("Connect your wallet to transfer a profile.")
+    const hash = await writeContractAsync({
+      abi: ProfileRegistry as any,
+      address: REGISTRY,
+      functionName: "transferProfile",
+      args: [id, to],
+      account: address,
+      chain: base,
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
+
+  return { transfer, isPending, error }
 }
