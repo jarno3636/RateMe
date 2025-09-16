@@ -9,20 +9,13 @@ export const metadata = {
   description: "Creator subscriptions + paid posts + on-chain ratings (Base + USDC)",
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-black text-white">
         <Providers>
-          {/* Global navigation bar */}
           <Nav />
-          {/* Main container for page content */}
-          <main className="container py-8">{children}</main>
-          {/* Toast notifications */}
+          <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
           <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
         </Providers>
       </body>
