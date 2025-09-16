@@ -4,21 +4,22 @@
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import toast from "react-hot-toast"
-import { useAccount, useReadContract, useWriteContract } from "wagmi"
+import { useAccount, useReadContract, useWriteContract, useChainId } from "wagmi"
 import { Address } from "viem"
+import { base } from "viem/chains"
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
+import { publicClient } from "@/lib/chain"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
 const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
-const USDC     = process.env.NEXT_PUBLIC_USDC as `0x${string}`
 
-// helper: 6-decimals
-const toUnits6 = (n: number) => BigInt(Math.round(n * 1_000_000))
+// helper: 6-decimals → pretty string
 const fromUnits6 = (v?: bigint) => (Number(v ?? 0n) / 1e6).toFixed(2)
 
 export default function BecomeCreatorPage() {
   const router = useRouter()
   const { address, isConnected } = useAccount()
+  const currentChainId = useChainId()
 
   // form state
   const [handle, setHandle] = useState("")
@@ -46,7 +47,7 @@ export default function BecomeCreatorPage() {
   const canRegOk = Boolean((canRegRaw as any)?.[0])
   const canRegReason = String((canRegRaw as any)?.[1] ?? "")
 
-  // fee preview + balance/allowance checks
+  // previewCreate(user) -> [balance, allowance, fee, okBalance, okAllowance]
   const { data: preview } = useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
@@ -54,22 +55,20 @@ export default function BecomeCreatorPage() {
     args: address ? [address as Address] : undefined,
     query: { enabled: !!address },
   })
-  // previewCreate returns [balance, allowance, fee, okBalance, okAllowance]
-  const feeUnits   = (preview as any)?.[2] as bigint | undefined
-  const okBalance  = Boolean((preview as any)?.[3])
-  const okAllowance= Boolean((preview as any)?.[4])
+  const feeUnits    = (preview as any)?.[2] as bigint | undefined
+  const okBalance   = Boolean((preview as any)?.[3])
+  const okAllowance = Boolean((preview as any)?.[4])
 
-  // live allowance via your hook (spender = registry)
+  // USDC allowance/approve (spender = registry)
   const { data: allowance } = useUSDCAllowance(REGISTRY)
-  const { approve, isPending: approving, error: approveErr } = useUSDCApprove()
+  const { approve, isPending: approving } = useUSDCApprove()
 
   /* ---------- WRITE: createProfile ---------- */
   const { writeContractAsync, isPending: creating } = useWriteContract()
 
   const needsApproval = useMemo(() => {
     if (feeUnits === undefined) return false
-    const a = (allowance ?? 0n)
-    return a < feeUnits
+    return (allowance ?? 0n) < feeUnits
   }, [allowance, feeUnits])
 
   const approveFee = async () => {
@@ -94,38 +93,33 @@ export default function BecomeCreatorPage() {
     try {
       const fidBig = fid ? BigInt(fid) : 0n
       const t = toast.loading("Creating profile…")
-      const hash = await writeContractAsync({
+
+      await writeContractAsync({
         abi: ProfileRegistry as any,
         address: REGISTRY,
         functionName: "createProfile",
         args: [normHandle, displayName || normHandle, avatarURI || "", bio || "", fidBig],
-      })
+        account: address,                   // ✅ satisfy wagmi v2 types
+        chainId: currentChainId || base.id, // ✅ hint chain (Base as fallback)
+      } as any)
+
       toast.loading("Waiting for confirmation…", { id: t })
-      // we don't have the viem client here; wagmi will resolve receipt internally for UI later
-      // simple poll (best-effort): after TX, we can redirect optimistically; the dashboard will read on-chain.
       toast.dismiss(t)
       toast.success("Profile created!")
 
-      // try to look up id by handle, then redirect
-      // getIdByHandle(handle) -> id
+      // Resolve the new ID and redirect
+      let newId: bigint | undefined
       try {
-        const id = (await (async () =>
-          await (window as any).wagmi?.config?.getClient?.()?.readContract?.({
-            abi: ProfileRegistry as any,
-            address: REGISTRY,
-            functionName: "getIdByHandle",
-            args: [normHandle],
-          }))()) as unknown as bigint | undefined
+        newId = (await publicClient.readContract({
+          abi: ProfileRegistry as any,
+          address: REGISTRY,
+          functionName: "getIdByHandle",
+          args: [normHandle],
+        })) as bigint
+      } catch { /* ignore */ }
 
-        if (id && id > 0n) {
-          router.push(`/creator/${id.toString()}/dashboard`)
-        } else {
-          // fallback: go to discover
-          router.push("/discover")
-        }
-      } catch {
-        router.push("/discover")
-      }
+      if (newId && newId > 0n) router.push(`/creator/${newId.toString()}/dashboard`)
+      else router.push("/discover")
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Create profile failed")
     }
@@ -263,8 +257,8 @@ export default function BecomeCreatorPage() {
 
       {/* Help */}
       <section className="card text-sm opacity-80">
-        <div className="font-medium mb-1">Tips</div>
-        <ul className="list-disc pl-5 space-y-1">
+        <div className="mb-1 font-medium">Tips</div>
+        <ul className="list-disc space-y-1 pl-5">
           <li>Handles are lowercase letters, digits, <code>.</code>, <code>-</code>, <code>_</code>.</li>
           <li>You can update your name, avatar, bio, and FID later from your dashboard.</li>
           <li>Creation fee is paid in USDC; you may need to approve spending once.</li>
