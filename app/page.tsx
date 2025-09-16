@@ -1,11 +1,8 @@
 // /app/page.tsx
 import Link from "next/link"
 import { headers } from "next/headers"
-import ProfileRegistry from "@/abi/ProfileRegistry.json"
-import { publicClient } from "@/lib/chain"
 import { computeTop3 } from "@/lib/top3"
-
-const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
+import { getProfileSnaps } from "@/lib/profileCache"
 
 async function getOrigin() {
   try {
@@ -31,42 +28,9 @@ async function getTop3Ids(): Promise<number[]> {
   return await computeTop3(50)
 }
 
+// ⬇️ uses KV-backed cache via lib/profileCache
 async function getProfiles(ids: number[]) {
-  if (ids.length === 0) return []
-  try {
-    const res = (await publicClient.readContract({
-      address: PROFILE_REGISTRY,
-      abi: ProfileRegistry as any,
-      functionName: "getProfilesFlat",
-      args: [ids.map(BigInt)],
-    })) as unknown as [
-      bigint[],
-      string[],
-      string[],
-      string[],
-      string[],
-      string[],
-      bigint[],
-      bigint[]
-    ]
-
-    const outIds = res?.[0] ?? []
-    const owners = res?.[1] ?? []
-    const handles = res?.[2] ?? []
-    const names = res?.[3] ?? []
-    const avatars = res?.[4] ?? []
-
-    return outIds.map((id, i) => ({
-      id: Number(id),
-      owner: owners[i],
-      handle: String(handles[i] ?? ""),
-      name: String(names[i] ?? `Profile #${Number(id)}`),
-      avatar: String(avatars[i] ?? ""),
-    }))
-  } catch (e) {
-    console.error("getProfiles error:", e)
-    return []
-  }
+  return getProfileSnaps(ids)
 }
 
 export const dynamic = "force-dynamic"
