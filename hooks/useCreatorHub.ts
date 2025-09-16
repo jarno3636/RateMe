@@ -1,92 +1,103 @@
 // /hooks/useCreatorHub.ts
 "use client"
 
-import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi"
+import { useEffect } from "react"
+import {
+  useAccount,
+  usePublicClient,
+  useReadContract,
+  useWriteContract,
+  useBlockNumber,
+} from "wagmi"
 import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 
 const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}` | undefined
-
 type WatchOpt = { watch?: boolean }
+
+/* Small helper to refetch on new blocks when opt.watch = true */
+function useRefetchOnBlock(refetch?: () => void, watch?: boolean) {
+  const { data: blockNumber } = useBlockNumber({
+    watch: !!watch,
+    query: { enabled: !!watch },
+  })
+  useEffect(() => {
+    if (watch) refetch?.()
+  }, [watch, blockNumber, refetch])
+}
 
 /* ----------------------------- READS ----------------------------- */
 
 export function useCreatorPlanIds(creator?: `0x${string}`, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "getCreatorPlanIds",
     args: creator ? [creator] : undefined,
-    query: {
-      enabled: !!HUB && !!creator,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && !!creator },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 export function useCreatorPostIds(creator?: `0x${string}`, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "getCreatorPostIds",
     args: creator ? [creator] : undefined,
-    query: {
-      enabled: !!HUB && !!creator,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && !!creator },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 export function usePlan(id?: bigint, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "plans",
     args: id !== undefined ? [id] : undefined,
-    query: {
-      enabled: !!HUB && id !== undefined,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && id !== undefined },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 export function usePost(id?: bigint, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "posts",
     args: id !== undefined ? [id] : undefined,
-    query: {
-      enabled: !!HUB && id !== undefined,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && id !== undefined },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 export function useHasPostAccess(user?: `0x${string}`, postId?: bigint, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "hasPostAccess",
     args: user && postId !== undefined ? [user, postId] : undefined,
-    query: {
-      enabled: !!HUB && !!user && postId !== undefined,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && !!user && postId !== undefined },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`, opt?: WatchOpt) {
-  return useReadContract({
+  const read = useReadContract({
     abi: CreatorHub as any,
     address: HUB,
     functionName: "isActive",
     args: subscriber && creator ? [subscriber, creator] : undefined,
-    query: {
-      enabled: !!HUB && !!subscriber && !!creator,
-      refetchOnBlock: !!opt?.watch,
-    },
+    query: { enabled: !!HUB && !!subscriber && !!creator },
   })
+  useRefetchOnBlock(read.refetch, opt?.watch)
+  return read
 }
 
 /* ----------------------------- WRITES ----------------------------- */
