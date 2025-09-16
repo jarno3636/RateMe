@@ -29,7 +29,7 @@ const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 /* ----------------------------- Plans ----------------------------- */
 // plans(id) -> [creator, token, pricePerPeriod, periodDays, active, name, metadataURI]
 function PlanRow({ id }: { id: bigint }) {
-  const { data: plan } = usePlan(id, { watch: true }) // live refresh per block
+  const { data: plan } = usePlan(id)
   const price   = (plan?.[2] as bigint | undefined) ?? 0n
   const days    = Number(plan?.[3] ?? 30)
   const active  = Boolean(plan?.[4] ?? true)
@@ -81,15 +81,15 @@ function PlanRow({ id }: { id: bigint }) {
 // posts(id) -> [creator, token, price, active, accessViaSub, uri]
 function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const { address } = useAccount()
-  const { data: post } = usePost(id, { watch: true })
+  const { data: post } = usePost(id)
+
   const price   = (post?.[2] as bigint | undefined) ?? 0n
   const active  = Boolean(post?.[3] ?? true)
   const subGate = Boolean(post?.[4] ?? false)
   const uri     = String(post?.[5] ?? "")
 
-  const { data: hasSub } = useIsActive(address as `0x${string}` | undefined, creator, { watch: true })
-  const { data: hasAccess } = useHasPostAccess(address as `0x${string}` | undefined, id, { watch: true })
-
+  const { data: hasSub } = useIsActive(address as `0x${string}` | undefined, creator)
+  const { data: hasAccess } = useHasPostAccess(address as `0x${string}` | undefined, id)
   const canView = !!hasAccess || (!!hasSub && subGate) || (!subGate && price === 0n)
 
   const { buy, isPending: buying } = useBuyPost()
@@ -158,13 +158,8 @@ export default function CreatorPublicPage() {
     try { return BigInt(params.id) } catch { return 0n }
   }, [params.id])
 
-  // Profile live-read; watch=true ensures avatar/name/bio changes show up automatically.
-  const {
-    data: prof,
-    isLoading: profLoading,
-    isFetching: profFetching,
-    error: profError,
-  } = useGetProfile(id, { watch: true })
+  // Profile read
+  const { data: prof, isLoading: profLoading, error: profError } = useGetProfile(id)
 
   // Decode tuple
   const creator = (prof?.[0] as `0x${string}` | undefined) ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
@@ -174,8 +169,8 @@ export default function CreatorPublicPage() {
   const bio     = String(prof?.[4] ?? "")
 
   // Children data
-  const { data: planIds, isLoading: plansLoading } = useCreatorPlanIds(creator, { watch: true })
-  const { data: postIds, isLoading: postsLoading } = useCreatorPostIds(creator, { watch: true })
+  const { data: planIds, isLoading: plansLoading } = useCreatorPlanIds(creator)
+  const { data: postIds, isLoading: postsLoading } = useCreatorPostIds(creator)
 
   const plans = (planIds as bigint[] | undefined) ?? []
   const posts = (postIds as bigint[] | undefined) ?? []
@@ -215,7 +210,7 @@ export default function CreatorPublicPage() {
       {/* Posts */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Posts</h2>
-        {(postsLoading || profFetching) && <div className="card">Loading posts…</div>}
+        {postsLoading && <div className="card">Loading posts…</div>}
         {!postsLoading && posts.length === 0 && <div className="opacity-70">No posts yet.</div>}
         <div className="grid gap-4 md:grid-cols-2">
           {posts.map((pid) => (
@@ -227,7 +222,7 @@ export default function CreatorPublicPage() {
       {/* Plans */}
       <section id="plans" className="space-y-3">
         <h2 className="text-xl font-semibold">Subscription plans</h2>
-        {(plansLoading || profFetching) && <div className="card">Loading plans…</div>}
+        {plansLoading && <div className="card">Loading plans…</div>}
         {!plansLoading && plans.length === 0 && <div className="opacity-70">No plans yet.</div>}
         <div className="grid gap-4">
           {plans.map((plid) => (
