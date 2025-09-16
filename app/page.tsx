@@ -76,7 +76,7 @@ export default async function HomePage() {
   const profiles = await getProfiles(ids)
 
   return (
-    <div className="relative space-y-12">
+    <div className="relative space-y-14">
       {/* Decorative background */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
         <div className="absolute left-1/2 top-[-8rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-pink-500/20 blur-[90px]" />
@@ -96,33 +96,56 @@ export default async function HomePage() {
         </h1>
 
         <p className="mx-auto mt-3 max-w-2xl text-balance text-sm/6 opacity-80 md:text-base/7">
-          Creator subscriptions, paid posts, and on-chain ratings—secured on{" "}
+          Creator subscriptions, paid posts, and on-chain ratings — secured on{" "}
           <span className="font-medium text-pink-300">Base</span> with{" "}
-          <span className="font-medium text-pink-300">USDC</span>. Discover, support, and rate your
-          favorite creators in one beautiful place.
+          <span className="font-medium text-pink-300">USDC</span>. Instant, secure payouts. Ratings
+          use small fees to keep the signal high and the spam low.
         </p>
 
         <div className="mt-6 flex items-center justify-center gap-3">
           <Link
-            className="rounded-full border border-pink-500/50 px-5 py-2 text-sm hover:bg-pink-500/10"
+            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
             href="/discover"
           >
             Discover creators
           </Link>
           <Link
-            className="rounded-full border border-pink-500/50 px-5 py-2 text-sm hover:bg-pink-500/10"
+            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
             href="/creator"
           >
             Become a creator
           </Link>
         </div>
 
-        {/* Trust badges */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs opacity-70">
-          <div className="rounded-full border border-white/10 px-3 py-1">On-chain reads</div>
-          <div className="rounded-full border border-white/10 px-3 py-1">USDC payments</div>
-          <div className="rounded-full border border-white/10 px-3 py-1">Ratings with micro-fees</div>
-          <div className="rounded-full border border-white/10 px-3 py-1">Vercel storage</div>
+        {/* Key value props */}
+        <div className="mt-8 grid gap-3 text-left sm:grid-cols-2">
+          <Feature
+            title="Low platform fee"
+            body="Just 1% platform fee. Keep more of what you earn."
+            icon={<PercentIcon />}
+          />
+          <Feature
+            title="Simple account setup"
+            body="$0.50 USDC one-time profile creation."
+            icon={<CoinIcon />}
+          />
+          <Feature
+            title="Instant on-chain payments"
+            body="Non-custodial USDC. You stay in control."
+            icon={<BoltIcon />}
+          />
+          <Feature
+            title="Anti-spam ratings"
+            body="Micropayment per rating keeps feedback real."
+            icon={<ShieldIcon />}
+          />
+        </div>
+
+        {/* Micro-CTA band */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs opacity-75">
+          <span className="rounded-full border border-white/10 px-3 py-1">Non-custodial</span>
+          <span className="rounded-full border border-white/10 px-3 py-1">Creator-friendly terms</span>
+          <span className="rounded-full border border-white/10 px-3 py-1">Built with wagmi + viem</span>
         </div>
       </section>
 
@@ -132,7 +155,7 @@ export default async function HomePage() {
 
         {profiles.length === 0 ? (
           <div className="card mx-auto max-w-3xl text-center opacity-80">
-            No leaderboard yet—be the first to create a profile and get rated.
+            No leaderboard yet — be the first to create a profile and get rated.
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -187,7 +210,7 @@ export default async function HomePage() {
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
             <Link
-              className="rounded-full border border-pink-500/50 px-5 py-2 text-sm hover:bg-pink-500/10"
+              className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
               href="/creator"
             >
               Start creating
@@ -209,6 +232,57 @@ export default async function HomePage() {
           />
         </div>
       </section>
+    </div>
+  )
+}
+
+/* --- tiny inline icon components to keep it self-contained --- */
+function PercentIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
+      <path d="M19 5L5 19M8 8h.01M16 16h.01" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+function CoinIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
+      <ellipse cx="12" cy="7" rx="7" ry="3.5" stroke="currentColor" strokeWidth="1.6" fill="none" />
+      <path d="M5 7v10c0 1.9 3.1 3.5 7 3.5s7-1.6 7-3.5V7" stroke="currentColor" strokeWidth="1.6" fill="none" />
+    </svg>
+  )
+}
+function BoltIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
+      <path d="M13 2L3 14h7l-1 8 10-12h-7l1-8z" fill="currentColor" />
+    </svg>
+  )
+}
+function ShieldIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
+      <path d="M12 3l7 3v6c0 4-2.7 7.5-7 9-4.3-1.5-7-5-7-9V6l7-3z" stroke="currentColor" strokeWidth="1.6" fill="none" />
+      <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+function Feature({
+  title,
+  body,
+  icon,
+}: {
+  title: string
+  body: string
+  icon: React.ReactNode
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-black/30 p-3">
+      <div className="mt-1 text-pink-300">{icon}</div>
+      <div>
+        <div className="text-sm font-medium">{title}</div>
+        <div className="text-xs opacity-75">{body}</div>
+      </div>
     </div>
   )
 }
