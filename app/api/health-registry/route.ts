@@ -16,6 +16,7 @@ export async function GET() {
       abi: ProfileRegistry as any,
       address: REGISTRY,
       functionName: "profileCount",
+      args: [], // ✅ required even for no-arg functions
     })) as bigint
 
     return NextResponse.json({
@@ -24,10 +25,7 @@ export async function GET() {
     })
   } catch (e: any) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: e?.message || "health check failed",
-      },
+      { ok: false, error: e?.message || "health check failed" },
       { status: 500 }
     )
   }
