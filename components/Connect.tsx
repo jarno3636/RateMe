@@ -1,7 +1,15 @@
+// /components/Connect.tsx
 "use client"
 
 import * as React from "react"
-import { useAccount, useConnect, useDisconnect, useSwitchChain, useChainId, useConnectors } from "wagmi"
+import {
+  useAccount,
+  useConnect,
+  useDisconnect,
+  useSwitchChain,
+  useChainId,
+  useConnectors,
+} from "wagmi"
 
 const BASE_CHAIN_ID = 8453
 
@@ -34,9 +42,18 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
   const isWrongChain = isConnected && chainId !== BASE_CHAIN_ID
   const baseScanUrl = address ? `https://basescan.org/address/${address}` : "#"
 
+  // Show only distinct, ready connectors; hide Safe in navbar menu
+  const ready = connectors
+    .filter((c) => c.ready)
+    .filter((c) => c.id !== "safe")
+    // de-dupe multiple walletconnect items some providers expose
+    .filter((c, i, arr) => arr.findIndex((x) => x.id === c.id) === i)
+
+  const hasAny = ready.length > 0
+
   const connectWallet = async (id: string) => {
     try {
-      const connector = connectors.find((c) => c.id === id) ?? connectors[0]
+      const connector = ready.find((c) => c.id === id) ?? ready[0]
       if (!connector) return
       await connectAsync({ connector })
       setOpen(false)
@@ -89,28 +106,37 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
           role="menu"
         >
           {!isConnected ? (
-            <div className="space-y-1">
-              {connectors.map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => connectWallet(c.id)}
-                  disabled={isConnecting || !c.ready}
-                  className="flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 hover:bg-white/10 disabled:opacity-50"
+            hasAny ? (
+              <div className="space-y-1">
+                {ready.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => connectWallet(c.id)}
+                    disabled={isConnecting}
+                    className="flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 hover:bg-white/10 disabled:opacity-50"
+                  >
+                    <span className="truncate">
+                      {c.name === "Injected" ? "Browser Wallet" : c.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <a
+                  className="block rounded-xl px-2.5 py-1.5 hover:bg-white/10"
+                  href="https://metamask.io/download/"
+                  target="_blank"
+                  rel="noreferrer"
                 >
-                  <span className="truncate">
-                    {c.name === "Injected" ? "Browser Wallet" : c.name}
-                  </span>
-                  {!c.ready ? (
-                    <span className="ml-2 shrink-0 text-[10px] opacity-60">Unavailable</span>
-                  ) : null}
-                </button>
-              ))}
-              {connectors.length === 0 && (
-                <div className="rounded-xl px-2.5 py-1.5 opacity-70">
-                  No wallets detected.
-                </div>
-              )}
-            </div>
+                  Install MetaMask
+                </a>
+                {/* WalletConnect only appears if configured in providers */}
+                <span className="block rounded-xl px-2.5 py-1.5 opacity-60">
+                  WalletConnect unavailable
+                </span>
+              </div>
+            )
           ) : (
             <div className="space-y-1">
               <div className="rounded-xl border border-white/10 px-2.5 py-1.5">
