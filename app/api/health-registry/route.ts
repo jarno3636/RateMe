@@ -5,11 +5,13 @@ import ProfileRegistry from "@/abi/ProfileRegistry.json"
 
 const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
 
+export const dynamic = "force-dynamic"
+
 export async function GET() {
   try {
     if (!REGISTRY) throw new Error("Missing NEXT_PUBLIC_PROFILE_REGISTRY")
 
-    // simple call: profileCount()
+    // Simple on-chain read to verify connectivity
     const count = (await publicClient.readContract({
       abi: ProfileRegistry as any,
       address: REGISTRY,
@@ -22,4 +24,11 @@ export async function GET() {
     })
   } catch (e: any) {
     return NextResponse.json(
-      { ok
+      {
+        ok: false,
+        error: e?.message || "health check failed",
+      },
+      { status: 500 }
+    )
+  }
+}
