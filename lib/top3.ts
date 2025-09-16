@@ -40,30 +40,33 @@ export async function computeTop3(maxScan = 50): Promise<number[]> {
     const owners = (res?.[1] ?? []) as `0x${string}`[]
     if (!ids.length || !owners.length) return []
 
-    // Defensive: align lengths
+    // Align lengths just in case
     const n = Math.min(ids.length, owners.length)
     const idsN = ids.slice(0, n)
     const ownersN = owners.slice(0, n)
 
-    // Build calls (lightly typed to avoid deep generic expansion)
-    const calls: any[] = ownersN.map((owner) => ({
-      address: RATINGS,
-      abi: Ratings as any,
-      functionName: "getAverage",
-      args: [owner],
+    // Parallel on-chain reads without multicall (avoids TS deep instantiation)
+    const avgs = await Promise.all(
+      ownersN.map(async (owner) => {
+        try {
+          const avg = (await publicClient.readContract({
+            address: RATINGS,
+            abi: Ratings as any,
+            functionName: "getAverage",
+            args: [owner],
+          })) as bigint
+          return Number(avg)
+        } catch {
+          return 0
+        }
+      })
+    )
+
+    const entries = idsN.map((id, i) => ({
+      id: Number(id),
+      owner: ownersN[i],
+      avgX100: avgs[i] ?? 0,
     }))
-
-    // Allow failure; coarse result typing to keep TS happy on Vercel
-    const results = (await publicClient.multicall({
-      contracts: calls as any,
-      allowFailure: true,
-    })) as Array<{ status: "success" | "failure"; result?: unknown }>
-
-    const entries = idsN.map((id, i) => {
-      const r = results[i]
-      const avg = r && r.status === "success" ? (r.result as bigint) : 0n
-      return { id: Number(id), owner: ownersN[i], avgX100: Number(avg) }
-    })
 
     return entries
       .filter((e) => Number.isFinite(e.avgX100) && e.avgX100 > 0)
