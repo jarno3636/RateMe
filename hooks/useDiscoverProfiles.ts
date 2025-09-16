@@ -36,14 +36,20 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
 
   useEffect(() => {
     let ignore = false
+    setIsLoading(true) // reset on new params
+
     const run = async () => {
       setIsFetching(true)
       try {
-        const r = await fetch(`/api/discover?cursor=${cursor.toString()}&size=${size.toString()}`, {
-          cache: "no-store",
-        })
+        const r = await fetch(
+          `/api/discover?cursor=${cursor.toString()}&size=${size.toString()}`,
+          { cache: "no-store" },
+        )
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
-        const j = (await r.json()) as { data: ApiTuple }
+
+        const j = (await r.json()) as { data?: ApiTuple }
+        if (!j?.data) throw new Error("Malformed discover payload")
+
         const d = j.data
         const decoded: DiscoverTuple = [
           d[0].map((x) => BigInt(x)),
@@ -56,10 +62,16 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
           d[7].map((x) => BigInt(x)),
           BigInt(d[8]),
         ]
-        if (!ignore) setData(decoded)
-        setError(null)
+
+        if (!ignore) {
+          setData(decoded)
+          setError(null)
+        }
       } catch (e: any) {
-        if (!ignore) setError(e)
+        if (!ignore) {
+          setError(e instanceof Error ? e : new Error(String(e)))
+          setData(undefined)
+        }
       } finally {
         if (!ignore) {
           setIsLoading(false)
@@ -67,8 +79,11 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
         }
       }
     }
+
     run()
-    return () => { ignore = true }
+    return () => {
+      ignore = true
+    }
   }, [cursor, size])
 
   return { data, isLoading, isFetching, error }
