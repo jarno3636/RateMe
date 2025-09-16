@@ -3,14 +3,19 @@ import { publicClient } from "./chain"
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
 import Ratings from "@/abi/Ratings"
 
-const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
-const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
+const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
+const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}` | undefined
 
 /**
  * Fetch first N profiles (flat) then compute rating averages for each owner.
  * Returns up to 3 profile IDs with highest avg. Safe: never throws, returns [] on error.
  */
 export async function computeTop3(maxScan = 50): Promise<number[]> {
+  if (!PROFILE_REGISTRY || !RATINGS) {
+    console.error("computeTop3: missing env (PROFILE_REGISTRY or RATINGS)")
+    return []
+  }
+
   try {
     // listProfilesFlat(uint256 cursor, uint256 size)
     // [outIds, owners, handles, displayNames, avatarURIs, bios, fids, createdAts, nextCursor]
@@ -35,31 +40,35 @@ export async function computeTop3(maxScan = 50): Promise<number[]> {
     const owners = (res?.[1] ?? []) as `0x${string}`[]
     if (!ids.length || !owners.length) return []
 
-    // Compute averages (x100) per owner
-    const entries = await Promise.all(
-      ids.map(async (id, i) => {
-        const owner = owners[i]
-        if (!owner) return { id: Number(id), owner: "0x0" as `0x${string}`, avgX100: 0 }
-        let avg: bigint = 0n
-        try {
-          avg = (await publicClient.readContract({
-            address: RATINGS,
-            abi: Ratings as any,
-            functionName: "getAverage",
-            args: [owner],
-          })) as bigint
-        } catch {
-          // unrated or ABI mismatch — treat as 0
-        }
-        return { id: Number(id), owner, avgX100: Number(avg) }
-      })
-    )
+    // Defensive: align lengths
+    const n = Math.min(ids.length, owners.length)
+    const idsN = ids.slice(0, n)
+    const ownersN = owners.slice(0, n)
+
+    // Batch all getAverage(owner) calls
+    const calls = ownersN.map((owner) => ({
+      address: RATINGS,
+      abi: Ratings as any,
+      functionName: "getAverage",
+      args: [owner],
+    }))
+
+    const results = await publicClient.multicall({
+      contracts: calls,
+      allowFailure: true,
+    })
+
+    const entries = idsN.map((id, i) => {
+      const r = results[i]
+      const avg = r && r.status === "success" ? (r.result as bigint) : 0n
+      return { id: Number(id), owner: ownersN[i], avgX100: Number(avg) }
+    })
 
     return entries
       .filter((e) => Number.isFinite(e.avgX100) && e.avgX100 > 0)
       .sort((a, b) => b.avgX100 - a.avgX100)
       .slice(0, 3)
-      .map((r) => r.id)
+      .map((e) => e.id)
   } catch (err) {
     console.error("computeTop3 failed:", err)
     return []
