@@ -12,141 +12,191 @@ import ProfileRegistry from "@/abi/ProfileRegistry.json"
 
 export const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
 
+type WatchOpts = { watch?: boolean }
+const REFRESH_MS = 5_000
+
 /* ----------------------------- READ HOOKS ----------------------------- */
 
 /** Paginated flat listing: ids, owners, handles, names, avatars, bios, fids, createdAts, nextCursor */
-export function useListProfiles(cursor: bigint = 0n, size: bigint = 12n) {
+export function useListProfiles(cursor: bigint = 0n, size: bigint = 12n, opts?: WatchOpts) {
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "listProfilesFlat",
     args: [cursor, size],
+    query: {
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Single profile by id -> (owner_, handle_, displayName_, avatarURI_, bio_, fid_, createdAt_) */
-export function useGetProfile(id?: bigint) {
+export function useGetProfile(id?: bigint, opts?: WatchOpts) {
+  const enabled = id !== undefined
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "getProfile",
-    args: id !== undefined ? [id] : undefined,
-    query: { enabled: id !== undefined },
+    args: enabled ? [id as bigint] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Batch flat fetch by ids -> outIds, owners, handles, displayNames, avatarURIs, bios, fids, createdAts */
-export function useGetProfilesFlat(ids?: bigint[]) {
+export function useGetProfilesFlat(ids?: bigint[], opts?: WatchOpts) {
+  const enabled = !!ids && ids.length > 0
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "getProfilesFlat",
-    args: ids && ids.length ? [ids] : undefined,
-    query: { enabled: !!ids && ids.length > 0 },
+    args: enabled ? [ids as bigint[]] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Resolve id from handle */
-export function useGetIdByHandle(handle?: string) {
+export function useGetIdByHandle(handle?: string, opts?: WatchOpts) {
+  const enabled = !!handle
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "getIdByHandle",
-    args: handle ? [handle] : undefined,
-    query: { enabled: !!handle },
+    args: enabled ? [handle as string] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Resolve full profile by handle (exists, id, owner_, handle_, displayName_, avatarURI_, bio_, fid_, createdAt_) */
-export function useGetProfileByHandle(handle?: string) {
+export function useGetProfileByHandle(handle?: string, opts?: WatchOpts) {
+  const enabled = !!handle
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "getProfileByHandle",
-    args: handle ? [handle] : undefined,
-    query: { enabled: !!handle },
+    args: enabled ? [handle as string] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** All profile IDs owned by an address */
-export function useProfilesByOwner(owner?: `0x${string}`) {
+export function useProfilesByOwner(owner?: `0x${string}`, opts?: WatchOpts) {
+  const enabled = !!owner
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "getProfilesByOwner",
-    args: owner ? [owner] : undefined,
-    query: { enabled: !!owner },
+    args: enabled ? [owner as `0x${string}`] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Can a handle be registered? -> (ok, reason) */
-export function useCanRegister(handle?: string) {
+export function useCanRegister(handle?: string, opts?: WatchOpts) {
+  const enabled = !!handle
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "canRegister",
-    args: handle ? [handle] : undefined,
-    query: { enabled: !!handle },
+    args: enabled ? [handle as string] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Is a handle taken? -> bool */
-export function useHandleTaken(handle?: string) {
+export function useHandleTaken(handle?: string, opts?: WatchOpts) {
+  const enabled = !!handle
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "handleTaken",
-    args: handle ? [handle] : undefined,
-    query: { enabled: !!handle },
+    args: enabled ? [handle as string] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Fee info -> (treasury, feeUnits) */
-export function useFeeInfo() {
+export function useFeeInfo(opts?: WatchOpts) {
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "feeInfo",
+    query: {
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Flat fee units only (e.g., 500_000 for $0.50 with 6dp USDC) */
-export function useFeeUnits() {
+export function useFeeUnits(opts?: WatchOpts) {
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "feeUnits",
+    query: {
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Next profile id (monotonic) */
-export function useNextId() {
+export function useNextId(opts?: WatchOpts) {
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "nextId",
+    query: {
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Total profiles created */
-export function useProfileCount() {
+export function useProfileCount(opts?: WatchOpts) {
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "profileCount",
+    query: {
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
 /** Preview create for connected user -> (balance, allowance_, fee, okBalance, okAllowance) */
-export function usePreviewCreate(user?: `0x${string}`) {
+export function usePreviewCreate(user?: `0x${string}`, opts?: WatchOpts) {
   const { address } = useAccount()
-  const who = user ?? (address as `0x${string}` | undefined)
+  const who = (user ?? address) as `0x${string}` | undefined
+  const enabled = !!who
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "previewCreate",
-    args: who ? [who] : undefined,
-    query: { enabled: !!who },
+    args: enabled ? [who as `0x${string}`] : undefined,
+    query: {
+      enabled,
+      refetchInterval: opts?.watch ? REFRESH_MS : false,
+    },
   })
 }
 
