@@ -45,18 +45,19 @@ export async function computeTop3(maxScan = 50): Promise<number[]> {
     const idsN = ids.slice(0, n)
     const ownersN = owners.slice(0, n)
 
-    // Batch all getAverage(owner) calls
-    const calls = ownersN.map((owner) => ({
+    // Build calls (lightly typed to avoid deep generic expansion)
+    const calls: any[] = ownersN.map((owner) => ({
       address: RATINGS,
       abi: Ratings as any,
       functionName: "getAverage",
       args: [owner],
     }))
 
-    const results = await publicClient.multicall({
-      contracts: calls,
+    // Allow failure; coarse result typing to keep TS happy on Vercel
+    const results = (await publicClient.multicall({
+      contracts: calls as any,
       allowFailure: true,
-    })
+    })) as Array<{ status: "success" | "failure"; result?: unknown }>
 
     const entries = idsN.map((id, i) => {
       const r = results[i]
