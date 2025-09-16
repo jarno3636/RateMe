@@ -7,6 +7,7 @@ import {
   useReadContract,
   useWriteContract,
 } from "wagmi"
+import { base } from "viem/chains"
 import RatingsAbi from "@/abi/Ratings"
 
 const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
@@ -70,7 +71,8 @@ export function useRate() {
       address: RATINGS,
       functionName: "rate",
       args: [ratee, score, comment],
-      // account: address, // optional; wagmi will infer from connector
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
@@ -92,7 +94,8 @@ export function useUpdateRating() {
       address: RATINGS,
       functionName: "updateRating",
       args: [ratee, newScore, newComment],
-      // account: address, // optional; wagmi will infer from connector
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
