@@ -24,13 +24,17 @@ export default function BecomeCreatorPage() {
   // form state
   const [handle, setHandle] = useState("")
   const [displayName, setDisplayName] = useState("")
-  const [avatarURI, setAvatarURI] = useState("")        // final stored URL (ipfs/http)
-  const [avatarLocal, setAvatarLocal] = useState<string>("") // local preview (object URL)
+  const [avatarURI, setAvatarURI] = useState("")            // final stored URL
+  const [avatarLocal, setAvatarLocal] = useState<string>("") // local preview
   const [bio, setBio] = useState("")
   const [fid, setFid] = useState("")
   const [uploading, setUploading] = useState(false)
 
-  // normalize handle (on-chain uniqueness = handle)
+  // KV handle check state
+  const [kvOk, setKvOk] = useState<boolean | null>(null)
+  const [kvReason, setKvReason] = useState<string>("")
+
+  // normalize handle (on-chain uniqueness)
   const normHandle = useMemo(
     () => handle.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
     [handle]
@@ -38,7 +42,7 @@ export default function BecomeCreatorPage() {
 
   /* ---------- READS ---------- */
 
-  // canRegister(handle) -> (ok, reason)  — this enforces uniqueness on-chain
+  // On-chain: canRegister(handle) -> (ok, reason)
   const { data: canRegRaw, refetch: refetchCanReg, isFetching: checkingHandle } = useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
@@ -84,22 +88,43 @@ export default function BecomeCreatorPage() {
     }
   }
 
-  // ---------- Avatar upload (client -> /api/upload-avatar -> Blob) ----------
+  // ---------- KV handle check (debounced) ----------
+  useEffect(() => {
+    let cancelled = false
+    setKvOk(null)
+    setKvReason("")
+    const run = async () => {
+      if (!normHandle) return
+      try {
+        const r = await fetch(`/api/check-handle?handle=${encodeURIComponent(normHandle)}`)
+        const j = await r.json()
+        if (!cancelled) {
+          setKvOk(Boolean(j.ok))
+          setKvReason(String(j.reason ?? ""))
+        }
+      } catch {
+        if (!cancelled) {
+          // Non-fatal: if KV fails, just fall back to on-chain check UI
+          setKvOk(null)
+          setKvReason("")
+        }
+      }
+    }
+    const t = setTimeout(run, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [normHandle])
+
+  // ---------- Avatar upload ----------
   const onPickAvatar: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // enforce: single image file, ≤ 1MB
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please choose an image.")
-      return
-    }
-    if (file.size > MAX_AVATAR_BYTES) {
-      toast.error("Image must be ≤ 1MB.")
-      return
-    }
+    if (!file.type.startsWith("image/")) return toast.error("Please choose an image.")
+    if (file.size > MAX_AVATAR_BYTES) return toast.error("Image must be ≤ 1MB.")
 
-    // show local preview
     const previewUrl = URL.createObjectURL(file)
     setAvatarLocal(previewUrl)
 
@@ -107,18 +132,14 @@ export default function BecomeCreatorPage() {
       setUploading(true)
       const fd = new FormData()
       fd.append("file", file)
-      const r = await fetch("/api/upload-avatar", {
-        method: "POST",
-        body: fd,
-      })
+      const r = await fetch("/api/upload-avatar", { method: "POST", body: fd })
       if (!r.ok) throw new Error(await r.text())
-      const j = await r.json() as { url?: string }
+      const j = (await r.json()) as { url?: string }
       if (!j.url) throw new Error("No URL returned")
-      setAvatarURI(j.url)      // final URL to store on-chain
+      setAvatarURI(j.url)
       toast.success("Avatar uploaded")
     } catch (err: any) {
       toast.error(err?.message || "Upload failed")
-      // clean preview on failure
       setAvatarLocal("")
       setAvatarURI("")
     } finally {
@@ -129,6 +150,8 @@ export default function BecomeCreatorPage() {
   const createProfile = async () => {
     if (!isConnected || !address) return toast.error("Connect your wallet first.")
     if (!normHandle) return toast.error("Enter a handle.")
+    // Both checks: KV (fast) + on-chain (source of truth)
+    if (kvOk === false) return toast.error(kvReason || "Handle unavailable.")
     if (!canRegOk) return toast.error(canRegReason || "Handle unavailable.")
     if (feeUnits === undefined) return toast.error("Fee not available yet.")
     if (!okBalance) return toast.error("Insufficient USDC for the fee.")
@@ -152,7 +175,7 @@ export default function BecomeCreatorPage() {
       toast.dismiss(t)
       toast.success("Profile created!")
 
-      // Resolve and route
+      // Resolve new ID from chain
       let newId: bigint | undefined
       try {
         newId = (await publicClient.readContract({
@@ -163,6 +186,24 @@ export default function BecomeCreatorPage() {
         })) as bigint
       } catch { /* ignore */ }
 
+      // Index in KV (non-blocking)
+      try {
+        if (newId && newId > 0n) {
+          await fetch("/api/kv-index", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              id: newId.toString(),
+              handle: normHandle,
+              owner: address,
+              name: displayName || normHandle,
+              avatar: avatarURI || "",
+              bio,
+            }),
+          })
+        }
+      } catch { /* non-fatal */ }
+
       if (newId && newId > 0n) router.push(`/creator/${newId.toString()}/dashboard`)
       else router.push("/discover")
     } catch (e: any) {
@@ -170,7 +211,7 @@ export default function BecomeCreatorPage() {
     }
   }
 
-  // re-check when user edits handle (debounce)
+  // On-chain handle re-check (debounced)
   useEffect(() => {
     const t = setTimeout(() => { if (normHandle) refetchCanReg() }, 300)
     return () => clearTimeout(t)
@@ -209,7 +250,10 @@ export default function BecomeCreatorPage() {
             </div>
             {normHandle && (
               <div className="mt-1 text-xs">
-                {checkingHandle ? (
+                {/* KV quick verdict, then on-chain result */}
+                {kvOk === false ? (
+                  <span className="text-red-300">{kvReason || "Unavailable"}</span>
+                ) : checkingHandle ? (
                   <span className="opacity-60">Checking…</span>
                 ) : canRegOk ? (
                   <span className="text-green-300">Available</span>
@@ -234,20 +278,14 @@ export default function BecomeCreatorPage() {
           <label className="block">
             <div className="mb-1 text-sm opacity-70">Avatar</div>
             <div className="flex items-center gap-3">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={onPickAvatar}
-              />
+              <input type="file" accept="image/*" onChange={onPickAvatar} />
               {avatarLocal && (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={avatarLocal} alt="" className="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
               )}
             </div>
             <div className="mt-1 text-xs opacity-60">One image, ≤ 1MB. We’ll store the URL on-chain.</div>
-            {avatarURI && (
-              <div className="mt-1 text-xs break-all opacity-70">Stored URL: {avatarURI}</div>
-            )}
+            {avatarURI && <div className="mt-1 text-xs break-all opacity-70">Stored URL: {avatarURI}</div>}
           </label>
 
           <label className="block">
@@ -297,6 +335,7 @@ export default function BecomeCreatorPage() {
                   uploading ||
                   !isConnected ||
                   !normHandle ||
+                  (kvOk === false) ||
                   !canRegOk ||
                   !feeUnits ||
                   !okBalance ||
