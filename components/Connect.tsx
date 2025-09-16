@@ -1,4 +1,3 @@
-// /components/Connect.tsx
 "use client"
 
 import * as React from "react"
@@ -12,7 +11,7 @@ function truncate(addr?: string, left = 4, right = 4) {
 }
 
 export default function Connect({ compact = false }: { compact?: boolean }) {
-  const { address, status, isConnected } = useAccount()
+  const { address, isConnected } = useAccount()
   const chainId = useChainId()
   const { disconnect } = useDisconnect()
   const { connectAsync, isPending: isConnecting } = useConnect()
@@ -22,7 +21,6 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = React.useState(false)
   const menuRef = React.useRef<HTMLDivElement | null>(null)
 
-  // Close when clicking outside
   React.useEffect(() => {
     const onClick = (e: MouseEvent) => {
       if (!menuRef.current) return
@@ -34,7 +32,6 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
 
   const label = isConnected ? truncate(address) : "Connect"
   const isWrongChain = isConnected && chainId !== BASE_CHAIN_ID
-
   const baseScanUrl = address ? `https://basescan.org/address/${address}` : "#"
 
   const connectWallet = async (id: string) => {
@@ -70,9 +67,9 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
       <button
         onClick={() => setOpen((v) => !v)}
         className={[
-          "group rounded-full px-4 py-2 text-sm transition",
+          "group rounded-full px-3 py-1.5 text-xs transition",
           "border border-pink-500/50 hover:bg-pink-500/10",
-          "max-w-[160px] truncate",
+          "max-w-[140px] truncate",
         ].join(" ")}
         title={isConnected ? address : "Connect wallet"}
       >
@@ -88,7 +85,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
 
       {open && (
         <div
-          className="absolute right-0 z-50 mt-2 w-64 rounded-2xl border border-white/10 bg-black/90 p-2 shadow-xl backdrop-blur"
+          className="absolute right-0 z-50 mt-2 w-56 max-h-72 overflow-auto rounded-2xl border border-white/10 bg-black/95 p-1.5 text-xs shadow-xl backdrop-blur"
           role="menu"
         >
           {!isConnected ? (
@@ -98,28 +95,27 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
                   key={c.id}
                   onClick={() => connectWallet(c.id)}
                   disabled={isConnecting || !c.ready}
-                  className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-sm hover:bg-white/10 disabled:opacity-50"
+                  className="flex w-full items-center justify-between rounded-xl px-2.5 py-1.5 hover:bg-white/10 disabled:opacity-50"
                 >
                   <span className="truncate">
                     {c.name === "Injected" ? "Browser Wallet" : c.name}
                   </span>
                   {!c.ready ? (
-                    <span className="text-xs opacity-60">Unavailable</span>
+                    <span className="ml-2 shrink-0 text-[10px] opacity-60">Unavailable</span>
                   ) : null}
                 </button>
               ))}
               {connectors.length === 0 && (
-                <div className="rounded-xl px-3 py-2 text-sm opacity-70">
-                  No wallets detected. Install MetaMask or use a wallet app.
+                <div className="rounded-xl px-2.5 py-1.5 opacity-70">
+                  No wallets detected.
                 </div>
               )}
             </div>
           ) : (
             <div className="space-y-1">
-              {/* Address */}
-              <div className="rounded-xl border border-white/10 px-3 py-2">
-                <div className="truncate text-sm font-medium">{address}</div>
-                <div className="text-xs opacity-60">
+              <div className="rounded-xl border border-white/10 px-2.5 py-1.5">
+                <div className="truncate font-medium">{address}</div>
+                <div className="mt-0.5 text-[11px] opacity-60">
                   {isWrongChain ? "Wrong network" : "Connected"}
                 </div>
               </div>
@@ -128,7 +124,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
                 <button
                   onClick={switchToBase}
                   disabled={isSwitching}
-                  className="w-full rounded-xl border border-pink-500/40 px-3 py-2 text-left text-sm hover:bg-pink-500/10 disabled:opacity-50"
+                  className="w-full rounded-xl border border-pink-500/40 px-2.5 py-1.5 text-left hover:bg-pink-500/10 disabled:opacity-50"
                 >
                   {isSwitching ? "Switching…" : "Switch to Base"}
                 </button>
@@ -136,7 +132,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
 
               <button
                 onClick={copyAddr}
-                className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-white/10"
+                className="w-full rounded-xl px-2.5 py-1.5 text-left hover:bg-white/10"
               >
                 Copy address
               </button>
@@ -145,7 +141,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
                 href={baseScanUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="block w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-white/10"
+                className="block w-full rounded-xl px-2.5 py-1.5 text-left hover:bg-white/10"
               >
                 View on BaseScan
               </a>
@@ -155,7 +151,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
                   disconnect()
                   setOpen(false)
                 }}
-                className="w-full rounded-xl border border-white/10 px-3 py-2 text-left text-sm text-red-300 hover:bg-red-500/10"
+                className="w-full rounded-xl border border-white/10 px-2.5 py-1.5 text-left text-red-300 hover:bg-red-500/10"
               >
                 Disconnect
               </button>
