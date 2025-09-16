@@ -1,4 +1,3 @@
-// /components/Nav.tsx
 "use client"
 
 import Link from "next/link"
@@ -18,7 +17,6 @@ function NavLink({
 }) {
   const pathname = usePathname()
   const isActive = pathname === href
-
   return (
     <Link
       href={href}
@@ -76,22 +74,41 @@ export default function Nav() {
         </div>
       </div>
 
-      {/* Mobile menu panel */}
+      {/* Mobile menu panel (compact, tidy) */}
       {open && (
         <div className="mx-auto max-w-5xl px-4 pb-3 md:hidden">
-          <div className="mt-2 space-y-2 rounded-2xl border border-white/10 bg-black/70 p-3">
-            <NavLink href="/" onClick={() => setOpen(false)}>
-              Home
-            </NavLink>
-            <NavLink href="/discover" onClick={() => setOpen(false)}>
-              Discover
-            </NavLink>
-            <NavLink href="/creator" onClick={() => setOpen(false)}>
-              Become a creator
-            </NavLink>
-            <NavLink href="/me" onClick={() => setOpen(false)}>
-              My profile
-            </NavLink>
+          <div className="mt-2 rounded-2xl border border-white/10 bg-black/70 p-3">
+            {/* 2-column compact pill grid */}
+            <div className="grid grid-cols-2 gap-2">
+              <Link
+                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
+                href="/"
+                onClick={() => setOpen(false)}
+              >
+                Home
+              </Link>
+              <Link
+                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
+                href="/discover"
+                onClick={() => setOpen(false)}
+              >
+                Discover
+              </Link>
+              <Link
+                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
+                href="/creator"
+                onClick={() => setOpen(false)}
+              >
+                Become a creator
+              </Link>
+              <Link
+                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
+                href="/me"
+                onClick={() => setOpen(false)}
+              >
+                My profile
+              </Link>
+            </div>
           </div>
         </div>
       )}
