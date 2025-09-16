@@ -17,8 +17,10 @@ export function useCreatorPlanIds(creator?: `0x${string}`, opt?: WatchOpt) {
     address: HUB,
     functionName: "getCreatorPlanIds",
     args: creator ? [creator] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && !!creator },
+    query: {
+      enabled: !!HUB && !!creator,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -28,8 +30,10 @@ export function useCreatorPostIds(creator?: `0x${string}`, opt?: WatchOpt) {
     address: HUB,
     functionName: "getCreatorPostIds",
     args: creator ? [creator] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && !!creator },
+    query: {
+      enabled: !!HUB && !!creator,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -39,8 +43,10 @@ export function usePlan(id?: bigint, opt?: WatchOpt) {
     address: HUB,
     functionName: "plans",
     args: id !== undefined ? [id] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && id !== undefined },
+    query: {
+      enabled: !!HUB && id !== undefined,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -50,8 +56,10 @@ export function usePost(id?: bigint, opt?: WatchOpt) {
     address: HUB,
     functionName: "posts",
     args: id !== undefined ? [id] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && id !== undefined },
+    query: {
+      enabled: !!HUB && id !== undefined,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -61,8 +69,10 @@ export function useHasPostAccess(user?: `0x${string}`, postId?: bigint, opt?: Wa
     address: HUB,
     functionName: "hasPostAccess",
     args: user && postId !== undefined ? [user, postId] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && !!user && postId !== undefined },
+    query: {
+      enabled: !!HUB && !!user && postId !== undefined,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -72,8 +82,10 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`,
     address: HUB,
     functionName: "isActive",
     args: subscriber && creator ? [subscriber, creator] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!HUB && !!subscriber && !!creator },
+    query: {
+      enabled: !!HUB && !!subscriber && !!creator,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
