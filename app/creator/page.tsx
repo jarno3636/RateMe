@@ -12,8 +12,8 @@ import { publicClient } from "@/lib/chain"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
 const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
+const MAX_AVATAR_BYTES = 1_000_000 // 1MB
 
-// helper: 6-decimals → pretty string
 const fromUnits6 = (v?: bigint) => (Number(v ?? 0n) / 1e6).toFixed(2)
 
 export default function BecomeCreatorPage() {
@@ -24,11 +24,13 @@ export default function BecomeCreatorPage() {
   // form state
   const [handle, setHandle] = useState("")
   const [displayName, setDisplayName] = useState("")
-  const [avatarURI, setAvatarURI] = useState("")
+  const [avatarURI, setAvatarURI] = useState("")        // final stored URL (ipfs/http)
+  const [avatarLocal, setAvatarLocal] = useState<string>("") // local preview (object URL)
   const [bio, setBio] = useState("")
   const [fid, setFid] = useState("")
+  const [uploading, setUploading] = useState(false)
 
-  // normalize handle
+  // normalize handle (on-chain uniqueness = handle)
   const normHandle = useMemo(
     () => handle.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
     [handle]
@@ -36,7 +38,7 @@ export default function BecomeCreatorPage() {
 
   /* ---------- READS ---------- */
 
-  // canRegister(handle) -> (ok, reason)
+  // canRegister(handle) -> (ok, reason)  — this enforces uniqueness on-chain
   const { data: canRegRaw, refetch: refetchCanReg, isFetching: checkingHandle } = useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
@@ -82,6 +84,48 @@ export default function BecomeCreatorPage() {
     }
   }
 
+  // ---------- Avatar upload (client -> /api/upload-avatar -> Blob) ----------
+  const onPickAvatar: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // enforce: single image file, ≤ 1MB
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please choose an image.")
+      return
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      toast.error("Image must be ≤ 1MB.")
+      return
+    }
+
+    // show local preview
+    const previewUrl = URL.createObjectURL(file)
+    setAvatarLocal(previewUrl)
+
+    try {
+      setUploading(true)
+      const fd = new FormData()
+      fd.append("file", file)
+      const r = await fetch("/api/upload-avatar", {
+        method: "POST",
+        body: fd,
+      })
+      if (!r.ok) throw new Error(await r.text())
+      const j = await r.json() as { url?: string }
+      if (!j.url) throw new Error("No URL returned")
+      setAvatarURI(j.url)      // final URL to store on-chain
+      toast.success("Avatar uploaded")
+    } catch (err: any) {
+      toast.error(err?.message || "Upload failed")
+      // clean preview on failure
+      setAvatarLocal("")
+      setAvatarURI("")
+    } finally {
+      setUploading(false)
+    }
+  }
+
   const createProfile = async () => {
     if (!isConnected || !address) return toast.error("Connect your wallet first.")
     if (!normHandle) return toast.error("Enter a handle.")
@@ -89,6 +133,7 @@ export default function BecomeCreatorPage() {
     if (feeUnits === undefined) return toast.error("Fee not available yet.")
     if (!okBalance) return toast.error("Insufficient USDC for the fee.")
     if (needsApproval) return toast.error("Please approve USDC first.")
+    if (uploading) return toast.error("Please wait for avatar upload to finish.")
 
     try {
       const fidBig = fid ? BigInt(fid) : 0n
@@ -99,15 +144,15 @@ export default function BecomeCreatorPage() {
         address: REGISTRY,
         functionName: "createProfile",
         args: [normHandle, displayName || normHandle, avatarURI || "", bio || "", fidBig],
-        account: address,                   // ✅ satisfy wagmi v2 types
-        chainId: currentChainId || base.id, // ✅ hint chain (Base as fallback)
+        account: address,
+        chainId: currentChainId || base.id,
       } as any)
 
       toast.loading("Waiting for confirmation…", { id: t })
       toast.dismiss(t)
       toast.success("Profile created!")
 
-      // Resolve the new ID and redirect
+      // Resolve and route
       let newId: bigint | undefined
       try {
         newId = (await publicClient.readContract({
@@ -125,7 +170,7 @@ export default function BecomeCreatorPage() {
     }
   }
 
-  // re-check when user edits handle
+  // re-check when user edits handle (debounce)
   useEffect(() => {
     const t = setTimeout(() => { if (normHandle) refetchCanReg() }, 300)
     return () => clearTimeout(t)
@@ -152,7 +197,7 @@ export default function BecomeCreatorPage() {
       <section className="card space-y-4">
         <div className="grid gap-4 md:grid-cols-2">
           <label className="block">
-            <div className="mb-1 text-sm opacity-70">Handle</div>
+            <div className="mb-1 text-sm opacity-70">Handle (unique)</div>
             <div className="flex items-center gap-2">
               <span className="opacity-60">@</span>
               <input
@@ -183,16 +228,26 @@ export default function BecomeCreatorPage() {
               placeholder="OnlyStars Creator"
               className="w-full"
             />
+            <div className="mt-1 text-xs opacity-60">Display names can duplicate; the handle is unique.</div>
           </label>
 
           <label className="block">
-            <div className="mb-1 text-sm opacity-70">Avatar URI</div>
-            <input
-              value={avatarURI}
-              onChange={(e) => setAvatarURI(e.target.value)}
-              placeholder="ipfs://... or https://..."
-              className="w-full"
-            />
+            <div className="mb-1 text-sm opacity-70">Avatar</div>
+            <div className="flex items-center gap-3">
+              <input
+                type="file"
+                accept="image/*"
+                onChange={onPickAvatar}
+              />
+              {avatarLocal && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={avatarLocal} alt="" className="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
+              )}
+            </div>
+            <div className="mt-1 text-xs opacity-60">One image, ≤ 1MB. We’ll store the URL on-chain.</div>
+            {avatarURI && (
+              <div className="mt-1 text-xs break-all opacity-70">Stored URL: {avatarURI}</div>
+            )}
           </label>
 
           <label className="block">
@@ -239,6 +294,7 @@ export default function BecomeCreatorPage() {
                 onClick={createProfile}
                 disabled={
                   creating ||
+                  uploading ||
                   !isConnected ||
                   !normHandle ||
                   !canRegOk ||
@@ -248,7 +304,7 @@ export default function BecomeCreatorPage() {
                 }
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
               >
-                {creating ? "Creating…" : "Create profile"}
+                {creating ? "Creating…" : (uploading ? "Uploading…" : "Create profile")}
               </button>
             </div>
           </div>
@@ -259,8 +315,9 @@ export default function BecomeCreatorPage() {
       <section className="card text-sm opacity-80">
         <div className="mb-1 font-medium">Tips</div>
         <ul className="list-disc space-y-1 pl-5">
-          <li>Handles are lowercase letters, digits, <code>.</code>, <code>-</code>, <code>_</code>.</li>
-          <li>You can update your name, avatar, bio, and FID later from your dashboard.</li>
+          <li>Handles are lowercase letters, digits, <code>.</code>, <code>-</code>, <code>_</code> (unique on-chain).</li>
+          <li>Display names are for presentation and can duplicate.</li>
+          <li>Avatar: single image ≤ 1MB; URL saved on-chain.</li>
           <li>Creation fee is paid in USDC; you may need to approve spending once.</li>
         </ul>
       </section>
