@@ -1,12 +1,12 @@
 // /hooks/useCreatorHub.ts
 "use client"
 
-import { usePublicClient, useReadContract, useWriteContract } from "wagmi"
+import { useAccount, usePublicClient, useReadContract, useWriteContract } from "wagmi"
+import { base } from "wagmi/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 
 const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}`
 
-/* ---------- READS (unchanged) ---------- */
 export function useCreatorPlanIds(creator?: `0x${string}`) {
   return useReadContract({
     abi: CreatorHub as any,
@@ -67,16 +67,22 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`)
   })
 }
 
-/* ---------- FAN ACTIONS (awaits receipt) ---------- */
+/** Fan actions */
 export function useSubscribe() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
   const subscribe = async (planId: bigint, periods: number) => {
+    if (!address) throw new Error("Connect wallet")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "subscribe",
       args: [planId, periods],
+      account: address,
+      chain: base,
+      // value: 0n // payable in ABI, but USDC flow → zero native value
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
@@ -86,13 +92,19 @@ export function useSubscribe() {
 
 export function useBuyPost() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
   const buy = async (postId: bigint) => {
+    if (!address) throw new Error("Connect wallet")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "buyPost",
       args: [postId],
+      account: address,
+      chain: base,
+      // value: 0n
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
@@ -100,10 +112,13 @@ export function useBuyPost() {
   return { buy, isPending, error }
 }
 
-/* ---------- CREATOR ACTIONS (awaits receipt) ---------- */
+/** Creator actions */
 export function useCreatePlan() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
+  // (token, pricePerPeriod, periodDays, name, metadataURI)
   const createPlan = async (
     token: `0x${string}`,
     pricePerPeriod: bigint,
@@ -111,81 +126,46 @@ export function useCreatePlan() {
     name: string,
     metadataURI: string
   ) => {
+    if (!address) throw new Error("Connect wallet")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "createPlan",
       args: [token, pricePerPeriod, periodDays, name, metadataURI],
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
-  return { createPlan, isPending, error }
-}
 
-export function useUpdatePlan() {
-  const client = usePublicClient()
-  const { writeContractAsync, isPending, error } = useWriteContract()
-  const updatePlan = async (
-    id: bigint,
-    name: string,
-    metadataURI: string,
-    pricePerPeriod: bigint,
-    periodDays: number,
-    active: boolean
-  ) => {
-    const hash = await writeContractAsync({
-      abi: CreatorHub as any,
-      address: HUB,
-      functionName: "updatePlan",
-      args: [id, name, metadataURI, pricePerPeriod, periodDays, active],
-    })
-    await client.waitForTransactionReceipt({ hash })
-    return hash
-  }
-  return { updatePlan, isPending, error }
+  return { createPlan, isPending, error }
 }
 
 export function useCreatePost() {
   const client = usePublicClient()
+  const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
+
+  // (token, price, accessViaSub, uri)
   const createPost = async (
     token: `0x${string}`,
     price: bigint,
     accessViaSub: boolean,
     uri: string
   ) => {
+    if (!address) throw new Error("Connect wallet")
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
       address: HUB,
       functionName: "createPost",
       args: [token, price, accessViaSub, uri],
+      account: address,
+      chain: base,
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
-  return { createPost, isPending, error }
-}
 
-export function useUpdatePost() {
-  const client = usePublicClient()
-  const { writeContractAsync, isPending, error } = useWriteContract()
-  const updatePost = async (
-    id: bigint,
-    token: `0x${string}`,
-    price: bigint,
-    active: boolean,
-    accessViaSub: boolean,
-    uri: string
-  ) => {
-    const hash = await writeContractAsync({
-      abi: CreatorHub as any,
-      address: HUB,
-      functionName: "updatePost",
-      args: [id, token, price, active, accessViaSub, uri],
-    })
-    await client.waitForTransactionReceipt({ hash })
-    return hash
-  }
-  return { updatePost, isPending, error }
+  return { createPost, isPending, error }
 }
