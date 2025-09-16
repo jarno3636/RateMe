@@ -16,8 +16,10 @@ export function useAverage(ratee?: `0x${string}`, opt?: WatchOpt) {
     address: RATINGS,
     functionName: "getAverage",
     args: ratee ? [ratee] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!RATINGS && !!ratee },
+    query: {
+      enabled: !!RATINGS && !!ratee,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -28,8 +30,10 @@ export function useRatingStats(ratee?: `0x${string}`, opt?: WatchOpt) {
     address: RATINGS,
     functionName: "getStats",
     args: ratee ? [ratee] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!RATINGS && !!ratee },
+    query: {
+      enabled: !!RATINGS && !!ratee,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -41,8 +45,10 @@ export function useMyRating(ratee?: `0x${string}`, opt?: WatchOpt) {
     address: RATINGS,
     functionName: "getRating",
     args: address && ratee ? [address, ratee] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!RATINGS && !!address && !!ratee },
+    query: {
+      enabled: !!RATINGS && !!address && !!ratee,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
@@ -54,8 +60,10 @@ export function useHasRated(ratee?: `0x${string}`, opt?: WatchOpt) {
     address: RATINGS,
     functionName: "hasRated",
     args: address && ratee ? [address, ratee] : undefined,
-    watch: !!opt?.watch,
-    query: { enabled: !!RATINGS && !!address && !!ratee },
+    query: {
+      enabled: !!RATINGS && !!address && !!ratee,
+      refetchOnBlock: !!opt?.watch,
+    },
   })
 }
 
