@@ -2,36 +2,41 @@
 import { NextResponse } from "next/server"
 import { put } from "@vercel/blob"
 
-export const runtime = "nodejs" // (Blob works in edge too; node is fine here)
+export const runtime = "nodejs"
 
 const MAX_BYTES = 1_000_000 // 1MB
 
 export async function POST(req: Request) {
   try {
-    const form = await req.formData()
-    const file = form.get("file") as File | null
+    // Some Vercel/Node TS combos resolve a minimal FormData type without `.get`.
+    // Cast to any to avoid the "Property 'get' does not exist" error during build.
+    const form: any = await req.formData()
+    const file: any = form?.get?.("file")
+
     if (!file) {
       return NextResponse.json({ error: "No file" }, { status: 400 })
     }
-    if (!file.type.startsWith("image/")) {
+    // Basic shape checks without relying on DOM lib types
+    if (typeof file.type !== "string" || !file.type.startsWith("image/")) {
       return NextResponse.json({ error: "Only image files allowed" }, { status: 400 })
     }
-    if (file.size > MAX_BYTES) {
+    if (typeof file.size !== "number" || file.size > MAX_BYTES) {
       return NextResponse.json({ error: "Image must be ≤ 1MB" }, { status: 400 })
     }
 
     // Sensible filename (no PII): avatar_<timestamp>.<ext>
-    const ext = file.name.includes(".") ? file.name.split(".").pop() : "jpg"
+    const name: string = typeof file.name === "string" ? file.name : "avatar.jpg"
+    const ext = name.includes(".") ? name.split(".").pop() : "jpg"
     const objectName = `avatars/avatar_${Date.now()}.${ext}`
 
-    const buf = Buffer.from(await file.arrayBuffer())
-    const blob = await put(objectName, buf, {
+    // You can pass the web File directly to put()
+    const blob = await put(objectName, file, {
       access: "public",
       contentType: file.type,
-      addRandomSuffix: true, // avoid collisions
+      addRandomSuffix: true,
+      // token: process.env.BLOB_READ_WRITE_TOKEN, // (only needed if running off-Vercel or locally)
     })
 
-    // blob.url is the public, immutable URL; store on-chain as avatarURI
     return NextResponse.json({ url: blob.url })
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Upload failed" }, { status: 500 })
