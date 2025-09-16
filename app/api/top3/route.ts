@@ -5,16 +5,22 @@ import { computeTop3 } from "@/lib/top3"
 
 const KEY = "onlystars:top3:ids"
 
+export const dynamic = "force-dynamic"
+
 export async function GET() {
   try {
     const cached = await kvGetJSON<number[]>(KEY)
     if (cached && cached.length) {
       return NextResponse.json({ ids: cached, cached: true })
     }
+
     const ids = await computeTop3(50)
     await kvSetJSON(KEY, ids, 60) // cache for 60s
     return NextResponse.json({ ids, cached: false })
   } catch (e: any) {
-    return NextResponse.json({ ids: [] }, { status: 200 })
+    return NextResponse.json(
+      { ids: [], cached: false, error: e?.message || "top3 failed" },
+      { status: 500 }
+    )
   }
 }
