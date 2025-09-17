@@ -1,7 +1,7 @@
 // components/CreatorContentManager.tsx
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import toast from "react-hot-toast"
 import { useAccount } from "wagmi"
 import {
@@ -9,14 +9,15 @@ import {
   useCreatorPlanIds,
   usePost,
   usePlan,
+  // create* come from base hook (they include token/metadata variants)
+  useCreatePost as useCreatePostOnchain,
+  useCreatePlan as useCreatePlanOnchain,
 } from "@/hooks/useCreatorHub"
 import {
-  useCreatePost,
   useUpdatePost,
-  useSetPostActive,
-  useCreatePlan,
-  useSetPlanActive,
+  useUpdatePlan,
 } from "@/hooks/useCreatorHubExtras"
+import * as ADDR from "@/lib/addresses"
 
 const MAX_IMAGE_BYTES = 1 * 1024 * 1024
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024
@@ -48,12 +49,7 @@ function PriceInput({
   )
 }
 
-export default function CreatorContentManager({
-  creator,
-}: {
-  /** creator address of the profile owner (from registry) */
-  creator: `0x${string}`
-}) {
+export default function CreatorContentManager({ creator }: { creator: `0x${string}` }) {
   const { address } = useAccount()
   const isOwner = !!address && address.toLowerCase() === (creator as string).toLowerCase()
 
@@ -77,9 +73,7 @@ export default function CreatorContentManager({
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Posts                                                               */
-/* ------------------------------------------------------------------ */
+/* ------------------------------- Posts ------------------------------- */
 
 function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [uri, setUri] = useState("")
@@ -88,16 +82,13 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [uploading, setUploading] = useState(false)
   const [creating, setCreating] = useState(false)
 
-  const { create: createPost } = useCreatePost()
+  const { createPost } = useCreatePostOnchain()
 
   async function onPick(file: File) {
     if (!file) return
     const isImage = file.type.startsWith("image/")
     const isVideo = file.type.startsWith("video/")
-    if (!isImage && !isVideo) {
-      toast.error("Pick an image or video")
-      return
-    }
+    if (!isImage && !isVideo) return toast.error("Pick an image or video")
     if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
     if (isVideo && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
 
@@ -120,9 +111,12 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
   const onCreate = async () => {
     try {
+      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
+      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
       setCreating(true)
       const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6)) // USDC 6dp
-      await createPost(priceUnits, subGate, uri) // (price, subGate, uri)
+      // createPost(token, price, accessViaSub, uri)
+      await createPost(ADDR.USDC, priceUnits, subGate, uri)
       toast.success("Post created")
       setUri("")
       setPriceUsd("0.00")
@@ -142,11 +136,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <button
-              className="btn"
-              onClick={() => document.getElementById("post-file")?.click()}
-              disabled={uploading}
-            >
+            <button className="btn" onClick={() => document.getElementById("post-file")?.click()} disabled={uploading}>
               {uploading ? "Uploading…" : "Choose file"}
             </button>
             <input
@@ -163,13 +153,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
             <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
           </div>
           <div className="text-xs opacity-70">
-            {uri
-              ? isImg(uri)
-                ? "Image selected"
-                : isVideo(uri)
-                ? "Video selected"
-                : "File uploaded"
-              : "No file selected"}
+            {uri ? (isImg(uri) ? "Image selected" : isVideo(uri) ? "Video selected" : "File uploaded") : "No file selected"}
           </div>
         </div>
 
@@ -196,13 +180,14 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
 function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const { data: post } = usePost(id)
+  const creator = post?.[0] as `0x${string}` | undefined
+  const token = (post?.[1] as `0x${string}` | undefined) ?? ADDR.USDC
   const price = (post?.[2] as bigint | undefined) ?? 0n
   const active = Boolean(post?.[3] ?? true)
   const subGate = Boolean(post?.[4] ?? false)
   const uri = String(post?.[5] ?? "")
 
   const { update: updatePost } = useUpdatePost()
-  const { setActive } = useSetPostActive()
 
   const [editUri, setEditUri] = useState(uri)
   const [editPrice, setEditPrice] = useState(fmt6(price))
@@ -228,9 +213,11 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
 
   const save = async () => {
     try {
+      if (!token) throw new Error("Missing token (USDC) address.")
       setSaving(true)
       const priceUnits = BigInt(Math.round(parseFloat(editPrice || "0") * 1e6))
-      await updatePost(id, priceUnits, editGate, editUri) // (id, price, subGate, uri)
+      // updatePost(id, token, price, active, accessViaSub, uri)
+      await updatePost(id, token, priceUnits, active, editGate, editUri)
       toast.success("Post updated")
       onChanged?.()
     } catch (e: any) {
@@ -243,8 +230,10 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
 
   const toggleActive = async () => {
     try {
+      if (!token) throw new Error("Missing token (USDC) address.")
       setToggling(true)
-      await setActive(id, !active)
+      // same fields, just flip active
+      await updatePost(id, token, BigInt(Math.round(parseFloat(editPrice || "0") * 1e6)), !active, editGate, editUri)
       toast.success(!active ? "Post activated" : "Post deactivated")
       onChanged?.()
     } catch (e: any) {
@@ -282,7 +271,6 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
         <div className="text-sm opacity-70">{active ? "Active" : "Inactive"}</div>
       </div>
 
-      {/* Preview (no raw URL) */}
       <div className="overflow-hidden rounded-xl border border-white/10">
         {isImg(editUri) ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -297,10 +285,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
-            <button
-              className="btn"
-              onClick={() => document.getElementById(`replace-${id}`)?.click()}
-            >
+            <button className="btn" onClick={() => document.getElementById(`replace-${id}`)?.click()}>
               Replace file
             </button>
             <input
@@ -342,33 +327,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   )
 }
 
-function PostList({
-  ids,
-  loading,
-  onChanged,
-}: {
-  ids: bigint[]
-  loading?: boolean
-  onChanged?: () => void
-}) {
-  if (loading) return <div className="card">Loading posts…</div>
-  const empty = !ids || ids.length === 0
-  if (empty) return <div className="opacity-70">No posts yet.</div>
-  return (
-    <section className="space-y-3">
-      <h2 className="text-xl font-semibold">Your posts</h2>
-      <div className="grid gap-4 md:grid-cols-2">
-        {ids.map((id) => (
-          <PostRow key={`${id}`} id={id} onChanged={onChanged} />
-        ))}
-      </div>
-    </section>
-  )
-}
-
-/* ------------------------------------------------------------------ */
-/* Plans                                                               */
-/* ------------------------------------------------------------------ */
+/* ------------------------------- Plans ------------------------------- */
 
 function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const [name, setName] = useState("")
@@ -376,13 +335,15 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const [priceUsd, setPriceUsd] = useState("0.00")
   const [creating, setCreating] = useState(false)
 
-  const { create: createPlan } = useCreatePlan()
+  const { createPlan } = useCreatePlanOnchain()
 
   const onCreate = async () => {
     try {
+      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
       setCreating(true)
       const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6))
-      await createPlan(priceUnits, BigInt(days), name || "Plan") // (price, periodDays, name)
+      // createPlan(token, pricePerPeriod, periodDays, name, metadataURI)
+      await createPlan(ADDR.USDC, priceUnits, days, name || "Plan", "")
       toast.success("Plan created")
       setName("")
       setDays(30)
@@ -435,12 +396,14 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
 
 function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const { data: plan } = usePlan(id)
+  const token = (plan?.[1] as `0x${string}` | undefined) ?? ADDR.USDC
   const price = (plan?.[2] as bigint | undefined) ?? 0n
   const days = Number(plan?.[3] ?? 30)
   const active = Boolean(plan?.[4] ?? true)
   const name = String(plan?.[5] ?? "Plan")
+  const metadataURI = String(plan?.[6] ?? "")
 
-  const { setActive } = useSetPlanActive()
+  const { update: updatePlan } = useUpdatePlan()
 
   const [toggling, setToggling] = useState(false)
   const [retiring, setRetiring] = useState(false)
@@ -448,7 +411,8 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const toggleActive = async () => {
     try {
       setToggling(true)
-      await setActive(id, !active)
+      // updatePlan(id, name, metadataURI, pricePerPeriod, periodDays, active)
+      await updatePlan(id, name, metadataURI, price, days, !active)
       toast.success(!active ? "Plan activated" : "Plan deactivated")
       onChanged?.()
     } catch (e: any) {
@@ -463,12 +427,8 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return
     try {
       setRetiring(true)
-      const res = await fetch("/api/content/retire-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: id.toString(), name }),
-      })
-      if (!res.ok) throw new Error("Retire failed")
+      // Optional: you could set active=false and add metadata tag; here we just set inactive
+      await updatePlan(id, name, metadataURI, price, days, false)
       toast.success("Plan retired")
       onChanged?.()
     } catch (e: any) {
