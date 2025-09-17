@@ -9,14 +9,11 @@ import {
   useCreatorPlanIds,
   usePost,
   usePlan,
-  // create* come from base hook (they include token/metadata variants)
+  // on-chain creators (ABI: createPost(token, price, accessViaSub, uri), createPlan(token, pricePerPeriod, periodDays, name, metadataURI))
   useCreatePost as useCreatePostOnchain,
   useCreatePlan as useCreatePlanOnchain,
 } from "@/hooks/useCreatorHub"
-import {
-  useUpdatePost,
-  useUpdatePlan,
-} from "@/hooks/useCreatorHubExtras"
+import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras"
 import * as ADDR from "@/lib/addresses"
 
 const MAX_IMAGE_BYTES = 1 * 1024 * 1024
@@ -53,8 +50,16 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   const { address } = useAccount()
   const isOwner = !!address && address.toLowerCase() === (creator as string).toLowerCase()
 
-  const { data: postIds, isLoading: postsLoading, refetch: refetchPosts } = useCreatorPostIds(creator)
-  const { data: planIds, isLoading: plansLoading, refetch: refetchPlans } = useCreatorPlanIds(creator)
+  const {
+    data: postIds,
+    isLoading: postsLoading,
+    refetch: refetchPosts,
+  } = useCreatorPostIds(creator)
+  const {
+    data: planIds,
+    isLoading: plansLoading,
+    refetch: refetchPlans,
+  } = useCreatorPlanIds(creator)
 
   const posts = (postIds as bigint[] | undefined) ?? []
   const plans = (planIds as bigint[] | undefined) ?? []
@@ -73,7 +78,9 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   )
 }
 
-/* ------------------------------- Posts ------------------------------- */
+/* ------------------------------------------------------------------ */
+/* Posts                                                               */
+/* ------------------------------------------------------------------ */
 
 function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [uri, setUri] = useState("")
@@ -180,7 +187,6 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
 function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const { data: post } = usePost(id)
-  const creator = post?.[0] as `0x${string}` | undefined
   const token = (post?.[1] as `0x${string}` | undefined) ?? ADDR.USDC
   const price = (post?.[2] as bigint | undefined) ?? 0n
   const active = Boolean(post?.[3] ?? true)
@@ -232,8 +238,8 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     try {
       if (!token) throw new Error("Missing token (USDC) address.")
       setToggling(true)
-      // same fields, just flip active
-      await updatePost(id, token, BigInt(Math.round(parseFloat(editPrice || "0") * 1e6)), !active, editGate, editUri)
+      const priceUnits = BigInt(Math.round(parseFloat(editPrice || "0") * 1e6))
+      await updatePost(id, token, priceUnits, !active, editGate, editUri)
       toast.success(!active ? "Post activated" : "Post deactivated")
       onChanged?.()
     } catch (e: any) {
@@ -327,7 +333,33 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   )
 }
 
-/* ------------------------------- Plans ------------------------------- */
+function PostList({
+  ids,
+  loading,
+  onChanged,
+}: {
+  ids: bigint[]
+  loading?: boolean
+  onChanged?: () => void
+}) {
+  if (loading) return <div className="card">Loading posts…</div>
+  const empty = !ids || ids.length === 0
+  if (empty) return <div className="opacity-70">No posts yet.</div>
+  return (
+    <section className="space-y-3">
+      <h2 className="text-xl font-semibold">Your posts</h2>
+      <div className="grid gap-4 md:grid-cols-2">
+        {ids.map((id) => (
+          <PostRow key={`${id}`} id={id} onChanged={onChanged} />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ------------------------------------------------------------------ */
+/* Plans                                                               */
+/* ------------------------------------------------------------------ */
 
 function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const [name, setName] = useState("")
@@ -340,7 +372,6 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const onCreate = async () => {
     try {
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
-      setCreating(true)
       const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6))
       // createPlan(token, pricePerPeriod, periodDays, name, metadataURI)
       await createPlan(ADDR.USDC, priceUnits, days, name || "Plan", "")
@@ -396,7 +427,6 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
 
 function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const { data: plan } = usePlan(id)
-  const token = (plan?.[1] as `0x${string}` | undefined) ?? ADDR.USDC
   const price = (plan?.[2] as bigint | undefined) ?? 0n
   const days = Number(plan?.[3] ?? 30)
   const active = Boolean(plan?.[4] ?? true)
@@ -427,7 +457,7 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return
     try {
       setRetiring(true)
-      // Optional: you could set active=false and add metadata tag; here we just set inactive
+      // Here “retire” == set inactive. You could also tag metadataURI if desired.
       await updatePlan(id, name, metadataURI, price, days, false)
       toast.success("Plan retired")
       onChanged?.()
@@ -459,7 +489,15 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   )
 }
 
-function PlanList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolean; onChanged?: () => void }) {
+function PlanList({
+  ids,
+  loading,
+  onChanged,
+}: {
+  ids: bigint[]
+  loading?: boolean
+  onChanged?: () => void
+}) {
   if (loading) return <div className="card">Loading plans…</div>
   if (!ids || ids.length === 0) return <div className="opacity-70">No plans yet.</div>
   return (
