@@ -24,29 +24,30 @@ import { useSpendApproval } from "@/hooks/useSpendApproval"
 import * as ADDR from "@/lib/addresses"
 import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 
-import RatingWidget from "@/components/RatingWidget"
+// import RatingWidget from "@/components/RatingWidget" // hidden for owner
+import StatsSection from "@/components/StatsSection"
 import EditProfileBox from "./EditProfileBox"
 
 const HUB = ADDR.CREATOR_HUB
 const pc = createPublicClient({ chain: base, transport: http() })
 
 const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u)
+const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(u)
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 const isNumericId = (s: string) => /^[0-9]+$/.test(s)
 
 async function resolveHandleToId(handle: string): Promise<bigint> {
   try {
     const res = await pc.readContract({
-      address: ADDR.PROFILE_REGISTRY,
+      address: ADDR.PROFILE_REGISTRY as `0x${string}`,
       abi: ProfileRegistryAbi as any,
       functionName: "getProfileByHandle",
       args: [handle],
     })
-    // common return shapes:
     if (typeof res === "bigint") return res
     if (Array.isArray(res)) {
-      const cand = (res as any[]).find((v) => typeof v === "bigint")
-      if (cand && cand > 0n) return cand as bigint
+      const cand = (res as any[]).find((v) => typeof v === "bigint" && v > 0n)
+      if (cand) return cand as bigint
     }
   } catch {}
   return 0n
@@ -136,20 +137,33 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
         </div>
       </div>
 
-      <div className={`overflow-hidden rounded-xl border border-white/10 ${canView ? "" : "blur-sm"}`}>
+      {/* Content: no raw URLs; render media, blur if locked */}
+      <div className="relative overflow-hidden rounded-xl border border-white/10">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {isImg(uri) ? (
           <img
             src={uri}
             alt=""
-            className="h-auto w-full"
+            className={`h-auto w-full ${canView ? "" : "blur-sm"}`}
             loading="lazy"
             onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
           />
+        ) : isVideo(uri) ? (
+          <video
+            src={uri}
+            className={`h-auto w-full ${canView ? "" : "blur-sm"}`}
+            controls={canView}
+            playsInline
+            preload={canView ? "metadata" : "none"}
+          />
         ) : (
-          <a className="block truncate bg-black/40 p-4" href={uri || "#"} target="_blank" rel="noreferrer">
-            {uri || "No content URI"}
-          </a>
+          <div className={`block bg-black/40 p-4 ${canView ? "" : "blur-sm"}`}>Post content</div>
+        )}
+
+        {!canView && (
+          <div className="absolute inset-0 grid place-items-center bg-black/40">
+            <div className="rounded-full border border-white/20 px-3 py-1 text-xs">Locked</div>
+          </div>
         )}
       </div>
 
@@ -193,11 +207,7 @@ export default function CreatorPublicPage() {
   // Parse numeric id
   const id = useMemo(() => {
     if (!rawParam || !isNumericId(rawParam)) return 0n
-    try {
-      return BigInt(rawParam)
-    } catch {
-      return 0n
-    }
+    try { return BigInt(rawParam) } catch { return 0n }
   }, [rawParam])
 
   // Profile read
@@ -221,16 +231,16 @@ export default function CreatorPublicPage() {
   const badId = rawParam && isNumericId(rawParam) && id === 0n
 
   return (
-    <div className="space-y-8">
+    <div className="mx-auto max-w-3xl space-y-8 px-4">
       {/* Header */}
       <section className="card flex items-center gap-4">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={avatar || "/favicon.ico"}
+          src={avatar || "/avatar.png"}
           alt=""
           className="h-16 w-16 rounded-full object-cover"
           loading="eager"
-          onError={(e) => ((e.currentTarget as HTMLImageElement).src = "/favicon.ico")}
+          onError={(e) => ((e.currentTarget as HTMLImageElement).src = "/avatar.png")}
         />
         <div className="min-w-0 flex-1">
           <div className="truncate text-2xl font-semibold">{profLoading ? "Loading…" : name}</div>
@@ -261,17 +271,23 @@ export default function CreatorPublicPage() {
         <section className="card">
           <EditProfileBox
             creatorId={id.toString()}
-            currentAvatar={avatar || ""}
+            currentAvatar={avatar || "/avatar.png"}
             currentBio={bio || ""}
             onSaved={() => setEditing(false)}
           />
         </section>
       )}
 
+      {/* Bio */}
       {bio && <section className="card whitespace-pre-wrap">{bio}</section>}
 
-      <RatingWidget creator={creator} />
+      {/* Stats for creator */}
+      <StatsSection creator={creator} profileId={id} />
 
+      {/* Ratings: show to non-owners only */}
+      {/* {!isOwner && <RatingWidget creator={creator} />} */}
+
+      {/* Posts */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Posts</h2>
         {postsLoading && <div className="card">Loading posts…</div>}
@@ -283,6 +299,7 @@ export default function CreatorPublicPage() {
         </div>
       </section>
 
+      {/* Plans */}
       <section id="plans" className="space-y-3">
         <h2 className="text-xl font-semibold">Subscription plans</h2>
         {plansLoading && <div className="card">Loading plans…</div>}
