@@ -1,10 +1,12 @@
-// /app/creator/[id]/page.tsx
+// app/creator/[id]/page.tsx
 "use client"
 
-import { useParams } from "next/navigation"
-import { useAccount } from "wagmi"
+import { useEffect, useMemo, useState } from "react"
+import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
-import { useMemo, useState } from "react"
+import { useAccount } from "wagmi"
+import { createPublicClient, http } from "viem"
+import { base } from "viem/chains"
 
 import { useGetProfile } from "@/hooks/useProfileRegistry"
 import {
@@ -18,27 +20,48 @@ import {
   useBuyPost,
 } from "@/hooks/useCreatorHub"
 import { useSpendApproval } from "@/hooks/useSpendApproval"
+
+import * as ADDR from "@/lib/addresses"
+import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
+
 import RatingWidget from "@/components/RatingWidget"
+import EditProfileBox from "./EditProfileBox"
 
-const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}` | undefined
+const HUB = ADDR.CREATOR_HUB
+const pc = createPublicClient({ chain: base, transport: http() })
 
-/* ----------------------------- Small helpers ----------------------------- */
 const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u)
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
+const isNumericId = (s: string) => /^[0-9]+$/.test(s)
 
-/* ----------------------------- Plans ----------------------------- */
-// plans(id) -> [creator, token, pricePerPeriod, periodDays, active, name, metadataURI]
+async function resolveHandleToId(handle: string): Promise<bigint> {
+  try {
+    const res = await pc.readContract({
+      address: ADDR.PROFILE_REGISTRY,
+      abi: ProfileRegistryAbi as any,
+      functionName: "getProfileByHandle",
+      args: [handle],
+    })
+    // common return shapes:
+    if (typeof res === "bigint") return res
+    if (Array.isArray(res)) {
+      const cand = (res as any[]).find((v) => typeof v === "bigint")
+      if (cand && cand > 0n) return cand as bigint
+    }
+  } catch {}
+  return 0n
+}
+
+/* ---------- Plans ---------- */
 function PlanRow({ id }: { id: bigint }) {
   const { data: plan } = usePlan(id)
-  const price   = (plan?.[2] as bigint | undefined) ?? 0n
-  const days    = Number(plan?.[3] ?? 30)
-  const active  = Boolean(plan?.[4] ?? true)
-  const name    = String(plan?.[5] ?? "Plan")
+  const price = (plan?.[2] as bigint | undefined) ?? 0n
+  const days = Number(plan?.[3] ?? 30)
+  const active = Boolean(plan?.[4] ?? true)
+  const name = String(plan?.[5] ?? "Plan")
 
   const [periods, setPeriods] = useState(1)
   const { subscribe, isPending: subscribing } = useSubscribe()
-
-  // Only request allowance if there’s a price and HUB is set
   const { approveExact, hasAllowance, isPending: approving } = useSpendApproval(
     price > 0n && HUB ? HUB : undefined,
     price > 0n ? price : undefined
@@ -69,7 +92,7 @@ function PlanRow({ id }: { id: bigint }) {
         className="btn"
         onClick={subscribeFlow}
         disabled={!active || approving || subscribing || (price > 0n && !HUB)}
-        title={!HUB ? "Missing HUB contract address" : (!active ? "Plan inactive" : "")}
+        title={!HUB ? "Missing HUB contract address" : !active ? "Plan inactive" : ""}
       >
         {price === 0n ? "Subscribe" : hasAllowance ? "Subscribe" : "Approve & Subscribe"}
       </button>
@@ -77,16 +100,15 @@ function PlanRow({ id }: { id: bigint }) {
   )
 }
 
-/* ----------------------------- Posts ----------------------------- */
-// posts(id) -> [creator, token, price, active, accessViaSub, uri]
+/* ---------- Posts ---------- */
 function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const { address } = useAccount()
   const { data: post } = usePost(id)
 
-  const price   = (post?.[2] as bigint | undefined) ?? 0n
-  const active  = Boolean(post?.[3] ?? true)
+  const price = (post?.[2] as bigint | undefined) ?? 0n
+  const active = Boolean(post?.[3] ?? true)
   const subGate = Boolean(post?.[4] ?? false)
-  const uri     = String(post?.[5] ?? "")
+  const uri = String(post?.[5] ?? "")
 
   const { data: hasSub } = useIsActive(address as `0x${string}` | undefined, creator)
   const { data: hasAccess } = useHasPostAccess(address as `0x${string}` | undefined, id)
@@ -109,12 +131,12 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
       <div className="flex items-center justify-between">
         <div className="font-medium">Post #{id.toString()}</div>
         <div className="text-sm opacity-70">
-          {subGate ? "Sub-gated" : price === 0n ? "Free" : "One-off"} · {fmt6(price)} USDC {active ? "" : "· inactive"}
+          {subGate ? "Sub-gated" : price === 0n ? "Free" : "One-off"} · {fmt6(price)} USDC{" "}
+          {active ? "" : "· inactive"}
         </div>
       </div>
 
       <div className={`overflow-hidden rounded-xl border border-white/10 ${canView ? "" : "blur-sm"}`}>
-        {/* Basic rendering: inline image or a link */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {isImg(uri) ? (
           <img
@@ -122,7 +144,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
             alt=""
             className="h-auto w-full"
             loading="lazy"
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
+            onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
           />
         ) : (
           <a className="block truncate bg-black/40 p-4" href={uri || "#"} target="_blank" rel="noreferrer">
@@ -134,13 +156,15 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
       {!canView && (
         <div className="flex items-center gap-3">
           {subGate ? (
-            <Link className="btn" href="#plans">See plans</Link>
+            <Link className="btn" href="#plans">
+              See plans
+            </Link>
           ) : price === 0n ? null : (
             <button
               className="btn"
               onClick={buyFlow}
               disabled={!active || approving || buying || !HUB}
-              title={!HUB ? "Missing HUB contract address" : (!active ? "Post inactive" : "")}
+              title={!HUB ? "Missing HUB contract address" : !active ? "Post inactive" : ""}
             >
               {hasAllowance ? "Buy post" : "Approve & Buy"}
             </button>
@@ -151,31 +175,50 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   )
 }
 
-/* ----------------------------- Page ----------------------------- */
+/* ---------- Page ---------- */
 export default function CreatorPublicPage() {
+  const router = useRouter()
   const params = useParams<{ id: string }>()
+  const rawParam = String(params.id || "").trim()
+
+  // If it's a handle, resolve -> redirect to numeric route.
+  useEffect(() => {
+    if (!rawParam || isNumericId(rawParam)) return
+    ;(async () => {
+      const id = await resolveHandleToId(rawParam.replace(/^@/, ""))
+      if (id > 0n) router.replace(`/creator/${id.toString()}`)
+    })()
+  }, [rawParam, router])
+
+  // Parse numeric id
   const id = useMemo(() => {
-    try { return BigInt(params.id) } catch { return 0n }
-  }, [params.id])
+    if (!rawParam || !isNumericId(rawParam)) return 0n
+    try {
+      return BigInt(rawParam)
+    } catch {
+      return 0n
+    }
+  }, [rawParam])
 
   // Profile read
   const { data: prof, isLoading: profLoading, error: profError } = useGetProfile(id)
 
-  // Decode tuple
   const creator = (prof?.[0] as `0x${string}` | undefined) ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
-  const handle  = String(prof?.[1] ?? "")
-  const name    = String(prof?.[2] ?? (id ? `Profile #${id}` : "Profile"))
-  const avatar  = String(prof?.[3] ?? "")
-  const bio     = String(prof?.[4] ?? "")
+  const handle = String(prof?.[1] ?? "")
+  const name = String(prof?.[2] ?? (id ? `Profile #${id}` : "Profile"))
+  const avatar = String(prof?.[3] ?? "")
+  const bio = String(prof?.[4] ?? "")
 
-  // Children data
   const { data: planIds, isLoading: plansLoading } = useCreatorPlanIds(creator)
   const { data: postIds, isLoading: postsLoading } = useCreatorPostIds(creator)
-
   const plans = (planIds as bigint[] | undefined) ?? []
   const posts = (postIds as bigint[] | undefined) ?? []
 
-  const badId = id === 0n
+  const { address } = useAccount()
+  const isOwner = !!address && !!creator && address.toLowerCase() === (creator as string).toLowerCase()
+  const [editing, setEditing] = useState(false)
+
+  const badId = rawParam && isNumericId(rawParam) && id === 0n
 
   return (
     <div className="space-y-8">
@@ -187,27 +230,48 @@ export default function CreatorPublicPage() {
           alt=""
           className="h-16 w-16 rounded-full object-cover"
           loading="eager"
-          onError={(e) => { (e.currentTarget as HTMLImageElement).src = "/favicon.ico" }}
+          onError={(e) => ((e.currentTarget as HTMLImageElement).src = "/favicon.ico")}
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-2xl font-semibold">
-            {profLoading ? "Loading…" : name}
-          </div>
+          <div className="truncate text-2xl font-semibold">{profLoading ? "Loading…" : name}</div>
           <div className="truncate opacity-70">@{handle}</div>
         </div>
+
+        {isOwner && id > 0n && (
+          <div className="flex items-center gap-2">
+            <button className="btn" onClick={() => setEditing((v) => !v)}>
+              {editing ? "Close Editor" : "Edit Profile"}
+            </button>
+          </div>
+        )}
       </section>
 
-      {/* Errors / invalid state */}
       {badId && <div className="card border-red-500/40 text-red-200">Invalid profile id.</div>}
       {profError && !profLoading && <div className="card border-red-500/40 text-red-200">Failed to load profile.</div>}
+      {!profLoading && !prof && id > 0n && (
+        <div className="card">
+          Profile not found.{" "}
+          <Link className="text-primary underline" href="/creator">
+            Become a creator
+          </Link>
+        </div>
+      )}
 
-      {/* Bio */}
+      {isOwner && editing && id > 0n && (
+        <section className="card">
+          <EditProfileBox
+            creatorId={id.toString()}
+            currentAvatar={avatar || ""}
+            currentBio={bio || ""}
+            onSaved={() => setEditing(false)}
+          />
+        </section>
+      )}
+
       {bio && <section className="card whitespace-pre-wrap">{bio}</section>}
 
-      {/* Ratings */}
       <RatingWidget creator={creator} />
 
-      {/* Posts */}
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Posts</h2>
         {postsLoading && <div className="card">Loading posts…</div>}
@@ -219,7 +283,6 @@ export default function CreatorPublicPage() {
         </div>
       </section>
 
-      {/* Plans */}
       <section id="plans" className="space-y-3">
         <h2 className="text-xl font-semibold">Subscription plans</h2>
         {plansLoading && <div className="card">Loading plans…</div>}
