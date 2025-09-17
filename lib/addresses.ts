@@ -10,7 +10,15 @@ function norm(key: string): `0x${string}` | undefined {
   return getAddress(raw.toLowerCase() as `0x${string}`)
 }
 
+/** Base mainnet chain id (update if you deploy elsewhere) */
+export const CHAIN_ID = 8453
+
+// Canonical exports
 export const REGISTRY = norm("NEXT_PUBLIC_PROFILE_REGISTRY")
-export const HUB       = norm("NEXT_PUBLIC_CREATOR_HUB")
-export const RATINGS   = norm("NEXT_PUBLIC_RATINGS")
-export const USDC      = norm("NEXT_PUBLIC_USDC") // if you have it
+export const HUB      = norm("NEXT_PUBLIC_CREATOR_HUB")
+export const RATINGS  = norm("NEXT_PUBLIC_RATINGS")
+export const USDC     = norm("NEXT_PUBLIC_USDC") // optional
+
+// Aliases (to satisfy imports in pages/components)
+export const PROFILE_REGISTRY = REGISTRY
+export const CREATOR_HUB      = HUB
