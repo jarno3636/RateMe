@@ -1,6 +1,7 @@
 // app/creator/[id]/page.tsx
 "use client"
 
+import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
@@ -27,6 +28,7 @@ import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 // import RatingWidget from "@/components/RatingWidget" // hidden for owner
 import StatsSection from "@/components/StatsSection"
 import CreatorContentManager from "@/components/CreatorContentManager"
+import ShareBar from "@/components/ShareBar"
 import EditProfileBox from "./EditProfileBox"
 
 const HUB = ADDR.HUB
@@ -88,7 +90,7 @@ function PlanRow({ id }: { id: bigint }) {
         min={1}
         value={periods}
         onChange={(e) => setPeriods(Math.max(1, Number(e.target.value) || 1))}
-        className="w-20"
+        className="w-20 rounded-lg border border-white/15 bg-black/30 px-2 py-2"
       />
       <button
         className="btn"
@@ -191,7 +193,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
 }
 
 /* ---------- Page ---------- */
-export default function CreatorPublicPage() {
+function CreatorPublicPageImpl() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
   const rawParam = String(params.id || "").trim()
@@ -246,6 +248,9 @@ export default function CreatorPublicPage() {
         <div className="min-w-0 flex-1">
           <div className="truncate text-2xl font-semibold">{profLoading ? "Loading…" : name}</div>
           <div className="truncate opacity-70">@{handle}</div>
+          <div className="mt-3">
+            <ShareBar creatorId={id.toString()} handle={handle} />
+          </div>
         </div>
 
         {isOwner && id > 0n && (
@@ -285,9 +290,6 @@ export default function CreatorPublicPage() {
       {/* Stats for creator */}
       <StatsSection creator={creator} profileId={id} />
 
-      {/* Ratings: show to non-owners only */}
-      {/* {!isOwner && <RatingWidget creator={creator} />} */}
-
       {/* Owner-only content manager */}
       {isOwner && (
         <section className="card">
@@ -321,3 +323,6 @@ export default function CreatorPublicPage() {
     </div>
   )
 }
+
+/** Export as client-only to avoid SSR storage crashes (indexedDB, etc.) */
+export default dynamic(() => Promise.resolve(CreatorPublicPageImpl), { ssr: false })
