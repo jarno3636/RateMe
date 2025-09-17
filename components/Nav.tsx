@@ -1,8 +1,11 @@
+// components/Nav.tsx
 "use client"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { useAccount } from "wagmi"
+import { useProfilesByOwner } from "@/hooks/useProfileRegistry"
 import Connect from "./Connect"
 import Logo from "./Logo"
 
@@ -34,6 +37,19 @@ function NavLink({
 
 export default function Nav() {
   const [open, setOpen] = useState(false)
+  const { address, isConnected } = useAccount()
+
+  // If connected, fetch owned profile IDs; otherwise don't query.
+  const { data: ownedIds } = useProfilesByOwner(
+    isConnected && address ? (address as `0x${string}`) : undefined
+  )
+
+  // Build the target for "My profile"
+  const myProfileHref = useMemo(() => {
+    const ids = (ownedIds as bigint[] | undefined) ?? []
+    if (ids.length > 0) return `/creator/${ids[0].toString()}`
+    return "/creator" // onboarding / become a creator
+  }, [ownedIds])
 
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur">
@@ -49,7 +65,7 @@ export default function Nav() {
           <NavLink href="/">Home</NavLink>
           <NavLink href="/discover">Discover</NavLink>
           <NavLink href="/creator">Become a creator</NavLink>
-          <NavLink href="/me">My profile</NavLink>
+          <NavLink href={myProfileHref}>My profile</NavLink>
           <Connect />
         </nav>
 
@@ -103,7 +119,7 @@ export default function Nav() {
               </Link>
               <Link
                 className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
-                href="/me"
+                href={myProfileHref}
                 onClick={() => setOpen(false)}
               >
                 My profile
