@@ -26,9 +26,10 @@ import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 
 // import RatingWidget from "@/components/RatingWidget" // hidden for owner
 import StatsSection from "@/components/StatsSection"
+import CreatorContentManager from "@/components/CreatorContentManager"
 import EditProfileBox from "./EditProfileBox"
 
-const HUB = ADDR.CREATOR_HUB
+const HUB = ADDR.HUB
 const pc = createPublicClient({ chain: base, transport: http() })
 
 const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u)
@@ -39,7 +40,7 @@ const isNumericId = (s: string) => /^[0-9]+$/.test(s)
 async function resolveHandleToId(handle: string): Promise<bigint> {
   try {
     const res = await pc.readContract({
-      address: ADDR.PROFILE_REGISTRY as `0x${string}`,
+      address: ADDR.REGISTRY as `0x${string}`,
       abi: ProfileRegistryAbi as any,
       functionName: "getProfileByHandle",
       args: [handle],
@@ -286,6 +287,13 @@ export default function CreatorPublicPage() {
 
       {/* Ratings: show to non-owners only */}
       {/* {!isOwner && <RatingWidget creator={creator} />} */}
+
+      {/* Owner-only content manager */}
+      {isOwner && (
+        <section className="card">
+          <CreatorContentManager creator={creator} />
+        </section>
+      )}
 
       {/* Posts */}
       <section className="space-y-3">
