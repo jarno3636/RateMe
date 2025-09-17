@@ -9,13 +9,14 @@ import {
   useCreatorPlanIds,
   usePost,
   usePlan,
-  // --- TODO: if your names differ, update here:
+} from "@/hooks/useCreatorHub"
+import {
   useCreatePost,
   useUpdatePost,
   useSetPostActive,
   useCreatePlan,
   useSetPlanActive,
-} from "@/hooks/useCreatorHub"
+} from "@/hooks/useCreatorHubExtras"
 
 const MAX_IMAGE_BYTES = 1 * 1024 * 1024
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024
@@ -87,8 +88,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [uploading, setUploading] = useState(false)
   const [creating, setCreating] = useState(false)
 
-  // TODO: adapt if hook name differs
-  const { create: createPost } = useCreatePost?.() ?? { create: async () => {} }
+  const { create: createPost } = useCreatePost()
 
   async function onPick(file: File) {
     if (!file) return
@@ -121,11 +121,8 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const onCreate = async () => {
     try {
       setCreating(true)
-      // price in USDC 6dp
-      const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6))
-      // TODO: if your hook has a different arg order, update here:
-      // expected shape: createPost(price, subGate, uri)
-      await createPost(priceUnits, subGate, uri)
+      const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6)) // USDC 6dp
+      await createPost(priceUnits, subGate, uri) // (price, subGate, uri)
       toast.success("Post created")
       setUri("")
       setPriceUsd("0.00")
@@ -204,9 +201,8 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const subGate = Boolean(post?.[4] ?? false)
   const uri = String(post?.[5] ?? "")
 
-  // TODO: adapt to your hooks if names differ
-  const { update: updatePost } = useUpdatePost?.() ?? { update: async () => {} }
-  const { setActive } = useSetPostActive?.() ?? { setActive: async () => {} }
+  const { update: updatePost } = useUpdatePost()
+  const { setActive } = useSetPostActive()
 
   const [editUri, setEditUri] = useState(uri)
   const [editPrice, setEditPrice] = useState(fmt6(price))
@@ -234,8 +230,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     try {
       setSaving(true)
       const priceUnits = BigInt(Math.round(parseFloat(editPrice || "0") * 1e6))
-      // expected: updatePost(id, price, subGate, uri)
-      await updatePost(id, priceUnits, editGate, editUri)
+      await updatePost(id, priceUnits, editGate, editUri) // (id, price, subGate, uri)
       toast.success("Post updated")
       onChanged?.()
     } catch (e: any) {
@@ -381,15 +376,13 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const [priceUsd, setPriceUsd] = useState("0.00")
   const [creating, setCreating] = useState(false)
 
-  // TODO: adapt if your hook name differs
-  const { create: createPlan } = useCreatePlan?.() ?? { create: async () => {} }
+  const { create: createPlan } = useCreatePlan()
 
   const onCreate = async () => {
     try {
       setCreating(true)
       const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6))
-      // expected: createPlan(price, periodDays, name)
-      await createPlan(priceUnits, BigInt(days), name || "Plan")
+      await createPlan(priceUnits, BigInt(days), name || "Plan") // (price, periodDays, name)
       toast.success("Plan created")
       setName("")
       setDays(30)
@@ -447,8 +440,7 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const active = Boolean(plan?.[4] ?? true)
   const name = String(plan?.[5] ?? "Plan")
 
-  // TODO: adapt if your hook names differ
-  const { setActive } = useSetPlanActive?.() ?? { setActive: async () => {} }
+  const { setActive } = useSetPlanActive()
 
   const [toggling, setToggling] = useState(false)
   const [retiring, setRetiring] = useState(false)
