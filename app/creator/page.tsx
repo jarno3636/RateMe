@@ -1,18 +1,26 @@
-// /app/creator/page.tsx
+// app/creator/page.tsx
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import toast from "react-hot-toast"
 import { useAccount, useReadContract, useWriteContract, useChainId } from "wagmi"
-import { Address } from "viem"
+import { Address, createPublicClient, http } from "viem"
 import { base } from "viem/chains"
+
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
-import { publicClient } from "@/lib/chain"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
 const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
+const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL
 const MAX_AVATAR_BYTES = 1_000_000 // 1MB
+const AVATAR_FALLBACK = "/avatar.png"
+
+// Client-side public client (do NOT import server-only lib/chain)
+const pc = createPublicClient({
+  chain: base,
+  transport: http(RPC_URL),
+})
 
 const fromUnits6 = (v?: bigint) => (Number(v ?? 0n) / 1e6).toFixed(2)
 
@@ -24,8 +32,8 @@ export default function BecomeCreatorPage() {
   // form state
   const [handle, setHandle] = useState("")
   const [displayName, setDisplayName] = useState("")
-  const [avatarURI, setAvatarURI] = useState("")            // final stored URL
-  const [avatarLocal, setAvatarLocal] = useState<string>("") // local preview
+  const [avatarURI, setAvatarURI] = useState("")
+  const [avatarLocal, setAvatarLocal] = useState<string>("") // objectURL preview
   const [bio, setBio] = useState("")
   const [fid, setFid] = useState("")
   const [uploading, setUploading] = useState(false)
@@ -82,7 +90,8 @@ export default function BecomeCreatorPage() {
       if (!feeUnits || feeUnits <= 0n) return toast.error("No fee required or fee unavailable.")
       const t = toast.loading("Approving USDC…")
       await approve(REGISTRY, feeUnits)
-      toast.dismiss(t); toast.success("USDC approved")
+      toast.dismiss(t)
+      toast.success("USDC approved")
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Approve failed")
     }
@@ -133,9 +142,8 @@ export default function BecomeCreatorPage() {
       const fd = new FormData()
       fd.append("file", file)
       const r = await fetch("/api/upload-avatar", { method: "POST", body: fd })
-      if (!r.ok) throw new Error(await r.text())
-      const j = (await r.json()) as { url?: string }
-      if (!j.url) throw new Error("No URL returned")
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j?.url) throw new Error(j?.error || "Upload failed")
       setAvatarURI(j.url)
       toast.success("Avatar uploaded")
     } catch (err: any) {
@@ -144,11 +152,14 @@ export default function BecomeCreatorPage() {
       setAvatarURI("")
     } finally {
       setUploading(false)
+      // Revoke the object URL a bit later to avoid flicker
+      setTimeout(() => previewUrl && URL.revokeObjectURL(previewUrl), 2000)
     }
   }
 
   const createProfile = async () => {
     if (!isConnected || !address) return toast.error("Connect your wallet first.")
+    if (currentChainId && currentChainId !== base.id) return toast.error("Please switch to Base.")
     if (!normHandle) return toast.error("Enter a handle.")
     // Both checks: KV (fast) + on-chain (source of truth)
     if (kvOk === false) return toast.error(kvReason || "Handle unavailable.")
@@ -175,16 +186,18 @@ export default function BecomeCreatorPage() {
       toast.dismiss(t)
       toast.success("Profile created!")
 
-      // Resolve new ID from chain
+      // Resolve new ID from chain using the client-side viem
       let newId: bigint | undefined
       try {
-        newId = (await publicClient.readContract({
+        newId = (await pc.readContract({
           abi: ProfileRegistry as any,
           address: REGISTRY,
           functionName: "getIdByHandle",
           args: [normHandle],
         })) as bigint
-      } catch { /* ignore */ }
+      } catch {
+        // ignore
+      }
 
       // Index in KV (non-blocking)
       try {
@@ -202,7 +215,9 @@ export default function BecomeCreatorPage() {
             }),
           })
         }
-      } catch { /* non-fatal */ }
+      } catch {
+        // non-fatal
+      }
 
       if (newId && newId > 0n) router.push(`/creator/${newId.toString()}/dashboard`)
       else router.push("/discover")
@@ -217,20 +232,35 @@ export default function BecomeCreatorPage() {
     return () => clearTimeout(t)
   }, [normHandle, refetchCanReg])
 
-  /* ---------- UI ---------- */
+  /* ---------- Derived “premium” readiness badges ---------- */
+  const hasAvatar = Boolean(avatarURI || avatarLocal)
+  const handleReady = (kvOk !== false) && canRegOk && !!normHandle
+  const paymentsReady = !!feeUnits && okBalance && okAllowance && !needsApproval
+  const onBase = currentChainId === base.id || currentChainId === undefined
+
   return (
     <div className="space-y-8">
       {/* Header / explainer */}
       <section className="card space-y-2">
         <h1 className="text-2xl font-semibold">Become a creator</h1>
         <p className="opacity-80 text-sm">
-          Create your on-chain creator profile on <span className="text-pink-300">Base</span>.
-          One-time account fee: <span className="font-medium">{fromUnits6(feeUnits)} USDC</span>.
+          Create your on-chain creator profile on <span className="text-pink-300">Base</span>. One-time account fee:{" "}
+          <span className="font-medium">{fromUnits6(feeUnits)} USDC</span>.
         </p>
-        <div className="flex flex-wrap gap-2 text-xs opacity-70">
-          <span className="rounded-full border border-white/10 px-3 py-1">Instant, secure USDC</span>
-          <span className="rounded-full border border-white/10 px-3 py-1">1% platform fee</span>
-          <span className="rounded-full border border-white/10 px-3 py-1">Micropayments for ratings</span>
+
+        {/* Chain hint */}
+        {isConnected && currentChainId && currentChainId !== base.id && (
+          <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 px-3 py-2 text-xs">
+            You’re connected to the wrong network. Please switch to <span className="font-medium">Base</span>.
+          </div>
+        )}
+
+        {/* Premium-esque readiness badges */}
+        <div className="mt-2 flex flex-wrap gap-2 text-xs">
+          <Badge ok={onBase} label="On Base" />
+          <Badge ok={handleReady} label={handleReady ? "Handle ready" : checkingHandle ? "Checking handle…" : "Handle not ready"} />
+          <Badge ok={hasAvatar} label={hasAvatar ? "Avatar set" : "Avatar pending"} />
+          <Badge ok={paymentsReady} label={paymentsReady ? "USDC ready" : "Approve/Top up USDC"} />
         </div>
       </section>
 
@@ -246,6 +276,8 @@ export default function BecomeCreatorPage() {
                 onChange={(e) => setHandle(e.target.value)}
                 placeholder="yourname"
                 className="w-full"
+                autoComplete="off"
+                spellCheck={false}
               />
             </div>
             {normHandle && (
@@ -279,10 +311,13 @@ export default function BecomeCreatorPage() {
             <div className="mb-1 text-sm opacity-70">Avatar</div>
             <div className="flex items-center gap-3">
               <input type="file" accept="image/*" onChange={onPickAvatar} />
-              {avatarLocal && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={avatarLocal} alt="" className="h-12 w-12 rounded-full object-cover ring-1 ring-white/10" />
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={avatarLocal || avatarURI || AVATAR_FALLBACK}
+                alt=""
+                className="h-12 w-12 rounded-full object-cover ring-1 ring-white/10"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).src = AVATAR_FALLBACK }}
+              />
             </div>
             <div className="mt-1 text-xs opacity-60">One image, ≤ 1MB. We’ll store the URL on-chain.</div>
             {avatarURI && <div className="mt-1 text-xs break-all opacity-70">Stored URL: {avatarURI}</div>}
@@ -292,9 +327,11 @@ export default function BecomeCreatorPage() {
             <div className="mb-1 text-sm opacity-70">Farcaster FID (optional)</div>
             <input
               value={fid}
-              onChange={(e) => setFid(e.target.value)}
+              onChange={(e) => setFid(e.target.value.replace(/[^\d]/g, ""))}
               placeholder="e.g. 12345"
               className="w-full"
+              inputMode="numeric"
+              pattern="[0-9]*"
             />
           </label>
         </div>
@@ -306,14 +343,19 @@ export default function BecomeCreatorPage() {
             onChange={(e) => setBio(e.target.value)}
             placeholder="Tell your fans about yourself..."
             className="w-full min-h-[100px]"
+            maxLength={1200}
           />
+          <div className="mt-1 text-xs opacity-60">{bio.length}/1200</div>
         </label>
 
         {/* Fee & actions */}
         <div className="rounded-2xl border border-white/10 p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="opacity-80">
-              <div>Account creation fee: <span className="font-medium">{fromUnits6(feeUnits)} USDC</span></div>
+              <div>
+                Account creation fee:{" "}
+                <span className="font-medium">{fromUnits6(feeUnits)} USDC</span>
+              </div>
               <div className="text-xs opacity-70">
                 Balance OK: {okBalance ? "Yes" : "No"} · Allowance OK: {okAllowance ? "Yes" : "No"}
               </div>
@@ -324,6 +366,7 @@ export default function BecomeCreatorPage() {
                 onClick={approveFee}
                 disabled={!feeUnits || feeUnits <= 0n || !needsApproval || approving}
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
+                title={!feeUnits || feeUnits <= 0n ? "No approval needed" : needsApproval ? "" : "Already approved"}
               >
                 {approving ? "Approving…" : (needsApproval ? "Approve USDC" : "Approved")}
               </button>
@@ -335,11 +378,12 @@ export default function BecomeCreatorPage() {
                   uploading ||
                   !isConnected ||
                   !normHandle ||
-                  (kvOk === false) ||
+                  kvOk === false ||
                   !canRegOk ||
                   !feeUnits ||
                   !okBalance ||
-                  needsApproval
+                  needsApproval ||
+                  (currentChainId && currentChainId !== base.id)
                 }
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
               >
@@ -361,5 +405,30 @@ export default function BecomeCreatorPage() {
         </ul>
       </section>
     </div>
+  )
+}
+
+/* ---------- Tiny badge component (premium-esque) ---------- */
+function Badge({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1 rounded-full border px-3 py-1",
+        ok ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200" : "border-white/15 bg-white/5 opacity-80",
+        "shadow-[0_0_12px_rgba(16,185,129,0.15)]",
+        "text-[11px] tracking-wide",
+      ].join(" ")}
+      title={label}
+    >
+      {/* dot */}
+      <span
+        aria-hidden
+        className={[
+          "inline-block h-1.5 w-1.5 rounded-full",
+          ok ? "bg-emerald-400" : "bg-white/40",
+        ].join(" ")}
+      />
+      {label}
+    </span>
   )
 }
