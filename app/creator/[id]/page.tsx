@@ -33,7 +33,7 @@ import RatingWidget from "@/components/RatingWidget"
 
 const FALLBACK_AVATAR = "/avatar.png"
 const HUB = ADDR.HUB
-const pc = createPublicClient({ chain: base, transport: http() })
+const pc = createPublicClient({ chain: base, transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL) })
 
 /* ---------------- helpers ---------------- */
 function normalizeIpfs(u?: string | null) {
@@ -97,7 +97,10 @@ function AvatarImg({
       className={`rounded-full object-cover ring-1 ring-white/10 ${className}`}
       loading="eager"
       decoding="async"
-      onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK_AVATAR }}
+      onError={(e) => {
+        const el = e.currentTarget as HTMLImageElement
+        if (!el.src.endsWith(FALLBACK_AVATAR)) el.src = FALLBACK_AVATAR
+      }}
     />
   )
 }
@@ -137,7 +140,7 @@ function PlanRow({ id }: { id: bigint }) {
 
   const [periods, setPeriods] = useState(1)
   const { subscribe, isPending: subscribing } = useSubscribe()
-  const { approveExact, hasAllowance, isPending: approving } = useSpendApproval(
+  const { approveExact, hasAllowance, isPending: approving, status } = useSpendApproval(
     price > 0n && HUB ? HUB : undefined,
     price > 0n ? price : undefined
   )
@@ -149,29 +152,36 @@ function PlanRow({ id }: { id: bigint }) {
   }
 
   return (
-    <div className="card flex items-center gap-3">
+    <div className="card flex flex-wrap items-center gap-3">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{name}</div>
         <div className="text-sm opacity-70">
           {fmt6(price)} USDC / {days}d {active ? "" : "· inactive"}
         </div>
       </div>
-      <input
-        type="number"
-        min={1}
-        value={periods}
-        onChange={(e) => setPeriods(Math.max(1, Number(e.target.value) || 1))}
-        className="w-20 rounded-lg border border-white/15 bg-black/30 px-2 py-2"
-        aria-label="Subscription periods"
-      />
-      <button
-        className="btn"
-        onClick={subscribeFlow}
-        disabled={!active || approving || subscribing || (price > 0n && !HUB)}
-        title={!HUB ? "Missing HUB contract address" : !active ? "Plan inactive" : ""}
-      >
-        {price === 0n ? "Subscribe" : hasAllowance ? "Subscribe" : "Approve & Subscribe"}
-      </button>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={1}
+          value={periods}
+          onChange={(e) => setPeriods(Math.max(1, Number(e.target.value) || 1))}
+          className="w-24 rounded-lg border border-white/15 bg-black/30 px-2 py-2"
+          aria-label="Subscription periods"
+        />
+        <button
+          className="btn"
+          onClick={subscribeFlow}
+          disabled={!active || approving || subscribing || (price > 0n && !HUB)}
+          title={!HUB ? "Missing HUB contract address" : !active ? "Plan inactive" : ""}
+        >
+          {price === 0n
+            ? "Subscribe"
+            : hasAllowance
+            ? (subscribing ? "Subscribing…" : "Subscribe")
+            : (status === "pending-tx" ? "Approving…" : "Approve & Subscribe")}
+        </button>
+      </div>
     </div>
   )
 }
@@ -191,7 +201,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const canView = !!hasAccess || (!!hasSub && subGate) || (!subGate && price === 0n)
 
   const { buy, isPending: buying } = useBuyPost()
-  const { approveExact, hasAllowance, isPending: approving } = useSpendApproval(
+  const { approveExact, hasAllowance, isPending: approving, status } = useSpendApproval(
     price > 0n && HUB ? HUB : undefined,
     price > 0n ? price : undefined
   )
@@ -204,7 +214,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
 
   return (
     <div className="card space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium">Post #{id.toString()}</div>
         <div className="flex items-center gap-2 text-sm opacity-80">
           {subGate ? <Badge label="Subscriber" tone="green" /> : price === 0n ? <Badge label="Free" tone="slate" /> : <Badge label="Paid" tone="amber" />}
@@ -244,22 +254,24 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
         )}
       </div>
 
-      {!canView && (
-        <div className="flex items-center gap-3">
-          {subGate ? (
-            <Link className="btn" href="#plans">
-              See plans
-            </Link>
-          ) : price === 0n ? null : (
-            <button
-              className="btn"
-              onClick={buyFlow}
-              disabled={!active || approving || buying || !HUB}
-              title={!HUB ? "Missing HUB contract address" : !active ? "Post inactive" : ""}
-            >
-              {hasAllowance ? "Buy post" : "Approve & Buy"}
-            </button>
-          )}
+      {!canView && price > 0n && !subGate && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="btn"
+            onClick={buyFlow}
+            disabled={!active || approving || buying || !HUB}
+            title={!HUB ? "Missing HUB contract address" : !active ? "Post inactive" : ""}
+          >
+            {hasAllowance
+              ? (buying ? "Buying…" : "Buy post")
+              : (status === "pending-tx" ? "Approving…" : "Approve & Buy")}
+          </button>
+        </div>
+      )}
+
+      {!canView && subGate && (
+        <div className="flex">
+          <Link className="btn" href="#plans">See plans</Link>
         </div>
       )}
     </div>
@@ -310,7 +322,7 @@ function CreatorPublicPageImpl() {
   // For role-aware header badge (Subscriber)
   const { data: viewerHasSub } = useIsActive(address as `0x${string}` | undefined, creator)
 
-  // Decide header badge:
+  // Decide header badge
   const headerBadge =
     isOwner
       ? <Badge label="Creator" tone="pink" title="You own this profile" />
@@ -322,48 +334,45 @@ function CreatorPublicPageImpl() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4">
-      {/* Header */}
-      <section className="card flex items-center gap-4">
+      {/* Header — responsive, no overlap */}
+      <section className="card">
         {profLoading ? (
-          <>
+          <div className="flex items-center gap-4">
             <Skeleton className="h-16 w-16 rounded-full" />
             <div className="min-w-0 flex-1">
               <Skeleton className="mb-2 h-5 w-1/2" />
               <Skeleton className="h-4 w-1/3" />
             </div>
-          </>
+          </div>
         ) : (
-          <>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-[auto,1fr,auto] md:items-center">
             <div className="relative">
               <AvatarImg src={avatar || FALLBACK_AVATAR} size={64} alt="" />
-              {/* tiny corner badge dot */}
-              <span
-                aria-hidden
-                className="absolute -right-1 -bottom-1 h-4 w-4 rounded-full bg-pink-500/80 ring-2 ring-black/80"
-              />
+              <span aria-hidden className="absolute -right-1 -bottom-1 h-4 w-4 rounded-full bg-pink-500/80 ring-2 ring-black/80" />
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2">
+
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="truncate text-2xl font-semibold">{name}</div>
                 {headerBadge}
               </div>
-              <div className="truncate opacity-70">@{handle}</div>
+              {handle && <div className="truncate opacity-70">@{handle}</div>}
               <div className="mt-3">
-                <ShareBar creatorId={id.toString()} handle={handle} />
+                <ShareBar creatorId={id.toString()} handle={handle || id.toString()} />
               </div>
             </div>
-          </>
-        )}
 
-        {isOwner && id > 0n && (
-          <div className="flex items-center gap-2">
-            <button
-              className="btn"
-              onClick={() => setEditing((v) => !v)}
-              title={editing ? "Close editor" : "Edit your profile"}
-            >
-              {editing ? "Close Editor" : "Edit Profile"}
-            </button>
+            {isOwner && id > 0n && (
+              <div className="flex justify-start md:justify-end">
+                <button
+                  className="btn"
+                  onClick={() => setEditing((v) => !v)}
+                  title={editing ? "Close editor" : "Edit your profile"}
+                >
+                  {editing ? "Close Editor" : "Edit Profile"}
+                </button>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -379,7 +388,7 @@ function CreatorPublicPageImpl() {
         </div>
       )}
 
-      {/* Rating widget (hidden from owner; SSR-safe since this page is client only) */}
+      {/* Rating widget (kept visible for public view, hidden for owner) */}
       {!isOwner && creator !== "0x0000000000000000000000000000000000000000" && (
         <section className="card">
           <RatingWidget creator={creator} owner={creator} />
