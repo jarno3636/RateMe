@@ -9,6 +9,7 @@ import {
   useMyRating,
   useRate,
   useUpdateRating,
+  useRatingStats, // ← add this for count
 } from "@/hooks/useRatings"
 import { useRatingsAllowance } from "@/hooks/useRatingsAllowance"
 
@@ -16,19 +17,18 @@ import { useRatingsAllowance } from "@/hooks/useRatingsAllowance"
 function parseMyRating(raw: unknown): { score: number; comment: string } {
   if (!Array.isArray(raw)) return { score: 0, comment: "" }
   const arr = raw as any[]
-  // Some ABIs return [rater, creator, score, comment]
   if (typeof arr[0] === "string" && arr[0]?.startsWith?.("0x")) {
     const score = Number(arr[2] ?? 0)
     const comment = String(arr[3] ?? "")
     return { score: Number.isFinite(score) ? score : 0, comment }
   }
-  // Others return [score, comment, ...]
   const score = Number(arr[0] ?? 0)
   const comment = String(arr[1] ?? arr[3] ?? "")
   return { score: Number.isFinite(score) ? score : 0, comment }
 }
 
 const ALLOW_SELF_RATING = false
+const MAX_COMMENT = 240
 
 function Star({
   index,
@@ -63,7 +63,7 @@ function Star({
       onBlur={() => setHover(0)}
       onClick={() => setScore(index)}
       onKeyDown={onKey}
-      className="transition active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/60 rounded-sm"
+      className="rounded-sm transition will-change-transform active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/60"
     >
       <svg
         width="28"
@@ -90,6 +90,8 @@ export default function RatingWidget({
 
   // Reads
   const { data: avgX100, isLoading: avgLoading } = useAverage(creator)
+  const { data: countTuple } = useRatingStats(creator) // [count, totalScore]
+  const ratingCount = Number((countTuple as any)?.[0] ?? 0)
   const { data: myRaw } = useMyRating(creator)
   const parsed = useMemo(() => parseMyRating(myRaw), [myRaw])
   const hasExisting = (parsed.score ?? 0) > 0
@@ -124,15 +126,22 @@ export default function RatingWidget({
     !!owner &&
     address.toLowerCase() === owner.toLowerCase()
 
-  const canRate = ALLOW_SELF_RATING ? !!address : (!!address && !isSelf)
+  const clampedScore = Math.max(1, Math.min(5, Math.floor(Number(score) || 5)))
+  const commentTrimmed = comment.slice(0, MAX_COMMENT)
 
+  // Disable submit if nothing changed
+  const unchanged =
+    hasExisting &&
+    clampedScore === (parsed.score || 0) &&
+    commentTrimmed === (parsed.comment || "")
+
+  const canRate = ALLOW_SELF_RATING ? !!address : (!!address && !isSelf)
   const submitting = states.approving || isRating || isUpdating
 
   async function onSubmit() {
     if (!address) return toast.error("Connect a wallet first.")
     if (!ALLOW_SELF_RATING && isSelf) return toast.error("You cannot rate your own profile.")
-
-    const clamped = Math.max(1, Math.min(5, Math.floor(Number(score) || 5)))
+    if (unchanged) return toast.error("No changes to save.")
 
     try {
       // If there’s a USDC fee, ensure approval first
@@ -145,9 +154,9 @@ export default function RatingWidget({
 
       const t2 = toast.loading(hasExisting ? "Updating rating…" : "Submitting rating…")
       if (hasExisting) {
-        await update(creator, clamped, comment || parsed.comment)
+        await update(creator, clampedScore, commentTrimmed || parsed.comment)
       } else {
-        await rate(creator, clamped, comment)
+        await rate(creator, clampedScore, commentTrimmed)
       }
       toast.dismiss(t2)
       toast.success("Rating saved")
@@ -158,44 +167,62 @@ export default function RatingWidget({
 
   return (
     <div className="card space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium">Rate this creator</div>
-        <div className="text-sm opacity-70">
-          Average:{" "}
-          <span className="font-semibold">{avg}</span>
-          {avg !== "-" && avg !== "…" && " / 5"}
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-xs">
+          <span className="opacity-70">Average</span>
+          <span className="font-semibold tabular-nums">
+            {avg}{avg !== "-" && avg !== "…" ? " / 5" : ""}
+          </span>
+          <span aria-hidden>•</span>
+          <span className="opacity-70">{ratingCount} {ratingCount === 1 ? "rating" : "ratings"}</span>
         </div>
       </div>
 
       {/* Star row */}
-      <div className="flex items-center gap-1" role="radiogroup" aria-label="Select rating">
-        {[1, 2, 3, 4, 5].map((n) => {
-          const filled = (hover || score) >= n
-          return (
-            <Star
-              key={n}
-              index={n}
-              filled={filled}
-              setHover={setHover}
-              setScore={setScore}
-            />
-          )
-        })}
-        <span className="ml-2 text-sm opacity-70">{Math.max(1, Math.min(5, Math.floor(score)))}/5</span>
+      <div className="flex flex-wrap items-center gap-2" role="radiogroup" aria-label="Select rating">
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((n) => {
+            const filled = (hover || clampedScore) >= n
+            return (
+              <Star
+                key={n}
+                index={n}
+                filled={filled}
+                setHover={setHover}
+                setScore={setScore}
+              />
+            )
+          })}
+        </div>
+        <span className="text-sm opacity-70">{clampedScore}/5</span>
+        {hasExisting && (
+          <span className="ml-2 rounded-full border border-pink-500/30 bg-pink-500/10 px-2 py-0.5 text-[11px] uppercase tracking-wide text-pink-200">
+            You rated
+          </span>
+        )}
       </div>
 
       {/* Comment + submit */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          placeholder="Add a comment (optional)"
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-          className="min-w-[220px] flex-1 rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
-        />
+        <div className="flex-1">
+          <input
+            placeholder="Add a comment (optional, max 240 chars)"
+            value={comment}
+            onChange={(e) => setComment(e.target.value.slice(0, MAX_COMMENT))}
+            className="min-w-[220px] w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+            aria-label="Rating comment"
+            maxLength={MAX_COMMENT}
+          />
+          <div className="mt-1 text-right text-[11px] opacity-60">
+            {commentTrimmed.length}/{MAX_COMMENT}
+          </div>
+        </div>
+
         <button
           className="btn"
           onClick={onSubmit}
-          disabled={!canRate || submitting || states.loading}
+          disabled={!canRate || submitting || states.loading || unchanged}
           title={
             !address
               ? "Connect wallet"
@@ -205,6 +232,8 @@ export default function RatingWidget({
               ? "Loading fee…"
               : states.approving
               ? "Approving…"
+              : unchanged
+              ? "No changes"
               : isRating || isUpdating
               ? "Submitting…"
               : ""
