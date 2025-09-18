@@ -2,6 +2,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, useCallback } from "react"
+import Link from "next/link"
 import { useParams } from "next/navigation"
 import toast from "react-hot-toast"
 import { useAccount } from "wagmi"
@@ -20,16 +21,39 @@ import { useAverage, useRatingStats } from "@/hooks/useRatings"
 const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}` | undefined
 const AVATAR_FALLBACK = "/avatar.png"
 
-/** ---------- utils ---------- */
-function toUnits6(n: number) {
-  return BigInt(Math.round(n * 1_000_000))
-}
+/* ---------- utils ---------- */
+function toUnits6(n: number) { return BigInt(Math.round(n * 1_000_000)) }
 function numberOr(v: unknown, d: number) {
   const n = typeof v === "string" ? Number(v) : Number(v ?? NaN)
   return Number.isFinite(n) ? n : d
 }
-function isSameAddr(a?: string, b?: string) {
-  return !!a && !!b && a.toLowerCase() === b.toLowerCase()
+function isSameAddr(a?: string, b?: string) { return !!a && !!b && a.toLowerCase() === b.toLowerCase() }
+
+/* ---------- atoms ---------- */
+function Badge({
+  label,
+  tone = "pink",
+  title,
+}: {
+  label: string
+  tone?: "pink" | "green" | "slate" | "amber" | "blue"
+  title?: string
+}) {
+  const tones: Record<string, string> = {
+    pink:  "border-pink-500/50 text-pink-200",
+    green: "border-emerald-500/50 text-emerald-200",
+    slate: "border-white/20 text-white/80",
+    amber: "border-amber-500/50 text-amber-200",
+    blue:  "border-sky-500/50 text-sky-200",
+  }
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] || tones.pink}`}
+    >
+      {label}
+    </span>
+  )
 }
 
 /** Avatar with built-in fallback */
@@ -43,7 +67,7 @@ function Avatar({
   className?: string
 }) {
   const [fallback, setFallback] = useState(false)
-  const finalSrc = !fallback && src?.trim() ? src : AVATAR_FALLBACK
+  const finalSrc = !fallback && (src || "").trim() ? (src as string) : AVATAR_FALLBACK
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -57,15 +81,10 @@ function Avatar({
   )
 }
 
+/* ===================== Page ===================== */
 export default function CreatorDashboardPage() {
   const params = useParams<{ id: string }>()
-  const id = useMemo(() => {
-    try {
-      return BigInt(params.id)
-    } catch {
-      return 0n
-    }
-  }, [params.id])
+  const id = useMemo(() => { try { return BigInt(params.id) } catch { return 0n } }, [params.id])
 
   const { address } = useAccount()
 
@@ -100,7 +119,7 @@ export default function CreatorDashboardPage() {
     try {
       if (!isOwner) return toast.error("You don't own this profile")
       const fidBig = fidNum ? BigInt(fidNum) : 0n
-      await update(id, displayName, avatarURI, bioText, fidBig)
+      await update(id, displayName.trim(), avatarURI.trim(), bioText, fidBig)
       toast.success("Profile updated")
       setEditing(false)
       refetchProfile()
@@ -124,7 +143,7 @@ export default function CreatorDashboardPage() {
       if (!USDC) return toast.error("USDC address not configured")
       const priceUnits = toUnits6(numberOr(planPrice, 0))
       if (priceUnits < 0n) return toast.error("Price must be ≥ 0")
-      const days = numberOr(planDays, 30)
+      const days = Math.max(1, numberOr(planDays, 30))
       await createPlan(USDC, priceUnits, days, (planName || "Plan").trim(), (planMeta || "").trim())
       toast.success("Plan created")
       setPlanName(""); setPlanPrice(""); setPlanDays("30"); setPlanMeta("")
@@ -181,13 +200,24 @@ export default function CreatorDashboardPage() {
           setMrr(Number(j.mrr ?? 0))
         }
       } catch {
-        if (!ignore) {
-          setSubs(0); setSales(0); setMrr(0)
-        }
+        if (!ignore) { setSubs(0); setSales(0); setMrr(0) }
       }
     })()
     return () => { ignore = true }
   }, [params.id])
+
+  /* ---------- role-aware header badges ---------- */
+  const hasPlans = ((planIds as bigint[]) ?? []).length > 0
+  const headerBadges = (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Badge label="Creator (You)" tone="pink" />
+      {hasPlans && <Badge label="Pro" tone="amber" title="You offer paid subscriptions/content" />}
+      {subs > 0 && <Badge label="Earning" tone="green" title="You have active subscribers" />}
+      {ratingCount > 0 && <Badge label={`Rated ${ratingAvg.toFixed(2)}`} tone="blue" title="Average rating" />}
+    </div>
+  )
+
+  const profileUrl = `/creator/${params.id}`
 
   return (
     <div className="space-y-8">
@@ -199,17 +229,26 @@ export default function CreatorDashboardPage() {
           className="h-16 w-16 rounded-full object-cover ring-1 ring-white/10"
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-2xl font-semibold">{name || `Profile #${params.id}`}</div>
+          <div className="flex items-center gap-2">
+            <div className="truncate text-2xl font-semibold">{name || `Profile #${params.id}`}</div>
+            {headerBadges}
+          </div>
           <div className="truncate opacity-70">@{handle}</div>
         </div>
-        {isOwner && (
-          <button
-            className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10"
-            onClick={() => setEditing((v) => !v)}
-          >
-            {editing ? "Cancel" : "Edit profile"}
-          </button>
-        )}
+
+        <div className="flex items-center gap-2">
+          <Link href={profileUrl} className="btn" title="Open your public profile">
+            View public
+          </Link>
+          {isOwner && (
+            <button
+              className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10"
+              onClick={() => setEditing((v) => !v)}
+            >
+              {editing ? "Cancel" : "Edit profile"}
+            </button>
+          )}
+        </div>
       </section>
 
       {/* Edit profile */}
@@ -419,15 +458,35 @@ function PlanRow({ id }: { id: bigint }) {
   const active = Boolean(plan?.[4] ?? true)
   const name   = String(plan?.[5] ?? "Plan")
 
+  const softDelete = async () => {
+    try {
+      const r = await fetch("/api/content/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: id.toString(), kind: "plan" }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      toast.success("Plan marked as deleted")
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete")
+    }
+  }
+
   return (
     <div className="card flex items-center justify-between">
       <div>
-        <div className="font-medium">{name}</div>
+        <div className="flex items-center gap-2">
+          <span className="font-medium">{name}</span>
+          <Badge label={active ? "Active" : "Inactive"} tone={active ? "green" : "slate"} />
+        </div>
         <div className="text-sm opacity-70">
-          {(Number(price) / 1e6).toFixed(2)} USDC / {days}d {active ? "" : "· inactive"}
+          {(Number(price) / 1e6).toFixed(2)} USDC / {days}d
         </div>
       </div>
-      <div className="text-xs rounded-full border border-white/10 px-3 py-1 opacity-70">#{id.toString()}</div>
+      <div className="flex items-center gap-2">
+        <div className="text-xs rounded-full border border-white/10 px-3 py-1 opacity-70">#{id.toString()}</div>
+        <button className="btn" onClick={softDelete} title="Soft-delete (KV mark)">Delete</button>
+      </div>
     </div>
   )
 }
@@ -440,12 +499,31 @@ function PostRow({ id }: { id: bigint }) {
   const subGate = Boolean(post?.[4] ?? false)
   const uri     = String(post?.[5] ?? "")
 
+  const softDelete = async () => {
+    try {
+      const r = await fetch("/api/content/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id: id.toString(), kind: "post" }),
+      })
+      if (!r.ok) throw new Error(await r.text())
+      toast.success("Post marked as deleted")
+    } catch (e: any) {
+      toast.error(e?.message || "Failed to delete")
+    }
+  }
+
   return (
     <div className="card space-y-2">
       <div className="flex items-center justify-between">
-        <div className="font-medium">Post #{id.toString()}</div>
-        <div className="text-sm opacity-70">
-          {subGate ? "Sub-gated" : (price === 0n ? "Free" : "Paid")} · {(Number(price)/1e6).toFixed(2)} USDC {active ? "" : "· inactive"}
+        <div className="flex items-center gap-2">
+          <span className="font-medium">Post #{id.toString()}</span>
+          <Badge label={subGate ? "Subscriber" : price === 0n ? "Free" : "Paid"} tone={subGate ? "green" : price === 0n ? "slate" : "amber"} />
+          {!active && <Badge label="Inactive" tone="slate" />}
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="text-sm opacity-70">{(Number(price)/1e6).toFixed(2)} USDC</div>
+          <button className="btn" onClick={softDelete} title="Soft-delete (KV mark)">Delete</button>
         </div>
       </div>
       <div className="truncate text-sm opacity-70">{uri || "(no uri set)"}</div>
