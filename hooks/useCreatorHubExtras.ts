@@ -1,20 +1,29 @@
-// hooks/useCreatorHubExtras.ts
+// /hooks/useCreatorHubExtras.ts
 "use client"
 
 import { base } from "viem/chains"
 import { useAccount, usePublicClient, useWriteContract } from "wagmi"
 import * as ADDR from "@/lib/addresses"
+import { assertAddresses } from "@/lib/addresses"
 import CreatorHubAbi from "@/abi/CreatorHub.json"
 
-// Guard: HUB must exist
+/** Resolve and assert HUB address (clear error instead of deep revert) */
 function useHubAddr(): `0x${string}` {
-  if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
-  return ADDR.HUB
+  assertAddresses("HUB") // throws with a friendly message if missing
+  // ADDR.HUB is guaranteed after assert
+  return ADDR.HUB as `0x${string}`
+}
+
+/** Tiny helper to format unknown errors nicely */
+function toUserError(e: unknown, fallback = "Transaction failed") {
+  if (e && typeof e === "object" && "message" in e) return (e as any).message as string
+  return String(e ?? fallback)
 }
 
 /**
  * updatePost(id, token, price, active, accessViaSub, uri)
- * Convenience wrapper: if token not passed, defaults to ADDR.USDC (if set).
+ * - If `token` is omitted, defaults to ADDR.USDC (and asserts it exists).
+ * - Simulates before sending to catch reverts with a readable message.
  */
 export function useUpdatePost() {
   const hub = useHubAddr()
@@ -24,23 +33,66 @@ export function useUpdatePost() {
 
   async function update(
     id: bigint,
-    token: `0x${string}`,
-    price: bigint,
-    active: boolean,
-    accessViaSub: boolean,
-    uri: string
+    tokenOrPrice: `0x${string}` | bigint, // allow (id, price, ...) if you prefer default token
+    priceOrActive: bigint | boolean,
+    activeOrGate?: boolean,
+    gateOrUri?: boolean | string,
+    maybeUri?: string
   ) {
     if (!address) throw new Error("Connect your wallet.")
-    const hash = await writeContractAsync({
-      abi: CreatorHubAbi as any,
-      address: hub,
-      functionName: "updatePost",
-      args: [id, token, price, active, accessViaSub, uri],
-      chain: base,
-      account: address,
-    })
-    await client.waitForTransactionReceipt({ hash })
-    return hash
+
+    // Overload handling so devs can call update(id, price, active, gate, uri)
+    let token: `0x${string}` | undefined
+    let price: bigint
+    let active: boolean
+    let accessViaSub: boolean
+    let uri: string
+
+    if (typeof tokenOrPrice === "string") {
+      // Full signature: (id, token, price, active, accessViaSub, uri)
+      token = tokenOrPrice as `0x${string}`
+      price = priceOrActive as bigint
+      active = activeOrGate as boolean
+      accessViaSub = gateOrUri as boolean
+      uri = (maybeUri ?? "") as string
+    } else {
+      // Short signature: (id, price, active, accessViaSub, uri) with default USDC
+      assertAddresses("USDC")
+      token = ADDR.USDC as `0x${string}`
+      price = tokenOrPrice as bigint
+      active = priceOrActive as boolean
+      accessViaSub = activeOrGate as boolean
+      uri = (gateOrUri ?? "") as string
+    }
+
+    // Preflight simulate to surface revert reasons before we send
+    try {
+      await client.simulateContract({
+        abi: CreatorHubAbi as any,
+        address: hub,
+        functionName: "updatePost",
+        args: [id, token, price, active, accessViaSub, uri],
+        chain: base,
+        account: address,
+      })
+    } catch (e) {
+      throw new Error(toUserError(e, "Update would revert"))
+    }
+
+    try {
+      const hash = await writeContractAsync({
+        abi: CreatorHubAbi as any,
+        address: hub,
+        functionName: "updatePost",
+        args: [id, token, price, active, accessViaSub, uri],
+        chain: base,
+        account: address,
+      })
+      await client.waitForTransactionReceipt({ hash })
+      return hash
+    } catch (e) {
+      throw new Error(toUserError(e))
+    }
   }
 
   return { update, isPending, error }
@@ -48,6 +100,7 @@ export function useUpdatePost() {
 
 /**
  * updatePlan(id, name, metadataURI, pricePerPeriod, periodDays, active)
+ * - Simulates before send for early revert reasons.
  */
 export function useUpdatePlan() {
   const hub = useHubAddr()
@@ -64,16 +117,35 @@ export function useUpdatePlan() {
     active: boolean
   ) {
     if (!address) throw new Error("Connect your wallet.")
-    const hash = await writeContractAsync({
-      abi: CreatorHubAbi as any,
-      address: hub,
-      functionName: "updatePlan",
-      args: [id, name, metadataURI, pricePerPeriod, periodDays, active],
-      chain: base,
-      account: address,
-    })
-    await client.waitForTransactionReceipt({ hash })
-    return hash
+
+    // Preflight simulate
+    try {
+      await client.simulateContract({
+        abi: CreatorHubAbi as any,
+        address: hub,
+        functionName: "updatePlan",
+        args: [id, name.trim(), metadataURI.trim(), pricePerPeriod, periodDays, active],
+        chain: base,
+        account: address,
+      })
+    } catch (e) {
+      throw new Error(toUserError(e, "Update would revert"))
+    }
+
+    try {
+      const hash = await writeContractAsync({
+        abi: CreatorHubAbi as any,
+        address: hub,
+        functionName: "updatePlan",
+        args: [id, name.trim(), metadataURI.trim(), pricePerPeriod, periodDays, active],
+        chain: base,
+        account: address,
+      })
+      await client.waitForTransactionReceipt({ hash })
+      return hash
+    } catch (e) {
+      throw new Error(toUserError(e))
+    }
   }
 
   return { update, isPending, error }
