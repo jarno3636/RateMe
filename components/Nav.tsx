@@ -1,9 +1,9 @@
-// components/Nav.tsx
+// /components/Nav.tsx
 "use client"
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useAccount } from "wagmi"
 import { useProfilesByOwner } from "@/hooks/useProfileRegistry"
 import Connect from "./Connect"
@@ -13,17 +13,24 @@ function NavLink({
   href,
   children,
   onClick,
+  activeWhenStartsWith = false,
 }: {
   href: string
   children: React.ReactNode
   onClick?: () => void
+  /** If true, mark active when pathname startsWith href (good for section roots) */
+  activeWhenStartsWith?: boolean
 }) {
-  const pathname = usePathname()
-  const isActive = pathname === href
+  const pathname = usePathname() || "/"
+  const isActive = activeWhenStartsWith
+    ? pathname === href || pathname.startsWith(`${href}/`)
+    : pathname === href
+
   return (
     <Link
       href={href}
       onClick={onClick}
+      aria-current={isActive ? "page" : undefined}
       className={[
         "rounded-full px-4 py-2 text-sm transition",
         "border border-pink-500/50 hover:bg-pink-500/10",
@@ -37,6 +44,7 @@ function NavLink({
 
 export default function Nav() {
   const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const { address, isConnected } = useAccount()
 
   // If connected, fetch owned profile IDs; otherwise don't query.
@@ -51,21 +59,60 @@ export default function Nav() {
     return "/creator" // onboarding / become a creator
   }, [ownedIds])
 
+  // Close mobile menu on route change (safer when user navigates from external state)
+  const pathname = usePathname()
+  useEffect(() => {
+    setOpen(false)
+  }, [pathname])
+
+  // Click-outside & Esc-to-close for mobile panel
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    const onClick = (e: MouseEvent) => {
+      if (!panelRef.current) return
+      if (!panelRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("keydown", onKey)
+    document.addEventListener("mousedown", onClick)
+    return () => {
+      document.removeEventListener("keydown", onKey)
+      document.removeEventListener("mousedown", onClick)
+    }
+  }, [open])
+
   return (
-    <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur supports-[backdrop-filter]:bg-black/50">
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:rounded-md focus:bg-pink-600 focus:px-3 focus:py-1.5"
+      >
+        Skip to content
+      </a>
+
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
         {/* Left: logo + title */}
-        <Link href="/" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2" aria-label="OnlyStars home">
           <Logo className="h-6 w-6" />
           <span className="font-semibold tracking-wide">OnlyStars</span>
         </Link>
 
         {/* Desktop nav */}
-        <nav className="hidden items-center gap-3 md:flex">
-          <NavLink href="/">Home</NavLink>
-          <NavLink href="/discover">Discover</NavLink>
-          <NavLink href="/creator">Become a creator</NavLink>
-          <NavLink href={myProfileHref}>My profile</NavLink>
+        <nav className="hidden items-center gap-3 md:flex" aria-label="Primary">
+          <NavLink href="/" activeWhenStartsWith>
+            Home
+          </NavLink>
+          <NavLink href="/discover" activeWhenStartsWith>
+            Discover
+          </NavLink>
+          <NavLink href="/creator" activeWhenStartsWith>
+            Become a creator
+          </NavLink>
+          <NavLink href={myProfileHref} activeWhenStartsWith>
+            My profile
+          </NavLink>
           <Connect />
         </nav>
 
@@ -73,6 +120,7 @@ export default function Nav() {
         <div className="flex items-center gap-2 md:hidden">
           <Connect compact />
           <button
+            type="button"
             aria-label="Menu"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
@@ -90,10 +138,14 @@ export default function Nav() {
         </div>
       </div>
 
-      {/* Mobile menu panel (compact, tidy) */}
+      {/* Mobile menu panel */}
       {open && (
-        <div className="mx-auto max-w-5xl px-4 pb-3 md:hidden">
-          <div className="mt-2 rounded-2xl border border-white/10 bg-black/70 p-3">
+        <div className="mx-auto max-w-5xl px-4 pb-3 md:hidden" ref={panelRef}>
+          <div
+            className="mt-2 rounded-2xl border border-white/10 bg-black/70 p-3 shadow-lg"
+            role="dialog"
+            aria-label="Mobile navigation"
+          >
             {/* 2-column compact pill grid */}
             <div className="grid grid-cols-2 gap-2">
               <Link
