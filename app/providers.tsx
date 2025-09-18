@@ -15,19 +15,14 @@ import {
 import "@rainbow-me/rainbowkit/styles.css"
 
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL
-const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "ONLYSTARS" // replace with a real ID in prod
+const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "ONLYSTARS" // replace in prod
 
-// v1+ signature: connectorsForWallets(groups, { appName, projectId })
+// Pass wallet *creators* (no parentheses) and give shared options in 2nd arg
 const connectors = connectorsForWallets(
   [
     {
       groupName: "Recommended",
-      wallets: [
-        injectedWallet(),
-        metaMaskWallet({ projectId: WC_PROJECT_ID }),
-        walletConnectWallet({ projectId: WC_PROJECT_ID }),
-        coinbaseWallet({ appName: "OnlyStars" }),
-      ],
+      wallets: [injectedWallet, metaMaskWallet, walletConnectWallet, coinbaseWallet],
     },
   ],
   {
@@ -41,7 +36,8 @@ const wagmiConfig = createConfig({
   transports: { [base.id]: http(RPC_URL) },
   connectors,
   ssr: true,
-  storage: createStorage({ storage: cookieStorage }), // SSR-safe (no indexedDB usage server-side)
+  // Cookie storage = SSR-safe (prevents `indexedDB is not defined` on server)
+  storage: createStorage({ storage: cookieStorage }),
 })
 
 const theme = darkTheme({
