@@ -1,13 +1,11 @@
-// /lib/chain.ts
-import "server-only"
-import { createPublicClient, http } from "viem"
-import { base } from "viem/chains"
+// /lib/chain.ts  (client-safe)
+import { createPublicClient, http } from "viem";
+import { base } from "viem/chains";
 
-const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL
+const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL;
 if (!rpcUrl) {
-  console.warn(
-    "[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using viem default (rate-limited)"
-  )
+  // ok to warn on both client/server
+  console.warn("[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using viem default (rate-limited)");
 }
 
 export const publicClient = createPublicClient({
@@ -15,4 +13,4 @@ export const publicClient = createPublicClient({
   transport: rpcUrl ? http(rpcUrl) : http(),
   batch: { multicall: true },
   pollingInterval: 8_000,
-})
+});
