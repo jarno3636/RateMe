@@ -1,90 +1,131 @@
 // /hooks/useDiscoverProfiles.ts
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 type ApiTuple = [
-  string[],        // ids (as strings)
+  string[],        // ids
   `0x${string}`[], // owners
   string[],        // handles
   string[],        // displayNames
   string[],        // avatarURIs
   string[],        // bios
-  string[],        // fids (as strings)
-  string[],        // createdAts (as strings)
-  string           // nextCursor (as string)
+  string[],        // fids
+  string[],        // createdAts
+  string           // nextCursor
 ]
 
-// same tuple shape as on-chain, but with real bigints on the bigint fields
 export type DiscoverTuple = [
-  bigint[],        // ids
-  `0x${string}`[], // owners
-  string[],        // handles
-  string[],        // displayNames
-  string[],        // avatarURIs
-  string[],        // bios
-  bigint[],        // fids
-  bigint[],        // createdAts
-  bigint           // nextCursor
+  bigint[],
+  `0x${string}`[],
+  string[],
+  string[],
+  string[],
+  string[],
+  bigint[],
+  bigint[],
+  bigint
 ]
+
+/** in-memory page cache (per session) */
+const cache = new Map<string, DiscoverTuple>()
+
+const toBig = (v: string, d: bigint = 0n) => {
+  try { return BigInt(v) } catch { return d }
+}
+
+function decodeTuple(d: ApiTuple): DiscoverTuple {
+  return [
+    d[0].map((x) => toBig(x)),
+    d[1],
+    d[2],
+    d[3],
+    d[4],
+    d[5],
+    d[6].map((x) => toBig(x)),
+    d[7].map((x) => toBig(x)),
+    toBig(d[8]),
+  ]
+}
+
+type State = {
+  data?: DiscoverTuple
+  isLoading: boolean   // first load for these params
+  isFetching: boolean  // any in-flight fetch (including refresh/pagination)
+  error: Error | null
+}
 
 export function useDiscoverProfiles(cursor: bigint, size: bigint) {
-  const [data, setData] = useState<DiscoverTuple | undefined>()
-  const [isLoading, setIsLoading] = useState(true)
-  const [isFetching, setIsFetching] = useState(false)
-  const [error, setError] = useState<Error | null>(null)
+  const key = useMemo(() => `c:${cursor.toString()}:s:${size.toString()}`, [cursor, size])
+  const abortRef = useRef<AbortController | null>(null)
 
-  useEffect(() => {
-    let ignore = false
-    setIsLoading(true) // reset on new params
+  const [state, setState] = useState<State>(() => {
+    const cached = cache.get(key)
+    return {
+      data: cached,
+      isLoading: !cached,
+      isFetching: false,
+      error: null,
+    }
+  })
 
-    const run = async () => {
-      setIsFetching(true)
-      try {
-        const r = await fetch(
-          `/api/discover?cursor=${cursor.toString()}&size=${size.toString()}`,
-          { cache: "no-store" },
-        )
-        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+  const fetchOnce = async (retry = 0): Promise<void> => {
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
 
-        const j = (await r.json()) as { data?: ApiTuple }
-        if (!j?.data) throw new Error("Malformed discover payload")
+    setState((s) => ({ ...s, isFetching: true, error: null }))
+    try {
+      const r = await fetch(
+        `/api/discover?cursor=${cursor.toString()}&size=${size.toString()}`,
+        { cache: "no-store", signal: ctrl.signal },
+      )
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const j = (await r.json()) as { data?: ApiTuple }
+      if (!j?.data) throw new Error("Malformed discover payload")
 
-        const d = j.data
-        const decoded: DiscoverTuple = [
-          d[0].map((x) => BigInt(x)),
-          d[1],
-          d[2],
-          d[3],
-          d[4],
-          d[5],
-          d[6].map((x) => BigInt(x)),
-          d[7].map((x) => BigInt(x)),
-          BigInt(d[8]),
-        ]
+      const decoded = decodeTuple(j.data)
+      cache.set(key, decoded)
 
-        if (!ignore) {
-          setData(decoded)
-          setError(null)
-        }
-      } catch (e: any) {
-        if (!ignore) {
-          setError(e instanceof Error ? e : new Error(String(e)))
-          setData(undefined)
-        }
-      } finally {
-        if (!ignore) {
-          setIsLoading(false)
-          setIsFetching(false)
-        }
+      setState({ data: decoded, isLoading: false, isFetching: false, error: null })
+    } catch (e: any) {
+      if (ctrl.signal.aborted) return
+      // small, bounded retry for transient network flakiness
+      if (retry < 1) {
+        await new Promise((res) => setTimeout(res, 350))
+        return fetchOnce(retry + 1)
       }
+      setState((s) => ({
+        ...s,
+        isLoading: false,
+        isFetching: false,
+        error: e instanceof Error ? e : new Error(String(e)),
+      }))
     }
+  }
 
-    run()
-    return () => {
-      ignore = true
-    }
-  }, [cursor, size])
+  // load on param change (keep previous data visible while fetching)
+  useEffect(() => {
+    const cached = cache.get(key)
+    setState({
+      data: cached,
+      isLoading: !cached,
+      isFetching: false,
+      error: null,
+    })
+    void fetchOnce()
+    return () => abortRef.current?.abort()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
 
-  return { data, isLoading, isFetching, error }
+  // expose manual refresh (keeps current data during refetch)
+  const refresh = () => fetchOnce()
+
+  return {
+    data: state.data,
+    isLoading: state.isLoading,
+    isFetching: state.isFetching,
+    error: state.error,
+    refresh,
+  }
 }
