@@ -5,9 +5,11 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useAccount } from "wagmi"
-import { useProfilesByOwner } from "@/hooks/useProfileRegistry"
+import { useProfilesByOwner, useGetProfile } from "@/hooks/useProfileRegistry"
 import Connect from "./Connect"
 import Logo from "./Logo"
+
+const AVATAR_FALLBACK = "/avatar.png"
 
 function NavLink({
   href,
@@ -32,13 +34,32 @@ function NavLink({
       onClick={onClick}
       aria-current={isActive ? "page" : undefined}
       className={[
-        "rounded-full px-4 py-2 text-sm transition",
+        "inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm transition",
         "border border-pink-500/50 hover:bg-pink-500/10",
-        isActive ? "bg-pink-500/20 shadow-[0_0_10px_rgba(236,72,153,0.7)]" : "",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/50",
+        isActive ? "bg-pink-500/20 shadow-[0_0_10px_rgba(236,72,153,0.5)]" : "",
       ].join(" ")}
     >
       {children}
     </Link>
+  )
+}
+
+function MiniAvatar({ src, size = 18, alt = "" }: { src?: string; size?: number; alt?: string }) {
+  const [err, setErr] = useState(false)
+  const finalSrc = !err && (src?.trim() || AVATAR_FALLBACK) ? src : AVATAR_FALLBACK
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={finalSrc}
+      width={size}
+      height={size}
+      alt={alt}
+      className="h-[18px] w-[18px] rounded-full object-cover ring-1 ring-white/10"
+      loading="eager"
+      decoding="async"
+      onError={() => setErr(true)}
+    />
   )
 }
 
@@ -47,19 +68,28 @@ export default function Nav() {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const { address, isConnected } = useAccount()
 
-  // If connected, fetch owned profile IDs; otherwise don't query.
+  // Only query owned profiles when connected
   const { data: ownedIds } = useProfilesByOwner(
     isConnected && address ? (address as `0x${string}`) : undefined
   )
 
-  // Build the target for "My profile"
-  const myProfileHref = useMemo(() => {
+  // First owned profile id (if any)
+  const myId = useMemo(() => {
     const ids = (ownedIds as bigint[] | undefined) ?? []
-    if (ids.length > 0) return `/creator/${ids[0].toString()}`
-    return "/creator" // onboarding / become a creator
+    return ids.length ? ids[0] : 0n
   }, [ownedIds])
 
-  // Close mobile menu on route change (safer when user navigates from external state)
+  // Optionally read profile for avatar (only if we have an id)
+  const { data: prof } = useGetProfile(myId > 0n ? myId : (undefined as unknown as bigint))
+  const myAvatar = String((prof?.[3] as string) || "") || AVATAR_FALLBACK
+
+  // Build the target for "My profile"
+  const myProfileHref = useMemo(() => {
+    if (myId && myId > 0n) return `/creator/${myId.toString()}`
+    return "/creator" // onboarding / become a creator
+  }, [myId])
+
+  // Close mobile menu on route change
   const pathname = usePathname()
   useEffect(() => {
     setOpen(false)
@@ -68,9 +98,7 @@ export default function Nav() {
   // Click-outside & Esc-to-close for mobile panel
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false)
-    }
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
     const onClick = (e: MouseEvent) => {
       if (!panelRef.current) return
       if (!panelRef.current.contains(e.target as Node)) setOpen(false)
@@ -92,49 +120,52 @@ export default function Nav() {
         Skip to content
       </a>
 
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-4">
-        {/* Left: logo + title */}
-        <Link href="/" className="flex items-center gap-2" aria-label="OnlyStars home">
-          <Logo className="h-6 w-6" />
-          <span className="font-semibold tracking-wide">OnlyStars</span>
+      {/* Three-zone layout to prevent overlap: Left logo, center nav, right connect */}
+      <div className="mx-auto grid h-16 max-w-5xl grid-cols-[auto,1fr,auto] items-center gap-3 px-4">
+        {/* Left: logo */}
+        <Link href="/" className="flex min-w-0 items-center gap-2" aria-label="OnlyStars home">
+          <Logo className="h-6 w-6 shrink-0" />
+          <span className="truncate font-semibold tracking-wide">OnlyStars</span>
         </Link>
 
-        {/* Desktop nav */}
-        <nav className="hidden items-center gap-3 md:flex" aria-label="Primary">
-          <NavLink href="/" activeWhenStartsWith>
-            Home
-          </NavLink>
-          <NavLink href="/discover" activeWhenStartsWith>
-            Discover
-          </NavLink>
-          <NavLink href="/creator" activeWhenStartsWith>
-            Become a creator
-          </NavLink>
-          <NavLink href={myProfileHref} activeWhenStartsWith>
-            My profile
-          </NavLink>
-          <Connect />
+        {/* Center: desktop nav (never overlaps right column) */}
+        <nav className="hidden min-w-0 justify-center md:flex" aria-label="Primary">
+          <div className="flex max-w-full flex-wrap items-center gap-3">
+            <NavLink href="/" activeWhenStartsWith>Home</NavLink>
+            <NavLink href="/discover" activeWhenStartsWith>Discover</NavLink>
+            <NavLink href="/creator" activeWhenStartsWith>Become a creator</NavLink>
+            <NavLink href={myProfileHref} activeWhenStartsWith>
+              {myId > 0n && (
+                <span className="-ml-1 inline-flex items-center gap-2">
+                  <MiniAvatar src={myAvatar} />
+                  <span>My profile</span>
+                </span>
+              )}
+              {myId === 0n && "My profile"}
+            </NavLink>
+          </div>
         </nav>
 
-        {/* Mobile: hamburger + connect */}
-        <div className="flex items-center gap-2 md:hidden">
-          <Connect compact />
-          <button
-            type="button"
-            aria-label="Menu"
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-            className="rounded-full border border-white/15 p-2 hover:bg-white/10"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                d="M4 6h16M4 12h16M4 18h16"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-              />
-            </svg>
-          </button>
+        {/* Right: Connect (desktop) + Menu (mobile) */}
+        <div className="flex items-center gap-2">
+          <div className="hidden md:block">
+            <Connect />
+          </div>
+          {/* Mobile: connect + menu */}
+          <div className="md:hidden flex items-center gap-2">
+            <Connect compact />
+            <button
+              type="button"
+              aria-label="Menu"
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+              className="rounded-full border border-white/15 p-2 hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/50"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
