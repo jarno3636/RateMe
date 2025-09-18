@@ -1,7 +1,7 @@
 // /lib/top3.ts
 import { publicClient } from "./chain"
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
-import Ratings from "@/abi/Ratings"
+import Ratings from "@/abi/Ratings.json"
 
 const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
 const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}` | undefined
