@@ -1,17 +1,12 @@
 // /lib/chain.ts
+import "server-only"
 import { createPublicClient, http } from "viem"
 import { base } from "viem/chains"
 
-/**
- * Public, read-only client for server-side usage.
- * - Uses NEXT_PUBLIC_BASE_RPC_URL if set, otherwise falls back to viem default
- * - Enables multicall batching for performance
- * - Slightly slower polling to reduce RPC churn
- */
 const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL
 if (!rpcUrl) {
   console.warn(
-    "[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using default viem RPC (slower, rate limited)"
+    "[chain] NEXT_PUBLIC_BASE_RPC_URL not set, using viem default (rate-limited)"
   )
 }
 
