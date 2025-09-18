@@ -1,27 +1,36 @@
 // /hooks/useRatingsAllowance.ts
 "use client"
 
-import Ratings from "@/abi/Ratings"
+import RatingsAbi from "@/abi/Ratings.json"
 import { useReadContract } from "wagmi"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
-const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}`
+const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}` | undefined
 
 export function useRatingsAllowance() {
-  // fee() -> uint256, feeCollector() -> address
-  const { data: feeUnits, isLoading: feeLoading, refetch: refetchFee } = useReadContract({
-    abi: Ratings as any,
+  // fee() -> uint256
+  const {
+    data: feeUnits,
+    isLoading: feeLoading,
+    refetch: refetchFee,
+  } = useReadContract({
+    abi: RatingsAbi as any,
     address: RATINGS,
     functionName: "fee",
+    // don't query until RATINGS exists
+    query: { enabled: !!RATINGS },
   })
 
+  // feeCollector() -> address (optional, but keep enabled guard)
   const { data: collector } = useReadContract({
-    abi: Ratings as any,
+    abi: RatingsAbi as any,
     address: RATINGS,
     functionName: "feeCollector",
+    query: { enabled: !!RATINGS },
   })
 
-  const { data: allowance } = useUSDCAllowance(RATINGS)
+  // Approvals
+  const { data: allowance } = useUSDCAllowance(RATINGS) // hook should no-op if undefined
   const { approve, isPending } = useUSDCApprove()
 
   const fee = (feeUnits ?? 0n) as bigint
@@ -29,19 +38,21 @@ export function useRatingsAllowance() {
   const hasAllowance = currentAllowance >= fee
 
   const approveForFee = async () => {
+    if (!RATINGS) throw new Error("Ratings contract address is not configured.")
     if (fee > 0n) {
-      await approve(RATINGS, fee) // waits for receipt internally
-      // Optional: refresh fee/allowance callers can refetch if needed
+      await approve(RATINGS, fee) // await receipt internally
     }
   }
 
   return {
-    fee,                               // bigint (USDC 6dp)
-    feeCollector: (collector ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
-    hasAllowance,                      // boolean
-    approveForFee,                     // function
+    fee, // bigint (USDC 6dp)
+    feeCollector:
+      ((collector as `0x${string}`) ??
+        "0x0000000000000000000000000000000000000000") as `0x${string}`,
+    hasAllowance,
+    approveForFee,
     states: { loading: feeLoading, approving: isPending },
     errors: {},
-    refetchFee,                        // in case you want to re-pull fee on UI event
+    refetchFee,
   }
 }
