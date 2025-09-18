@@ -1,9 +1,9 @@
 // /components/ClientProviders.tsx
 'use client';
 
-import { ReactNode, useRef, useMemo } from 'react';
+import '@rainbow-me/rainbowkit/styles.css';
+import { ReactNode, useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-
 import {
   WagmiProvider,
   createConfig,
@@ -12,72 +12,28 @@ import {
   http,
 } from 'wagmi';
 import { base } from 'viem/chains';
+import { injected } from 'wagmi/connectors';
+import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 
-// RainbowKit (wagmi v2 compatible)
-import '@rainbow-me/rainbowkit/styles.css';
-import {
-  RainbowKitProvider,
-  darkTheme,
-  connectorsForWallets,
-} from '@rainbow-me/rainbowkit';
-import {
-  injectedWallet,
-  metaMaskWallet,
-  walletConnectWallet,
-  coinbaseWallet,
-} from '@rainbow-me/rainbowkit/wallets';
+const queryClient = new QueryClient();
 
-const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL;
-const WC_PROJECT_ID =
-  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'ONLYSTARS';
-
-// Build RainbowKit connectors (no side effects; safe in client component)
-const connectors = connectorsForWallets(
-  [
-    {
-      groupName: 'Recommended',
-      wallets: [injectedWallet, metaMaskWallet, walletConnectWallet, coinbaseWallet],
-    },
-  ],
-  {
-    appName: 'OnlyStars',
-    projectId: WC_PROJECT_ID,
-  }
-);
-
-// Minimal wagmi config, SSR-aware storage (cookies only)
 const wagmiConfig = createConfig({
   chains: [base],
-  transports: { [base.id]: http(RPC_URL) },
-  connectors,
+  transports: { [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC_URL) },
+  connectors: [injected({ shimDisconnect: true })],
   storage: createStorage({ storage: cookieStorage }),
-  ssr: true,
-});
-
-// Polished dark theme
-const theme = darkTheme({
-  accentColor: '#ec4899', // Tailwind pink-500
-  overlayBlur: 'small',
-  borderRadius: 'large',
+  ssr: true, // ✅ hydration-safe
 });
 
 export default function ClientProviders({ children }: { children: ReactNode }) {
-  // Create the QueryClient once (avoids new instances on re-render/HMR)
-  const qcRef = useRef(new QueryClient());
   const cfg = useMemo(() => wagmiConfig, []);
-
   return (
-    <WagmiProvider config={cfg}>
-      <QueryClientProvider client={qcRef.current}>
-        <RainbowKitProvider
-          theme={theme}
-          initialChain={base}
-          modalSize="compact"
-          showRecentTransactions={false}
-        >
+    <QueryClientProvider client={queryClient}>
+      <WagmiProvider config={cfg}>
+        <RainbowKitProvider theme={darkTheme()}>
           {children}
         </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+      </WagmiProvider>
+    </QueryClientProvider>
   );
 }
