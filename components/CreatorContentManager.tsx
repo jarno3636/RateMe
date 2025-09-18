@@ -1,4 +1,4 @@
-// components/CreatorContentManager.tsx
+// /components/CreatorContentManager.tsx
 "use client"
 
 import { useRef, useState } from "react"
@@ -9,7 +9,6 @@ import {
   useCreatorPlanIds,
   usePost,
   usePlan,
-  // on-chain creators (ABI: createPost(token, price, accessViaSub, uri), createPlan(token, pricePerPeriod, periodDays, name, metadataURI))
   useCreatePost as useCreatePostOnchain,
   useCreatePlan as useCreatePlanOnchain,
 } from "@/hooks/useCreatorHub"
@@ -19,8 +18,8 @@ import * as ADDR from "@/lib/addresses"
 const MAX_IMAGE_BYTES = 1 * 1024 * 1024
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024
 
-const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u)
-const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(u)
+const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname)
+const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(new URL(u, "http://x").pathname)
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 
 function PriceInput({
@@ -52,16 +51,8 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   const { address } = useAccount()
   const isOwner = !!address && address.toLowerCase() === (creator as string).toLowerCase()
 
-  const {
-    data: postIds,
-    isLoading: postsLoading,
-    refetch: refetchPosts,
-  } = useCreatorPostIds(creator)
-  const {
-    data: planIds,
-    isLoading: plansLoading,
-    refetch: refetchPlans,
-  } = useCreatorPlanIds(creator)
+  const { data: postIds, isLoading: postsLoading, refetch: refetchPosts } = useCreatorPostIds(creator)
+  const { data: planIds, isLoading: plansLoading, refetch: refetchPlans } = useCreatorPlanIds(creator)
 
   const posts = (postIds as bigint[] | undefined) ?? []
   const plans = (planIds as bigint[] | undefined) ?? []
@@ -80,9 +71,7 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Posts                                                               */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ Posts ------------------------------ */
 
 function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [uri, setUri] = useState("")
@@ -97,10 +86,10 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   async function onPick(file: File) {
     if (!file) return
     const isImage = file.type.startsWith("image/")
-    const isVideo = file.type.startsWith("video/")
-    if (!isImage && !isVideo) return toast.error("Pick an image or video")
+    const isVideoType = file.type.startsWith("video/")
+    if (!isImage && !isVideoType) return toast.error("Pick an image or video")
     if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
-    if (isVideo && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
+    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
 
     try {
       setUploading(true)
@@ -124,10 +113,10 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
     try {
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
       if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
+      if (!uri) return toast.error("Please upload media first")
       setCreating(true)
       const priceFloat = Number.parseFloat(priceUsd || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6)) // USDC 6dp
-      // createPost(token, price, accessViaSub, uri)
       await createPost(ADDR.USDC, priceUnits, subGate, uri)
       toast.success("Post created")
       setUri("")
@@ -144,10 +133,19 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
   return (
     <section className="card space-y-4">
-      <div className="text-lg font-semibold">Create a post</div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-lg font-semibold">Create a post</div>
+        {/* status chips */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">Image ≤ 1 MB</span>
+          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">Video ≤ 2 MB</span>
+          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">USDC, non-custodial</span>
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-3">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               className="btn"
               onClick={() => fileInputRef.current?.click()}
@@ -167,10 +165,13 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
                 if (f) void onPick(f)
               }}
             />
-            <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
+            <span className="text-xs opacity-70">
+              {uri ? (isImg(uri) ? "Image selected" : isVideo(uri) ? "Video selected" : "File uploaded") : "No file selected"}
+            </span>
           </div>
-          <div className="text-xs opacity-70">
-            {uri ? (isImg(uri) ? "Image selected" : isVideo(uri) ? "Video selected" : "File uploaded") : "No file selected"}
+
+          <div className="rounded-xl border border-dashed border-white/15 p-3 text-xs opacity-70">
+            Tip: Short videos load faster and sell better. Images are cached on first view.
           </div>
         </div>
 
@@ -193,9 +194,16 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
         </div>
       </div>
 
-      <button className="btn" onClick={onCreate} disabled={creating || !uri}>
-        {creating ? "Creating…" : "Create post"}
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button className="btn" onClick={onCreate} disabled={creating || !uri}>
+          {creating ? "Creating…" : "Create post"}
+        </button>
+        {uri && (
+          <button className="btn-secondary" onClick={() => setUri("")} disabled={creating || uploading}>
+            Clear selection
+          </button>
+        )}
+      </div>
     </section>
   )
 }
@@ -219,10 +227,10 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
 
   async function pickReplace(file: File) {
     const isImage = file.type.startsWith("image/")
-    const isVideo = file.type.startsWith("video/")
-    if (!isImage && !isVideo) return toast.error("Pick an image or video")
+    const isVideoType = file.type.startsWith("video/")
+    if (!isImage && !isVideoType) return toast.error("Pick an image or video")
     if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
-    if (isVideo && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
+    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
     const fd = new FormData()
     fd.append("file", file)
     const res = await fetch("/api/upload", { method: "POST", body: fd })
@@ -238,7 +246,6 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
       setSaving(true)
       const priceFloat = Number.parseFloat(editPrice || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      // updatePost(id, token, price, active, accessViaSub, uri)
       await updatePost(id, token, priceUnits, active, editGate, editUri)
       toast.success("Post updated")
       onChanged?.()
@@ -289,7 +296,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
 
   return (
     <div className="card space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium">Post #{id.toString()}</div>
         <div className="text-sm opacity-70">{active ? "Active" : "Inactive"}</div>
       </div>
@@ -297,7 +304,12 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
       <div className="overflow-hidden rounded-xl border border-white/10">
         {isImg(editUri) ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={editUri} className="h-auto w-full" alt="" />
+          <img
+            src={editUri}
+            className="h-auto w-full"
+            alt=""
+            onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+          />
         ) : isVideo(editUri) ? (
           <video src={editUri} className="h-auto w-full" controls playsInline preload="metadata" />
         ) : (
@@ -307,7 +319,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button className="btn" onClick={() => document.getElementById(`replace-${id}`)?.click()}>
               Replace file
             </button>
@@ -339,7 +351,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
           </label>
         </div>
 
-        <div className="flex flex-wrap gap-2 md:items-end">
+        <div className="flex flex-wrap items-start gap-2 md:items-end">
           <button className="btn" onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -355,15 +367,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   )
 }
 
-function PostList({
-  ids,
-  loading,
-  onChanged,
-}: {
-  ids: bigint[]
-  loading?: boolean
-  onChanged?: () => void
-}) {
+function PostList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolean; onChanged?: () => void }) {
   if (loading) return <div className="card">Loading posts…</div>
   const empty = !ids || ids.length === 0
   if (empty) return <div className="opacity-70">No posts yet.</div>
@@ -379,9 +383,7 @@ function PostList({
   )
 }
 
-/* ------------------------------------------------------------------ */
-/* Plans                                                               */
-/* ------------------------------------------------------------------ */
+/* ------------------------------ Plans ------------------------------ */
 
 function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   const [name, setName] = useState("")
@@ -397,7 +399,6 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
       const priceFloat = Number.parseFloat(priceUsd || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      // createPlan(token, pricePerPeriod, periodDays, name, metadataURI)
       await createPlan(ADDR.USDC, priceUnits, days, name || "Plan", "")
       toast.success("Plan created")
       setName("")
@@ -465,7 +466,6 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const toggleActive = async () => {
     try {
       setToggling(true)
-      // updatePlan(id, name, metadataURI, pricePerPeriod, periodDays, active)
       await updatePlan(id, name, metadataURI, price, days, !active)
       toast.success(!active ? "Plan activated" : "Plan deactivated")
       onChanged?.()
@@ -493,14 +493,14 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   }
 
   return (
-    <div className="card flex items-center gap-3">
+    <div className="card flex flex-wrap items-center gap-3">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{name}</div>
         <div className="text-sm opacity-70">
           {fmt6(price)} USDC / {days}d {active ? "" : "· inactive"}
         </div>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button className="btn-secondary" onClick={toggleActive} disabled={toggling}>
           {active ? "Deactivate" : "Activate"}
         </button>
@@ -512,15 +512,7 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   )
 }
 
-function PlanList({
-  ids,
-  loading,
-  onChanged,
-}: {
-  ids: bigint[]
-  loading?: boolean
-  onChanged?: () => void
-}) {
+function PlanList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolean; onChanged?: () => void }) {
   if (loading) return <div className="card">Loading plans…</div>
   if (!ids || ids.length === 0) return <div className="opacity-70">No plans yet.</div>
   return (
