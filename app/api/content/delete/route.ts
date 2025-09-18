@@ -1,21 +1,55 @@
 // app/api/content/delete/route.ts
 import { NextResponse } from "next/server"
+import { kvSetJSON } from "@/lib/kv"
 
-let kv: any = null
-try {
-  // If you already have a kv client here, this will work.
-  // e.g., export const kv = new KV(...) or upstash client
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  kv = require("@/lib/kv").kv
-} catch {}
+// Namespace deletes by deployed registry to avoid cross-env collisions
+const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY || "unknown"
+
+type Body = {
+  id?: string
+  kind?: "post" | "plan"
+  by?: `0x${string}` | string           // optional: who requested (for audit UI)
+  reason?: string                       // optional: short reason
+  ttlDays?: number                      // optional: retention
+}
+
+export const dynamic = "force-dynamic"
 
 export async function POST(req: Request) {
-  if (!kv) return NextResponse.json({ error: "KV not configured" }, { status: 501 })
-  const body = await req.json().catch(() => null)
-  const id = body?.id as string | undefined
-  const kind = body?.kind as "post" | "plan" | undefined
-  if (!id || !kind) return NextResponse.json({ error: "Missing id/kind" }, { status: 400 })
-  const key = `deleted:${kind}:${id}`
-  await kv.set(key, true)
-  return NextResponse.json({ ok: true })
+  try {
+    const body = (await req.json().catch(() => null)) as Body | null
+    const id = body?.id?.trim()
+    const kind = body?.kind
+
+    if (!id || !kind) {
+      return NextResponse.json({ error: "Missing id/kind" }, { status: 400 })
+    }
+
+    // Soft-delete record
+    const ttlDays = Number.isFinite(body?.ttlDays) ? Math.max(1, Math.min(90, body!.ttlDays!)) : 30
+    const ttlSec = ttlDays * 24 * 60 * 60
+
+    const key = `onlystars:${REGISTRY}:deleted:${kind}:${id}`
+
+    await kvSetJSON(key, {
+      id,
+      kind,
+      at: Date.now(),
+      by: body?.by || "",
+      reason: (body?.reason || "").slice(0, 240),
+      version: 1,
+    }, ttlSec)
+
+    return NextResponse.json(
+      { ok: true, key, ttlDays },
+      { headers: { "cache-control": "no-store" } },
+    )
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message || "delete failed" },
+      { status: 500, headers: { "cache-control": "no-store" } },
+    )
+  }
 }
+
+// Optional: guard unsupported methods if you add a GET later.
