@@ -22,13 +22,15 @@ const globalAny = globalThis as any
 globalAny.__KV_SHIM__ = globalAny.__KV_SHIM__ || (new Map() as ShimRecord)
 const SHIM: ShimRecord = globalAny.__KV_SHIM__
 
-// Minimal interface we actually use
+// Extend interface with hset
 type KVLike = {
   get<T = string>(key: string): Promise<T | null>
   set(key: string, val: string, opts?: { ex?: number }): Promise<"OK" | number | null>
   del(...keys: string[]): Promise<number>
+  hset?(key: string, map: Record<string, string>): Promise<number | "OK">
 }
 
+// Real Upstash client supports hset out of the box
 export const kv: KVLike = KV_ENABLED
   ? new Redis({ url: URL, token: TOKEN })
   : {
@@ -44,52 +46,8 @@ export const kv: KVLike = KV_ENABLED
         for (const k of keys) if (SHIM.delete(k)) n++
         return n
       },
+      async hset(key: string, map: Record<string, string>) {
+        SHIM.set(key, JSON.stringify(map))
+        return 1
+      },
     }
-
-function jsonStringifySafe(value: unknown) {
-  return JSON.stringify(value, (_k, v) => (typeof v === "bigint" ? v.toString() : v))
-}
-
-export async function kvGetJSON<T>(key: string): Promise<T | null> {
-  try {
-    const v = await kv.get<string>(key)
-    if (!v) return null
-    try {
-      return JSON.parse(v) as T
-    } catch {
-      return null
-    }
-  } catch (err) {
-    console.warn("[kvGetJSON] failed:", err)
-    return null
-  }
-}
-
-export async function kvSetJSON(key: string, value: unknown, ttlSec?: number) {
-  try {
-    const s = jsonStringifySafe(value)
-    if (ttlSec && KV_ENABLED) {
-      return await kv.set(key, s, { ex: ttlSec })
-    }
-    return await kv.set(key, s)
-  } catch (err) {
-    console.warn("[kvSetJSON] failed:", err)
-    return null
-  }
-}
-
-export async function kvDel(...keys: string[]) {
-  try {
-    return await kv.del(...keys)
-  } catch (err) {
-    console.warn("[kvDel] failed:", err)
-    return 0
-  }
-}
-
-if (!KV_ENABLED) {
-  console.warn(
-    "[kv] Upstash KV not configured. Falling back to in-memory shim. " +
-      "Set KV_REST_API_URL and KV_REST_API_TOKEN in Vercel."
-  )
-}
