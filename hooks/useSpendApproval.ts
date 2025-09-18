@@ -4,34 +4,64 @@
 import { Address, maxUint256 } from "viem"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
-export function useSpendApproval(spender?: Address, amount?: bigint) {
-  const { data: currentAllowanceRaw } = useUSDCAllowance(spender)
-  const currentAllowance = (currentAllowanceRaw ?? 0n) as bigint
+type SpendApproval = {
+  allowance: bigint
+  hasAllowance: boolean
+  needsApproval: boolean
+  approveExact: () => Promise<`0x${string}` | void>
+  approveMax: () => Promise<`0x${string}` | void>
+  isPending: boolean
+  isFetching: boolean
+  error?: Error | null
+  refetchAllowance: () => void
+  /** Convenience aggregate for UI states */
+  status: "idle" | "fetching" | "pending-tx"
+}
+
+/** Generic USDC spend-approval helper.
+ * - Pass the contract `spender` and the exact `amount` you plan to spend (USDC 6dp).
+ * - If either is missing/zero, `needsApproval` is false and approve calls no-op.
+ */
+export function useSpendApproval(spender?: Address, amount?: bigint): SpendApproval {
+  const {
+    data: allowanceRaw,
+    refetch,
+    isFetching,
+  } = useUSDCAllowance(spender)
 
   const { approve, isPending, error } = useUSDCApprove()
 
-  const needsAmount = (amount ?? 0n) > 0n
-  const hasAllowance = needsAmount ? currentAllowance >= (amount as bigint) : true
-  const needsApproval = needsAmount && !hasAllowance
+  const allowance = (allowanceRaw ?? 0n) as bigint
+  const amt = (amount ?? 0n) < 0n ? 0n : (amount ?? 0n)
 
-  /** Approve exactly the needed amount */
+  const hasAllowance = amt === 0n ? true : allowance >= amt
+  const needsApproval = !hasAllowance && amt > 0n && !!spender
+
   const approveExact = async () => {
-    if (!spender || !needsAmount) return
-    return approve(spender, amount as bigint) // waits for receipt internally
+    if (!spender || amt <= 0n) return
+    const tx = await approve(spender, amt) // waits for receipt internally
+    // optimistic refresh so UI updates without waiting for next block poll
+    refetch()
+    return tx
   }
 
-  /** Approve max (reduce future prompts) */
   const approveMax = async () => {
     if (!spender) return
-    return approve(spender, maxUint256) // waits for receipt internally
+    const tx = await approve(spender, maxUint256)
+    refetch()
+    return tx
   }
 
   return {
+    allowance,
     hasAllowance,
     needsApproval,
     approveExact,
     approveMax,
     isPending,
-    error,
+    isFetching,
+    error: (error as Error | null) ?? null,
+    refetchAllowance: () => { void refetch() },
+    status: isPending ? "pending-tx" : isFetching ? "fetching" : "idle",
   }
 }
