@@ -29,6 +29,7 @@ import StatsSection from "@/components/StatsSection"
 import CreatorContentManager from "@/components/CreatorContentManager"
 import ShareBar from "@/components/ShareBar"
 import EditProfileBox from "./EditProfileBox"
+import RatingWidget from "@/components/RatingWidget"
 
 const FALLBACK_AVATAR = "/avatar.png"
 const HUB = ADDR.HUB
@@ -98,6 +99,31 @@ function AvatarImg({
       decoding="async"
       onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK_AVATAR }}
     />
+  )
+}
+
+function Badge({
+  label,
+  tone = "pink",
+  title,
+}: {
+  label: string
+  tone?: "pink" | "green" | "slate" | "amber"
+  title?: string
+}) {
+  const tones: Record<string, string> = {
+    pink:  "border-pink-500/50 text-pink-200",
+    green: "border-emerald-500/50 text-emerald-200",
+    slate: "border-white/20 text-white/80",
+    amber: "border-amber-500/50 text-amber-200",
+  }
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] || tones.pink}`}
+    >
+      {label}
+    </span>
   )
 }
 
@@ -180,9 +206,10 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
     <div className="card space-y-3">
       <div className="flex items-center justify-between">
         <div className="font-medium">Post #{id.toString()}</div>
-        <div className="text-sm opacity-70">
-          {subGate ? "Sub-gated" : price === 0n ? "Free" : "One-off"} · {fmt6(price)} USDC{" "}
-          {active ? "" : "· inactive"}
+        <div className="flex items-center gap-2 text-sm opacity-80">
+          {subGate ? <Badge label="Subscriber" tone="green" /> : price === 0n ? <Badge label="Free" tone="slate" /> : <Badge label="Paid" tone="amber" />}
+          {!active && <Badge label="Inactive" tone="slate" />}
+          <span className="opacity-70">· {fmt6(price)} USDC</span>
         </div>
       </div>
 
@@ -280,6 +307,19 @@ function CreatorPublicPageImpl() {
 
   const badId = rawParam && isNumericId(rawParam) && id === 0n
 
+  // For role-aware header badge (Subscriber)
+  const { data: viewerHasSub } = useIsActive(address as `0x${string}` | undefined, creator)
+
+  // Decide header badge:
+  const headerBadge =
+    isOwner
+      ? <Badge label="Creator" tone="pink" title="You own this profile" />
+      : viewerHasSub
+      ? <Badge label="Subscriber" tone="green" title="You have an active subscription" />
+      : plans.length > 0
+      ? <Badge label="Pro" tone="amber" title="Creator offers paid content" />
+      : <Badge label="New" tone="slate" title="New or free creator" />
+
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4">
       {/* Header */}
@@ -294,9 +334,19 @@ function CreatorPublicPageImpl() {
           </>
         ) : (
           <>
-            <AvatarImg src={avatar || FALLBACK_AVATAR} size={64} alt="" />
+            <div className="relative">
+              <AvatarImg src={avatar || FALLBACK_AVATAR} size={64} alt="" />
+              {/* tiny corner badge dot */}
+              <span
+                aria-hidden
+                className="absolute -right-1 -bottom-1 h-4 w-4 rounded-full bg-pink-500/80 ring-2 ring-black/80"
+              />
+            </div>
             <div className="min-w-0 flex-1">
-              <div className="truncate text-2xl font-semibold">{name}</div>
+              <div className="flex items-center gap-2">
+                <div className="truncate text-2xl font-semibold">{name}</div>
+                {headerBadge}
+              </div>
               <div className="truncate opacity-70">@{handle}</div>
               <div className="mt-3">
                 <ShareBar creatorId={id.toString()} handle={handle} />
@@ -327,6 +377,13 @@ function CreatorPublicPageImpl() {
             Become a creator
           </Link>
         </div>
+      )}
+
+      {/* Rating widget (hidden from owner; SSR-safe since this page is client only) */}
+      {!isOwner && creator !== "0x0000000000000000000000000000000000000000" && (
+        <section className="card">
+          <RatingWidget creator={creator} owner={creator} />
+        </section>
       )}
 
       {isOwner && editing && id > 0n && (
