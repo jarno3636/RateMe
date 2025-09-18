@@ -25,7 +25,6 @@ function bad(status: number, error: string) {
 
 export async function POST(req: Request) {
   try {
-    // Helpful: fail early if the blob token isn’t present in env
     if (!process.env.BLOB_READ_WRITE_TOKEN) {
       return bad(500, "Storage is not configured (missing BLOB_READ_WRITE_TOKEN).")
     }
@@ -39,32 +38,17 @@ export async function POST(req: Request) {
     const isImage = IMAGE_TYPES.has(type)
     const isVideo = VIDEO_TYPES.has(type)
 
-    if (!isImage && !isVideo) {
-      return bad(415, "Unsupported file type. Allowed: PNG, JPG, WEBP, GIF, MP4, WEBM.")
-    }
-    if (isImage && size > MAX_IMAGE_BYTES) {
-      return bad(413, "Image exceeds 1 MB")
-    }
-    if (isVideo && size > MAX_VIDEO_BYTES) {
-      return bad(413, "Video exceeds 2 MB")
-    }
+    if (!isImage && !isVideo) return bad(415, "Unsupported file type. Allowed: PNG, JPG, WEBP, GIF, MP4, WEBM.")
+    if (isImage && size > MAX_IMAGE_BYTES) return bad(413, "Image exceeds 1 MB")
+    if (isVideo && size > MAX_VIDEO_BYTES) return bad(413, "Video exceeds 2 MB")
 
-    // Read the file content
     const arrayBuf: ArrayBuffer = await (file as any).arrayBuffer()
     const buf = Buffer.from(arrayBuf)
 
-    // Extra safety: re-check size after read
-    if (isImage && buf.byteLength > MAX_IMAGE_BYTES) {
-      return bad(413, "Image exceeds 1 MB")
-    }
-    if (isVideo && buf.byteLength > MAX_VIDEO_BYTES) {
-      return bad(413, "Video exceeds 2 MB")
-    }
+    if (isImage && buf.byteLength > MAX_IMAGE_BYTES) return bad(413, "Image exceeds 1 MB")
+    if (isVideo && buf.byteLength > MAX_VIDEO_BYTES) return bad(413, "Video exceeds 2 MB")
 
-    // MIME → extension mapping (don’t trust user filename)
     const ext = EXT_FROM_MIME[type] || "bin"
-
-    // Content-derived name to avoid collisions + hide user-provided names
     const hash = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 16)
     const stamp = Date.now()
     const kind = isImage ? "images" : "videos"
@@ -73,17 +57,11 @@ export async function POST(req: Request) {
     const { url } = await put(key, buf, {
       access: "public",
       contentType: type,
-      addRandomSuffix: false, // we already include hash
-      // Premium UX: immutable, CDN-cache friendly assets
-      cacheControl: "public, max-age=31536000, immutable",
+      addRandomSuffix: false, // hash already in name
+      // NOTE: omit cacheControl; your installed @vercel/blob doesn't support it
     })
 
-    return NextResponse.json({
-      url,
-      type,
-      size: buf.byteLength,
-      kind: isImage ? "image" : "video",
-    })
+    return NextResponse.json({ url, type, size: buf.byteLength, kind: isImage ? "image" : "video" })
   } catch (e: any) {
     console.error("[/api/upload] error:", e)
     return bad(500, e?.message || "Upload failed")
