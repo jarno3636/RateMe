@@ -25,17 +25,31 @@ import { useSpendApproval } from "@/hooks/useSpendApproval"
 import * as ADDR from "@/lib/addresses"
 import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 
-// import RatingWidget from "@/components/RatingWidget" // hidden for owner
 import StatsSection from "@/components/StatsSection"
 import CreatorContentManager from "@/components/CreatorContentManager"
 import ShareBar from "@/components/ShareBar"
 import EditProfileBox from "./EditProfileBox"
 
+const FALLBACK_AVATAR = "/avatar.png"
 const HUB = ADDR.HUB
 const pc = createPublicClient({ chain: base, transport: http() })
 
-const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(u)
-const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(u)
+/* ---------------- helpers ---------------- */
+function normalizeIpfs(u?: string | null) {
+  if (!u) return ""
+  return u.startsWith("ipfs://") ? `https://ipfs.io/ipfs/${u.slice(7)}` : u
+}
+function safeUrlPathname(u: string) {
+  try { return new URL(u).pathname } catch { return u }
+}
+function isImg(u: string) {
+  const p = safeUrlPathname(u)
+  return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(p)
+}
+function isVideo(u: string) {
+  const p = safeUrlPathname(u)
+  return /\.(mp4|webm|ogg)$/i.test(p)
+}
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 const isNumericId = (s: string) => /^[0-9]+$/.test(s)
 
@@ -54,6 +68,37 @@ async function resolveHandleToId(handle: string): Promise<bigint> {
     }
   } catch {}
   return 0n
+}
+
+/* ------------ tiny UI atoms ------------- */
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-white/10 ${className}`} />
+}
+
+function AvatarImg({
+  src,
+  size = 64,
+  className = "",
+  alt = "",
+}: {
+  src?: string
+  size?: number
+  className?: string
+  alt?: string
+}) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return (
+    <img
+      src={normalizeIpfs(src) || FALLBACK_AVATAR}
+      alt={alt}
+      width={size}
+      height={size}
+      className={`rounded-full object-cover ring-1 ring-white/10 ${className}`}
+      loading="eager"
+      decoding="async"
+      onError={(e) => { (e.currentTarget as HTMLImageElement).src = FALLBACK_AVATAR }}
+    />
+  )
 }
 
 /* ---------- Plans ---------- */
@@ -91,6 +136,7 @@ function PlanRow({ id }: { id: bigint }) {
         value={periods}
         onChange={(e) => setPeriods(Math.max(1, Number(e.target.value) || 1))}
         className="w-20 rounded-lg border border-white/15 bg-black/30 px-2 py-2"
+        aria-label="Subscription periods"
       />
       <button
         className="btn"
@@ -140,7 +186,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
         </div>
       </div>
 
-      {/* Content: no raw URLs; render media, blur if locked */}
+      {/* Content */}
       <div className="relative overflow-hidden rounded-xl border border-white/10">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {isImg(uri) ? (
@@ -149,7 +195,8 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
             alt=""
             className={`h-auto w-full ${canView ? "" : "blur-sm"}`}
             loading="lazy"
-            onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+            decoding="async"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
           />
         ) : isVideo(uri) ? (
           <video
@@ -237,25 +284,34 @@ function CreatorPublicPageImpl() {
     <div className="mx-auto max-w-3xl space-y-8 px-4">
       {/* Header */}
       <section className="card flex items-center gap-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={avatar || "/avatar.png"}
-          alt=""
-          className="h-16 w-16 rounded-full object-cover"
-          loading="eager"
-          onError={(e) => ((e.currentTarget as HTMLImageElement).src = "/avatar.png")}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-2xl font-semibold">{profLoading ? "Loading…" : name}</div>
-          <div className="truncate opacity-70">@{handle}</div>
-          <div className="mt-3">
-            <ShareBar creatorId={id.toString()} handle={handle} />
-          </div>
-        </div>
+        {profLoading ? (
+          <>
+            <Skeleton className="h-16 w-16 rounded-full" />
+            <div className="min-w-0 flex-1">
+              <Skeleton className="mb-2 h-5 w-1/2" />
+              <Skeleton className="h-4 w-1/3" />
+            </div>
+          </>
+        ) : (
+          <>
+            <AvatarImg src={avatar || FALLBACK_AVATAR} size={64} alt="" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-2xl font-semibold">{name}</div>
+              <div className="truncate opacity-70">@{handle}</div>
+              <div className="mt-3">
+                <ShareBar creatorId={id.toString()} handle={handle} />
+              </div>
+            </div>
+          </>
+        )}
 
         {isOwner && id > 0n && (
           <div className="flex items-center gap-2">
-            <button className="btn" onClick={() => setEditing((v) => !v)}>
+            <button
+              className="btn"
+              onClick={() => setEditing((v) => !v)}
+              title={editing ? "Close editor" : "Edit your profile"}
+            >
               {editing ? "Close Editor" : "Edit Profile"}
             </button>
           </div>
@@ -277,7 +333,7 @@ function CreatorPublicPageImpl() {
         <section className="card">
           <EditProfileBox
             creatorId={id.toString()}
-            currentAvatar={avatar || "/avatar.png"}
+            currentAvatar={avatar || FALLBACK_AVATAR}
             currentBio={bio || ""}
             onSaved={() => setEditing(false)}
           />
@@ -301,7 +357,9 @@ function CreatorPublicPageImpl() {
       <section className="space-y-3">
         <h2 className="text-xl font-semibold">Posts</h2>
         {postsLoading && <div className="card">Loading posts…</div>}
-        {!postsLoading && posts.length === 0 && <div className="opacity-70">No posts yet.</div>}
+        {!postsLoading && posts.length === 0 && (
+          <div className="card opacity-70">No posts yet.</div>
+        )}
         <div className="grid gap-4 md:grid-cols-2">
           {posts.map((pid) => (
             <PostCard key={`${pid}`} id={pid} creator={creator} />
@@ -313,7 +371,9 @@ function CreatorPublicPageImpl() {
       <section id="plans" className="space-y-3">
         <h2 className="text-xl font-semibold">Subscription plans</h2>
         {plansLoading && <div className="card">Loading plans…</div>}
-        {!plansLoading && plans.length === 0 && <div className="opacity-70">No plans yet.</div>}
+        {!plansLoading && plans.length === 0 && (
+          <div className="card opacity-70">No plans yet.</div>
+        )}
         <div className="grid gap-4">
           {plans.map((plid) => (
             <PlanRow key={`${plid}`} id={plid} />
