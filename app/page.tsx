@@ -4,6 +4,8 @@ import { headers } from "next/headers"
 import { computeTop3 } from "@/lib/top3"
 import { getProfileSnaps } from "@/lib/profileCache"
 
+const AVATAR_FALLBACK = "/avatar.png"
+
 async function getOrigin() {
   try {
     const h = headers()
@@ -15,6 +17,7 @@ async function getOrigin() {
 }
 
 async function getTop3Ids(): Promise<number[]> {
+  // Try the API first (KV caching); if it hiccups, fall back to direct on-chain compute.
   try {
     const origin = await getOrigin()
     const url = origin ? `${origin}/api/top3` : `/api/top3`
@@ -28,8 +31,9 @@ async function getTop3Ids(): Promise<number[]> {
   return await computeTop3(50)
 }
 
-// ⬇️ uses KV-backed cache via lib/profileCache
+// KV-backed profile snapshot fetch (server-side only)
 async function getProfiles(ids: number[]) {
+  if (!ids?.length) return []
   return getProfileSnaps(ids)
 }
 
@@ -105,7 +109,6 @@ export default async function HomePage() {
           />
         </div>
 
-        {/* Micro-CTA band */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs opacity-75">
           <span className="rounded-full border border-white/10 px-3 py-1">Non-custodial</span>
           <span className="rounded-full border border-white/10 px-3 py-1">Creator-friendly terms</span>
@@ -123,44 +126,49 @@ export default async function HomePage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {profiles.map((p) => (
-              <Link
-                key={p.id}
-                href={`/creator/${p.id}`}
-                className="group card relative overflow-hidden border-white/10 p-4 hover:bg-white/10"
-              >
-                {/* Accent line */}
-                <span
-                  aria-hidden
-                  className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-pink-500/0 via-pink-500/60 to-pink-500/0 opacity-80"
-                />
-
-                <div className="flex items-center gap-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={p.avatar || "/favicon.ico"}
-                    alt=""
-                    className="h-14 w-14 shrink-0 rounded-full object-cover ring-1 ring-white/10"
+            {profiles.map((p) => {
+              const src = p.avatar?.trim() ? p.avatar : AVATAR_FALLBACK
+              const name = p.name?.trim() ? p.name : `Profile #${p.id}`
+              const handle = p.handle?.trim() ? p.handle : "unknown"
+              return (
+                <Link
+                  key={p.id}
+                  href={`/creator/${p.id}`}
+                  className="group card relative overflow-hidden border-white/10 p-4 hover:bg-white/10"
+                >
+                  {/* Accent line */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-pink-500/0 via-pink-500/60 to-pink-500/0 opacity-80"
                   />
-                  <div className="min-w-0">
-                    <div className="truncate text-lg font-medium">
-                      {p.name || `Profile #${p.id}`}
-                    </div>
-                    <div className="truncate text-sm opacity-70">@{p.handle}</div>
-                  </div>
-                </div>
 
-                {/* subtle hover glow */}
-                <div
-                  aria-hidden
-                  className="pointer-events-none absolute -inset-1 -z-10 opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-30"
-                  style={{
-                    background:
-                      "radial-gradient(120px 60px at 20% 0%, rgba(236,72,153,0.35), transparent 70%)",
-                  }}
-                />
-              </Link>
-            ))}
+                  <div className="flex items-center gap-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={src}
+                      alt=""
+                      className="h-14 w-14 shrink-0 rounded-full object-cover ring-1 ring-white/10"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-lg font-medium">{name}</div>
+                      <div className="truncate text-sm opacity-70">@{handle}</div>
+                    </div>
+                  </div>
+
+                  {/* subtle hover glow */}
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -inset-1 -z-10 opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-30"
+                    style={{
+                      background:
+                        "radial-gradient(120px 60px at 20% 0%, rgba(236,72,153,0.35), transparent 70%)",
+                    }}
+                  />
+                </Link>
+              )
+            })}
           </div>
         )}
       </section>
