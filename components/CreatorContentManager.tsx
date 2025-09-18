@@ -1,7 +1,7 @@
 // components/CreatorContentManager.tsx
 "use client"
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import toast from "react-hot-toast"
 import { useAccount } from "wagmi"
 import {
@@ -42,6 +42,8 @@ function PriceInput({
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled}
       className="w-28 rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+      inputMode="decimal"
+      aria-label="Price in USDC"
     />
   )
 }
@@ -88,6 +90,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [subGate, setSubGate] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [creating, setCreating] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const { createPost } = useCreatePostOnchain()
 
@@ -106,13 +109,14 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       const res = await fetch("/api/upload", { method: "POST", body: fd })
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error || "Upload failed")
-      setUri(json.url as string)
+      setUri(String(json.url))
       toast.success("Uploaded")
     } catch (e: any) {
       console.error(e)
       toast.error(e?.message || "Upload failed")
     } finally {
       setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ""
     }
   }
 
@@ -121,7 +125,8 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
       if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
       setCreating(true)
-      const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6)) // USDC 6dp
+      const priceFloat = Number.parseFloat(priceUsd || "0")
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6)) // USDC 6dp
       // createPost(token, price, accessViaSub, uri)
       await createPost(ADDR.USDC, priceUnits, subGate, uri)
       toast.success("Post created")
@@ -143,18 +148,23 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <button className="btn" onClick={() => document.getElementById("post-file")?.click()} disabled={uploading}>
+            <button
+              className="btn"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              aria-label="Choose media file"
+            >
               {uploading ? "Uploading…" : "Choose file"}
             </button>
             <input
+              ref={fileInputRef}
               id="post-file"
               type="file"
               accept="image/*,video/*"
               hidden
               onChange={(e) => {
-                const f = e.target.files?.[0]
+                const f = e.currentTarget.files?.[0]
                 if (f) void onPick(f)
-                e.currentTarget.value = ""
               }}
             />
             <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
@@ -166,13 +176,18 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
         <div className="space-y-2">
           <label className="flex items-center gap-2">
-            <span className="text-sm opacity-80 w-32">Price (USDC)</span>
+            <span className="w-32 text-sm opacity-80">Price (USDC)</span>
             <PriceInput value={priceUsd} onChange={setPriceUsd} />
             <span className="text-xs opacity-60">0 = free</span>
           </label>
 
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={subGate} onChange={(e) => setSubGate(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={subGate}
+              onChange={(e) => setSubGate(e.target.checked)}
+              aria-label="Gate by subscription"
+            />
             <span className="text-sm">Gated by subscription</span>
           </label>
         </div>
@@ -213,7 +228,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     const res = await fetch("/api/upload", { method: "POST", body: fd })
     const json = await res.json()
     if (!res.ok) return toast.error(json?.error || "Upload failed")
-    setEditUri(json.url as string)
+    setEditUri(String(json.url))
     toast.success("Replaced file")
   }
 
@@ -221,7 +236,8 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     try {
       if (!token) throw new Error("Missing token (USDC) address.")
       setSaving(true)
-      const priceUnits = BigInt(Math.round(parseFloat(editPrice || "0") * 1e6))
+      const priceFloat = Number.parseFloat(editPrice || "0")
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
       // updatePost(id, token, price, active, accessViaSub, uri)
       await updatePost(id, token, priceUnits, active, editGate, editUri)
       toast.success("Post updated")
@@ -238,7 +254,8 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     try {
       if (!token) throw new Error("Missing token (USDC) address.")
       setToggling(true)
-      const priceUnits = BigInt(Math.round(parseFloat(editPrice || "0") * 1e6))
+      const priceFloat = Number.parseFloat(editPrice || "0")
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
       await updatePost(id, token, priceUnits, !active, editGate, editUri)
       toast.success(!active ? "Post activated" : "Post deactivated")
       onChanged?.()
@@ -300,7 +317,7 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
               accept="image/*,video/*"
               hidden
               onChange={(e) => {
-                const f = e.target.files?.[0]
+                const f = e.currentTarget.files?.[0]
                 if (f) void pickReplace(f)
                 e.currentTarget.value = ""
               }}
@@ -308,11 +325,16 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
             <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
           </div>
           <label className="flex items-center gap-2">
-            <span className="text-sm opacity-80 w-28">Price (USDC)</span>
+            <span className="w-28 text-sm opacity-80">Price (USDC)</span>
             <PriceInput value={editPrice} onChange={setEditPrice} />
           </label>
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={editGate} onChange={(e) => setEditGate(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={editGate}
+              onChange={(e) => setEditGate(e.target.checked)}
+              aria-label="Gate by subscription"
+            />
             <span className="text-sm">Gated by subscription</span>
           </label>
         </div>
@@ -371,8 +393,10 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
 
   const onCreate = async () => {
     try {
+      setCreating(true)
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
-      const priceUnits = BigInt(Math.round(parseFloat(priceUsd || "0") * 1e6))
+      const priceFloat = Number.parseFloat(priceUsd || "0")
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
       // createPlan(token, pricePerPeriod, periodDays, name, metadataURI)
       await createPlan(ADDR.USDC, priceUnits, days, name || "Plan", "")
       toast.success("Plan created")
@@ -393,7 +417,7 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
       <h2 className="text-xl font-semibold">Create a plan</h2>
       <div className="grid gap-3 md:grid-cols-3">
         <label className="flex items-center gap-2">
-          <span className="text-sm opacity-80 w-20">Name</span>
+          <span className="w-20 text-sm opacity-80">Name</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -402,18 +426,18 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
           />
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-sm opacity-80 w-20">Period</span>
+          <span className="w-20 text-sm opacity-80">Period</span>
           <input
             type="number"
             min={1}
             value={days}
-            onChange={(e) => setDays(Math.max(1, Number(e.target.value) || 30))}
+            onChange={(e) => setDays(Math.max(1, Number(e.currentTarget.value) || 30))}
             className="w-24 rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
           />
           <span className="text-sm opacity-60">days</span>
         </label>
         <label className="flex items-center gap-2">
-          <span className="text-sm opacity-80 w-20">Price</span>
+          <span className="w-20 text-sm opacity-80">Price</span>
           <PriceInput value={priceUsd} onChange={setPriceUsd} />
           <span className="text-sm opacity-60">USDC / period</span>
         </label>
@@ -457,7 +481,6 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return
     try {
       setRetiring(true)
-      // Here “retire” == set inactive. You could also tag metadataURI if desired.
       await updatePlan(id, name, metadataURI, price, days, false)
       toast.success("Plan retired")
       onChanged?.()
