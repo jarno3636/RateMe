@@ -4,33 +4,29 @@
 import RatingsAbi from "@/abi/Ratings.json"
 import { useReadContract } from "wagmi"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
-
-const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}` | undefined
+import { RATINGS as RATINGS_ADDR } from "@/lib/addresses"  // ✅ normalized
 
 export function useRatingsAllowance() {
+  const ratingsOk = !!RATINGS_ADDR
+
   // fee() -> uint256
-  const {
-    data: feeUnits,
-    isLoading: feeLoading,
-    refetch: refetchFee,
-  } = useReadContract({
+  const { data: feeUnits, isLoading: feeLoading, refetch: refetchFee } = useReadContract({
     abi: RatingsAbi as any,
-    address: RATINGS,
+    address: RATINGS_ADDR,
     functionName: "fee",
-    // don't query until RATINGS exists
-    query: { enabled: !!RATINGS },
+    query: { enabled: ratingsOk },
   })
 
-  // feeCollector() -> address (optional, but keep enabled guard)
+  // feeCollector() -> address (optional)
   const { data: collector } = useReadContract({
     abi: RatingsAbi as any,
-    address: RATINGS,
+    address: RATINGS_ADDR,
     functionName: "feeCollector",
-    query: { enabled: !!RATINGS },
+    query: { enabled: ratingsOk },
   })
 
-  // Approvals
-  const { data: allowance } = useUSDCAllowance(RATINGS) // hook should no-op if undefined
+  // USDC allowance for Ratings (spender = Ratings contract)
+  const { data: allowance } = useUSDCAllowance(RATINGS_ADDR)
   const { approve, isPending } = useUSDCApprove()
 
   const fee = (feeUnits ?? 0n) as bigint
@@ -38,17 +34,13 @@ export function useRatingsAllowance() {
   const hasAllowance = currentAllowance >= fee
 
   const approveForFee = async () => {
-    if (!RATINGS) throw new Error("Ratings contract address is not configured.")
-    if (fee > 0n) {
-      await approve(RATINGS, fee) // await receipt internally
-    }
+    if (!RATINGS_ADDR) throw new Error("Ratings contract address is not configured.")
+    if (fee > 0n) await approve(RATINGS_ADDR, fee)
   }
 
   return {
-    fee, // bigint (USDC 6dp)
-    feeCollector:
-      ((collector as `0x${string}`) ??
-        "0x0000000000000000000000000000000000000000") as `0x${string}`,
+    fee,
+    feeCollector: ((collector as `0x${string}`) ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
     hasAllowance,
     approveForFee,
     states: { loading: feeLoading, approving: isPending },
