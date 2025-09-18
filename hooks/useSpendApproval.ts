@@ -1,6 +1,7 @@
 // /hooks/useSpendApproval.ts
 "use client"
 
+import { useEffect, useMemo } from "react"
 import { Address, maxUint256 } from "viem"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
@@ -10,18 +11,16 @@ type SpendApproval = {
   needsApproval: boolean
   approveExact: () => Promise<`0x${string}` | void>
   approveMax: () => Promise<`0x${string}` | void>
-  isPending: boolean
-  isFetching: boolean
+  isPending: boolean         // tx pending
+  isFetching: boolean        // reading allowance
   error?: Error | null
   refetchAllowance: () => void
-  /** Convenience aggregate for UI states */
   status: "idle" | "fetching" | "pending-tx"
+  /** convenience for buttons/tooltips */
+  ready: boolean
+  reason?: string
 }
 
-/** Generic USDC spend-approval helper.
- * - Pass the contract `spender` and the exact `amount` you plan to spend (USDC 6dp).
- * - If either is missing/zero, `needsApproval` is false and approve calls no-op.
- */
 export function useSpendApproval(spender?: Address, amount?: bigint): SpendApproval {
   const {
     data: allowanceRaw,
@@ -37,11 +36,15 @@ export function useSpendApproval(spender?: Address, amount?: bigint): SpendAppro
   const hasAllowance = amt === 0n ? true : allowance >= amt
   const needsApproval = !hasAllowance && amt > 0n && !!spender
 
+  // Auto-refresh when inputs change (avoid stale reads)
+  useEffect(() => {
+    if (spender) void refetch()
+  }, [spender, amt, refetch])
+
   const approveExact = async () => {
     if (!spender || amt <= 0n) return
-    const tx = await approve(spender, amt) // waits for receipt internally
-    // optimistic refresh so UI updates without waiting for next block poll
-    refetch()
+    const tx = await approve(spender, amt) // waits for receipt
+    refetch() // optimistic
     return tx
   }
 
@@ -51,6 +54,14 @@ export function useSpendApproval(spender?: Address, amount?: bigint): SpendAppro
     refetch()
     return tx
   }
+
+  const status: SpendApproval["status"] = isPending ? "pending-tx" : isFetching ? "fetching" : "idle"
+
+  const { ready, reason } = useMemo(() => {
+    if (!spender) return { ready: false, reason: "Missing spender address" }
+    if (amt < 0n) return { ready: false, reason: "Invalid approval amount" }
+    return { ready: true, reason: undefined }
+  }, [spender, amt])
 
   return {
     allowance,
@@ -62,6 +73,8 @@ export function useSpendApproval(spender?: Address, amount?: bigint): SpendAppro
     isFetching,
     error: (error as Error | null) ?? null,
     refetchAllowance: () => { void refetch() },
-    status: isPending ? "pending-tx" : isFetching ? "fetching" : "idle",
+    status,
+    ready,
+    reason,
   }
 }
