@@ -1,25 +1,27 @@
-// app/layout.tsx
-import './globals.css';
-import Nav from '@/components/Nav';
-import dynamic from 'next/dynamic';
+import "./globals.css"
+import dynamic from "next/dynamic"
+import Nav from "@/components/Nav"
+import { Toaster } from "react-hot-toast"
+
+// Import the client Providers without SSR so nothing tries to touch indexedDB on the server
+const ProvidersNoSSR = dynamic(() => import("./providers"), { ssr: false })
 
 export const metadata = {
-  title: 'OnlyStars',
-  description: 'Creator subscriptions + paid posts + on-chain ratings (Base + USDC)',
-};
-
-// Load the whole provider tree on the client to avoid any SSR storage access
-const Providers = dynamic(() => import('./providers'), { ssr: false });
+  title: "OnlyStars",
+  description: "Creator subscriptions + paid posts + on-chain ratings (Base + USDC)",
+}
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body className="bg-black text-white">
-        <Providers>
+        {/* Everything that touches wagmi/rainbowkit lives under the no-SSR provider */}
+        <ProvidersNoSSR>
           <Nav />
           <main className="mx-auto max-w-5xl px-4 py-8">{children}</main>
-        </Providers>
+          <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+        </ProvidersNoSSR>
       </body>
     </html>
-  );
+  )
 }
