@@ -11,8 +11,9 @@ import {
 } from "wagmi"
 import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
+import * as ADDR from "@/lib/addresses"
+import { assertAddresses } from "@/lib/addresses"
 
-const HUB = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}` | undefined
 type WatchOpt = { watch?: boolean }
 
 /* Small helper to refetch on new blocks when opt.watch = true */
@@ -25,6 +26,8 @@ function useRefetchOnBlock(refetch?: () => void, watch?: boolean) {
     if (watch) refetch?.()
   }, [watch, blockNumber, refetch])
 }
+
+const HUB = ADDR.HUB // checksummed or undefined
 
 /* ----------------------------- READS ----------------------------- */
 
@@ -102,17 +105,33 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`,
 
 /* ----------------------------- WRITES ----------------------------- */
 
+function toUserError(e: unknown, fallback = "Transaction failed") {
+  if (e && typeof e === "object" && "message" in e) return (e as any).message as string
+  return String(e ?? fallback)
+}
+
 export function useSubscribe() {
   const client = usePublicClient()
   const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
 
   const subscribe = async (planId: bigint, periods: number) => {
-    if (!HUB) throw new Error("CreatorHub address is not configured.")
+    assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+
+    // Preflight: revert reasons before signature
+    await client.simulateContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "subscribe",
+      args: [planId, periods],
+      account: address,
+      chain: base,
+    }).catch((e) => { throw new Error(toUserError(e, "Subscribe would revert")) })
+
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
-      address: HUB,
+      address: ADDR.HUB as `0x${string}`,
       functionName: "subscribe",
       args: [planId, periods],
       account: address,
@@ -130,11 +149,21 @@ export function useBuyPost() {
   const { writeContractAsync, isPending, error } = useWriteContract()
 
   const buy = async (postId: bigint) => {
-    if (!HUB) throw new Error("CreatorHub address is not configured.")
+    assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+
+    await client.simulateContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "buyPost",
+      args: [postId],
+      account: address,
+      chain: base,
+    }).catch((e) => { throw new Error(toUserError(e, "Purchase would revert")) })
+
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
-      address: HUB,
+      address: ADDR.HUB as `0x${string}`,
       functionName: "buyPost",
       args: [postId],
       account: address,
@@ -158,13 +187,23 @@ export function useCreatePlan() {
     name: string,
     metadataURI: string
   ) => {
-    if (!HUB) throw new Error("CreatorHub address is not configured.")
+    assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+
+    await client.simulateContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "createPlan",
+      args: [token, pricePerPeriod, periodDays, name.trim(), metadataURI.trim()],
+      account: address,
+      chain: base,
+    }).catch((e) => { throw new Error(toUserError(e, "Create plan would revert")) })
+
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
-      address: HUB,
+      address: ADDR.HUB as `0x${string}`,
       functionName: "createPlan",
-      args: [token, pricePerPeriod, periodDays, name, metadataURI],
+      args: [token, pricePerPeriod, periodDays, name.trim(), metadataURI.trim()],
       account: address,
       chain: base,
     })
@@ -186,13 +225,23 @@ export function useCreatePost() {
     accessViaSub: boolean,
     uri: string
   ) => {
-    if (!HUB) throw new Error("CreatorHub address is not configured.")
+    assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+
+    await client.simulateContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "createPost",
+      args: [token, price, accessViaSub, uri.trim()],
+      account: address,
+      chain: base,
+    }).catch((e) => { throw new Error(toUserError(e, "Create post would revert")) })
+
     const hash = await writeContractAsync({
       abi: CreatorHub as any,
-      address: HUB,
+      address: ADDR.HUB as `0x${string}`,
       functionName: "createPost",
-      args: [token, price, accessViaSub, uri],
+      args: [token, price, accessViaSub, uri.trim()],
       account: address,
       chain: base,
     })
