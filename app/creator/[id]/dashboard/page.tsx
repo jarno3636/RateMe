@@ -1,7 +1,7 @@
 // /app/creator/[id]/dashboard/page.tsx
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { useParams } from "next/navigation"
 import toast from "react-hot-toast"
 import { useAccount } from "wagmi"
@@ -17,36 +17,72 @@ import {
 } from "@/hooks/useCreatorHub"
 import { useAverage, useRatingStats } from "@/hooks/useRatings"
 
-const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}`
+const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}` | undefined
+const AVATAR_FALLBACK = "/avatar.png"
 
+/** ---------- utils ---------- */
 function toUnits6(n: number) {
   return BigInt(Math.round(n * 1_000_000))
 }
-function numberOr<T>(v: any, d: T): T {
-  const n = Number(v)
-  return Number.isFinite(n) ? (n as any) : d
+function numberOr(v: unknown, d: number) {
+  const n = typeof v === "string" ? Number(v) : Number(v ?? NaN)
+  return Number.isFinite(n) ? n : d
+}
+function isSameAddr(a?: string, b?: string) {
+  return !!a && !!b && a.toLowerCase() === b.toLowerCase()
+}
+
+/** Avatar with built-in fallback */
+function Avatar({
+  src,
+  alt = "",
+  className = "",
+}: {
+  src?: string
+  alt?: string
+  className?: string
+}) {
+  const [fallback, setFallback] = useState(false)
+  const finalSrc = !fallback && src?.trim() ? src : AVATAR_FALLBACK
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={finalSrc}
+      alt={alt}
+      className={className}
+      loading="lazy"
+      referrerPolicy="no-referrer"
+      onError={() => setFallback(true)}
+    />
+  )
 }
 
 export default function CreatorDashboardPage() {
   const params = useParams<{ id: string }>()
   const id = useMemo(() => {
-    try { return BigInt(params.id) } catch { return 0n }
+    try {
+      return BigInt(params.id)
+    } catch {
+      return 0n
+    }
   }, [params.id])
 
   const { address } = useAccount()
+
+  /** Profile */
   const { data: prof, refetch: refetchProfile } = useGetProfile(id)
   const { update, isPending: savingProfile } = useUpdateProfile()
 
-  const owner  = prof?.[0] as `0x${string}` | undefined
+  const owner  = (prof?.[0] as `0x${string}` | undefined) ?? undefined
   const handle = String(prof?.[1] ?? "")
   const name   = String(prof?.[2] ?? "")
   const avatar = String(prof?.[3] ?? "")
   const bio    = String(prof?.[4] ?? "")
   const fid    = (prof?.[5] as bigint) ?? 0n
 
-  const isOwner = owner && address && owner.toLowerCase() === address.toLowerCase()
+  const isOwner = isSameAddr(owner, address)
 
-  /* ---------- Edit profile ---------- */
+  /** ---------- Edit profile ---------- */
   const [editing, setEditing] = useState(false)
   const [displayName, setDisplayName] = useState(name)
   const [avatarURI, setAvatarURI] = useState(avatar)
@@ -60,7 +96,7 @@ export default function CreatorDashboardPage() {
     setFidNum(fid ? String(fid) : "")
   }, [name, avatar, bio, fid])
 
-  const saveProfile = async () => {
+  const saveProfile = useCallback(async () => {
     try {
       if (!isOwner) return toast.error("You don't own this profile")
       const fidBig = fidNum ? BigInt(fidNum) : 0n
@@ -71,10 +107,10 @@ export default function CreatorDashboardPage() {
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Failed to update profile")
     }
-  }
+  }, [isOwner, fidNum, update, id, displayName, avatarURI, bioText, refetchProfile])
 
-  /* ---------- Plans ---------- */
-  const { data: planIds, refetch: refetchPlans } = useCreatorPlanIds(owner)
+  /** ---------- Plans ---------- */
+  const { data: planIds, refetch: refetchPlans } = useCreatorPlanIds(owner ?? undefined)
   const { createPlan, isPending: creatingPlan } = useCreatePlan()
 
   const [planName, setPlanName] = useState("")
@@ -82,49 +118,52 @@ export default function CreatorDashboardPage() {
   const [planDays, setPlanDays] = useState("30")
   const [planMeta, setPlanMeta] = useState("")
 
-  const submitPlan = async () => {
+  const submitPlan = useCallback(async () => {
     try {
       if (!isOwner) return toast.error("Connect as the profile owner")
+      if (!USDC) return toast.error("USDC address not configured")
       const priceUnits = toUnits6(numberOr(planPrice, 0))
       if (priceUnits < 0n) return toast.error("Price must be ≥ 0")
       const days = numberOr(planDays, 30)
-      await createPlan(USDC, priceUnits, days, planName || "Plan", planMeta || "")
+      await createPlan(USDC, priceUnits, days, (planName || "Plan").trim(), (planMeta || "").trim())
       toast.success("Plan created")
       setPlanName(""); setPlanPrice(""); setPlanDays("30"); setPlanMeta("")
       refetchPlans()
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Failed to create plan")
     }
-  }
+  }, [isOwner, planPrice, planDays, planName, planMeta, refetchPlans])
 
-  /* ---------- Posts ---------- */
-  const { data: postIds, refetch: refetchPosts } = useCreatorPostIds(owner)
+  /** ---------- Posts ---------- */
+  const { data: postIds, refetch: refetchPosts } = useCreatorPostIds(owner ?? undefined)
   const { createPost, isPending: creatingPost } = useCreatePost()
 
   const [postURI, setPostURI] = useState("")
   const [postPrice, setPostPrice] = useState("") // USDC
   const [postSubGate, setPostSubGate] = useState(false)
 
-  const submitPost = async () => {
+  const submitPost = useCallback(async () => {
     try {
       if (!isOwner) return toast.error("Connect as the profile owner")
+      if (!USDC) return toast.error("USDC address not configured")
       const priceUnits = toUnits6(numberOr(postPrice, 0))
       if (priceUnits < 0n) return toast.error("Price must be ≥ 0")
-      await createPost(USDC, priceUnits, postSubGate, postURI)
+      await createPost(USDC, priceUnits, postSubGate, (postURI || "").trim())
       toast.success("Post created")
       setPostURI(""); setPostPrice(""); setPostSubGate(false)
       refetchPosts()
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Failed to create post")
     }
-  }
+  }, [isOwner, postPrice, postSubGate, postURI, refetchPosts])
 
-  /* ---------- Stats ---------- */
-  const { data: avgX100 } = useAverage(owner)
-  const { data: stat } = useRatingStats(owner)
+  /** ---------- Stats ---------- */
+  const { data: avgX100 } = useAverage(owner ?? undefined)
+  const { data: stat } = useRatingStats(owner ?? undefined)
   const ratingAvg = avgX100 ? Number(avgX100) / 100 : 0
   const ratingCount = stat ? Number((stat as any)?.[0] ?? 0) : 0
 
+  // mock server stats (kept as-is; fetches client-side)
   const [subs, setSubs] = useState(0)
   const [sales, setSales] = useState(0)
   const [mrr, setMrr] = useState(0)
@@ -154,8 +193,11 @@ export default function CreatorDashboardPage() {
     <div className="space-y-8">
       {/* Header */}
       <section className="card flex items-center gap-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={avatar || "/favicon.ico"} alt="" className="h-16 w-16 rounded-full object-cover" />
+        <Avatar
+          src={avatar}
+          alt=""
+          className="h-16 w-16 rounded-full object-cover ring-1 ring-white/10"
+        />
         <div className="min-w-0 flex-1">
           <div className="truncate text-2xl font-semibold">{name || `Profile #${params.id}`}</div>
           <div className="truncate opacity-70">@{handle}</div>
@@ -176,20 +218,38 @@ export default function CreatorDashboardPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Display name</div>
-              <input className="w-full" value={displayName} onChange={(e)=>setDisplayName(e.target.value)} />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={displayName}
+                onChange={(e)=>setDisplayName(e.target.value)}
+              />
             </label>
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Avatar URI</div>
-              <input className="w-full" value={avatarURI} onChange={(e)=>setAvatarURI(e.target.value)} />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={avatarURI}
+                onChange={(e)=>setAvatarURI(e.target.value)}
+                placeholder="https://... or ipfs://..."
+              />
             </label>
           </div>
           <label className="block">
             <div className="mb-1 text-sm opacity-70">Bio</div>
-            <textarea className="min-h-[100px] w-full" value={bioText} onChange={(e)=>setBioText(e.target.value)} />
+            <textarea
+              className="min-h-[100px] w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+              value={bioText}
+              onChange={(e)=>setBioText(e.target.value)}
+            />
           </label>
           <label className="block max-w-xs">
             <div className="mb-1 text-sm opacity-70">Farcaster FID (optional)</div>
-            <input className="w-full" value={fidNum} onChange={(e)=>setFidNum(e.target.value)} />
+            <input
+              className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+              value={fidNum}
+              onChange={(e)=>setFidNum(e.target.value)}
+              inputMode="numeric"
+            />
           </label>
 
           <div className="flex justify-end">
@@ -221,7 +281,8 @@ export default function CreatorDashboardPage() {
         <div className="card">
           <div className="text-sm opacity-70">Rating avg · count</div>
           <div className="text-2xl font-semibold">
-            {ratingAvg ? ratingAvg.toFixed(2) : "-"} <span className="text-sm opacity-70">({ratingCount})</span>
+            {ratingAvg ? ratingAvg.toFixed(2) : "-"}{" "}
+            <span className="text-sm opacity-70">({ratingCount})</span>
           </div>
         </div>
       </section>
@@ -233,11 +294,22 @@ export default function CreatorDashboardPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Content URI</div>
-              <input className="w-full" value={postURI} onChange={(e)=>setPostURI(e.target.value)} placeholder="https://blob.vercel-storage.com/..." />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={postURI}
+                onChange={(e)=>setPostURI(e.target.value)}
+                placeholder="https://blob.vercel-storage.com/..."
+              />
             </label>
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Price (USDC)</div>
-              <input className="w-full" value={postPrice} onChange={(e)=>setPostPrice(e.target.value)} placeholder="0.00 for free" />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={postPrice}
+                onChange={(e)=>setPostPrice(e.target.value)}
+                placeholder="0.00 for free"
+                inputMode="decimal"
+              />
             </label>
           </div>
           <label className="inline-flex items-center gap-2">
@@ -273,21 +345,43 @@ export default function CreatorDashboardPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Plan name</div>
-              <input className="w-full" value={planName} onChange={(e)=>setPlanName(e.target.value)} placeholder="Monthly" />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={planName}
+                onChange={(e)=>setPlanName(e.target.value)}
+                placeholder="Monthly"
+              />
             </label>
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Price per period (USDC)</div>
-              <input className="w-full" value={planPrice} onChange={(e)=>setPlanPrice(e.target.value)} placeholder="e.g. 5.00" />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={planPrice}
+                onChange={(e)=>setPlanPrice(e.target.value)}
+                placeholder="e.g. 5.00"
+                inputMode="decimal"
+              />
             </label>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Period (days)</div>
-              <input className="w-full" value={planDays} onChange={(e)=>setPlanDays(e.target.value)} placeholder="30" />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={planDays}
+                onChange={(e)=>setPlanDays(e.target.value)}
+                placeholder="30"
+                inputMode="numeric"
+              />
             </label>
             <label className="block">
               <div className="mb-1 text-sm opacity-70">Metadata URI (optional)</div>
-              <input className="w-full" value={planMeta} onChange={(e)=>setPlanMeta(e.target.value)} placeholder="ipfs://..., https://..., etc." />
+              <input
+                className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+                value={planMeta}
+                onChange={(e)=>setPlanMeta(e.target.value)}
+                placeholder="ipfs://..., https://..., etc."
+              />
             </label>
           </div>
           <div className="flex justify-end">
