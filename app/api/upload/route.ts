@@ -1,50 +1,91 @@
-// app/api/upload/route.ts
+// /app/api/upload/route.ts
 import { NextResponse } from "next/server"
 import { put } from "@vercel/blob"
+import crypto from "crypto"
 
 export const runtime = "nodejs"
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
 const VIDEO_TYPES = new Set(["video/mp4", "video/webm"])
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024 // 1MB
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 // 2MB
+
+const EXT_FROM_MIME: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+}
+
+function bad(status: number, error: string) {
+  return NextResponse.json({ error }, { status })
+}
 
 export async function POST(req: Request) {
   try {
+    // Helpful: fail early if the blob token isn’t present in env
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return bad(500, "Storage is not configured (missing BLOB_READ_WRITE_TOKEN).")
+    }
+
     const form = await req.formData()
-    // Cast to any to satisfy TS when DOM lib isn't present on server build
-    const file = (form as any).get("file") as File | null
-    if (!file) return NextResponse.json({ error: "No file" }, { status: 400 })
+    const file = (form as any).get?.("file") as File | null
+    if (!file) return bad(400, "No file provided")
 
     const type = (file as any).type as string
-    const size = (file as any).size as number
-
+    const size = Number((file as any).size ?? 0)
     const isImage = IMAGE_TYPES.has(type)
     const isVideo = VIDEO_TYPES.has(type)
+
     if (!isImage && !isVideo) {
-      return NextResponse.json({ error: "Unsupported file type" }, { status: 415 })
+      return bad(415, "Unsupported file type. Allowed: PNG, JPG, WEBP, GIF, MP4, WEBM.")
     }
     if (isImage && size > MAX_IMAGE_BYTES) {
-      return NextResponse.json({ error: "Image exceeds 1 MB" }, { status: 413 })
+      return bad(413, "Image exceeds 1 MB")
     }
     if (isVideo && size > MAX_VIDEO_BYTES) {
-      return NextResponse.json({ error: "Video exceeds 2 MB" }, { status: 413 })
+      return bad(413, "Video exceeds 2 MB")
     }
 
-    const name: string = (file as any).name || ""
-    const ext = name.includes(".") ? name.split(".").pop() : (isImage ? "png" : "mp4")
-    const key = `uploads/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+    // Read the file content
+    const arrayBuf: ArrayBuffer = await (file as any).arrayBuffer()
+    const buf = Buffer.from(arrayBuf)
 
-    const arrayBuf = await (file as any).arrayBuffer()
-    const { url } = await put(key, new Uint8Array(arrayBuf), {
+    // Extra safety: re-check size after read
+    if (isImage && buf.byteLength > MAX_IMAGE_BYTES) {
+      return bad(413, "Image exceeds 1 MB")
+    }
+    if (isVideo && buf.byteLength > MAX_VIDEO_BYTES) {
+      return bad(413, "Video exceeds 2 MB")
+    }
+
+    // MIME → extension mapping (don’t trust user filename)
+    const ext = EXT_FROM_MIME[type] || "bin"
+
+    // Content-derived name to avoid collisions + hide user-provided names
+    const hash = crypto.createHash("sha256").update(buf).digest("hex").slice(0, 16)
+    const stamp = Date.now()
+    const kind = isImage ? "images" : "videos"
+    const key = `uploads/${kind}/${stamp}-${hash}.${ext}`
+
+    const { url } = await put(key, buf, {
       access: "public",
       contentType: type,
-      addRandomSuffix: false,
+      addRandomSuffix: false, // we already include hash
+      // Premium UX: immutable, CDN-cache friendly assets
+      cacheControl: "public, max-age=31536000, immutable",
     })
 
-    return NextResponse.json({ url, type, size })
+    return NextResponse.json({
+      url,
+      type,
+      size: buf.byteLength,
+      kind: isImage ? "image" : "video",
+    })
   } catch (e: any) {
-    console.error(e)
-    return NextResponse.json({ error: "Upload failed" }, { status: 500 })
+    console.error("[/api/upload] error:", e)
+    return bad(500, e?.message || "Upload failed")
   }
 }
