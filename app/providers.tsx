@@ -15,26 +15,33 @@ import {
 import "@rainbow-me/rainbowkit/styles.css"
 
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL
-const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "ONLYSTARS"
+const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "ONLYSTARS" // replace with a real ID in prod
 
-const connectors = connectorsForWallets([
+// v1+ signature: connectorsForWallets(groups, { appName, projectId })
+const connectors = connectorsForWallets(
+  [
+    {
+      groupName: "Recommended",
+      wallets: [
+        injectedWallet(),
+        metaMaskWallet({ projectId: WC_PROJECT_ID }),
+        walletConnectWallet({ projectId: WC_PROJECT_ID }),
+        coinbaseWallet({ appName: "OnlyStars" }),
+      ],
+    },
+  ],
   {
-    groupName: "Recommended",
-    wallets: [
-      injectedWallet(),
-      metaMaskWallet({ projectId: WC_PROJECT_ID }),
-      walletConnectWallet({ projectId: WC_PROJECT_ID }),
-      coinbaseWallet({ appName: "OnlyStars" }),
-    ],
-  },
-])
+    appName: "OnlyStars",
+    projectId: WC_PROJECT_ID,
+  }
+)
 
 const wagmiConfig = createConfig({
   chains: [base],
   transports: { [base.id]: http(RPC_URL) },
   connectors,
   ssr: true,
-  storage: createStorage({ storage: cookieStorage }), // SSR-safe (no indexedDB)
+  storage: createStorage({ storage: cookieStorage }), // SSR-safe (no indexedDB usage server-side)
 })
 
 const theme = darkTheme({
@@ -49,7 +56,12 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={qcRef.current}>
-        <RainbowKitProvider theme={theme} initialChain={base} modalSize="compact" showRecentTransactions={false}>
+        <RainbowKitProvider
+          theme={theme}
+          initialChain={base}
+          modalSize="compact"
+          showRecentTransactions={false}
+        >
           {children}
         </RainbowKitProvider>
       </QueryClientProvider>
