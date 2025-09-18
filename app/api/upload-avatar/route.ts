@@ -1,72 +1,53 @@
 // /app/api/upload-avatar/route.ts
 import { NextResponse } from "next/server"
 import { put } from "@vercel/blob"
-import crypto from "crypto"
 
 export const runtime = "nodejs"
 
 const MAX_BYTES = 1_000_000 // 1MB
-const ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-  "image/avif",
-])
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"])
+const EXT_FROM_MIME: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/webp": "webp",
+  "image/gif": "gif",
+}
 
-function extFor(mime: string) {
-  if (mime === "image/png") return "png"
-  if (mime === "image/jpeg" || mime === "image/jpg") return "jpg"
-  if (mime === "image/webp") return "webp"
-  if (mime === "image/gif") return "gif"
-  if (mime === "image/avif") return "avif"
-  return "bin"
+function bad(status: number, error: string) {
+  return NextResponse.json({ error }, { status })
 }
 
 export async function POST(req: Request) {
   try {
+    if (!process.env.BLOB_READ_WRITE_TOKEN) {
+      return bad(500, "Storage not configured (missing BLOB_READ_WRITE_TOKEN).")
+    }
+
     const form = await req.formData()
     const file = (form as any).get("file") as File | null
-    if (!file) {
-      return NextResponse.json({ error: "No file uploaded" }, { status: 400 })
-    }
-    if (!file.type || !ALLOWED_MIME.has(file.type)) {
-      return NextResponse.json({ error: "Unsupported image type" }, { status: 400 })
-    }
-    if (file.size > MAX_BYTES) {
-      return NextResponse.json({ error: "Image must be ≤ 1MB" }, { status: 400 })
-    }
+    if (!file) return bad(400, "No file")
+    const type = (file as any).type as string
+    const size = Number((file as any).size ?? 0)
 
-    // Read the file
-    const arrayBuf = await file.arrayBuffer()
-    let buffer = Buffer.from(arrayBuf)
+    if (!IMAGE_TYPES.has(type)) return bad(400, "Only image files allowed")
+    if (size > MAX_BYTES) return bad(400, "Image must be ≤ 1MB")
 
-    // Optional: auto-resize to 512x512 if 'sharp' is available
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const sharp = require("sharp") as typeof import("sharp")
-      buffer = await sharp(buffer).resize(512, 512, { fit: "cover" }).toBuffer()
-    } catch {
-      // sharp not installed — skip resize (still safe)
-    }
+    const ext = EXT_FROM_MIME[type] || "jpg"
+    const key = `avatars/avatar_${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
 
-    // Hash for deterministic, non-guessable name
-    const hash = crypto.createHash("sha256").update(buffer).digest("hex").slice(0, 32)
-    const ext = extFor(file.type)
-    const objectName = `avatars/${hash}.${ext}`
+    const arrayBuf = await (file as any).arrayBuffer()
+    const buffer = Buffer.from(arrayBuf)
 
-    const blob = await put(objectName, buffer, {
+    const blob = await put(key, buffer, {
       access: "public",
-      contentType: file.type,
-      // Premium perf: long-lived CDN cache; URL is content-addressed by hash
-      cacheControlMaxAge: 60 * 60 * 24 * 365, // 1 year
-      contentDisposition: "inline",
+      contentType: type,
       addRandomSuffix: false,
+      cacheControl: "public, max-age=31536000, immutable",
     })
 
-    return NextResponse.json({ url: blob.url, bytes: buffer.byteLength, mime: file.type })
+    return NextResponse.json({ url: blob.url })
   } catch (err: any) {
-    return NextResponse.json({ error: err?.message || "Upload failed" }, { status: 500 })
+    console.error("[/api/upload-avatar] error:", err)
+    return bad(500, err?.message || "Upload failed")
   }
 }
