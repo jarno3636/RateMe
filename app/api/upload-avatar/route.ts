@@ -26,6 +26,7 @@ export async function POST(req: Request) {
     const form = await req.formData()
     const file = (form as any).get("file") as File | null
     if (!file) return bad(400, "No file")
+
     const type = (file as any).type as string
     const size = Number((file as any).size ?? 0)
 
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
       access: "public",
       contentType: type,
       addRandomSuffix: false,
-      cacheControl: "public, max-age=31536000, immutable",
+      // NOTE: older @vercel/blob versions don't support `cacheControl`
     })
 
     return NextResponse.json({ url: blob.url })
