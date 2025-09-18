@@ -1,12 +1,14 @@
-// lib/getTop3Ids.client.ts (client-safe util)
-export async function getTop3IdsClient(): Promise<number[]> {
+// /lib/getTop3Ids.ts (client-safe)
+export async function getTop3Ids(): Promise<number[]> {
   try {
-    const res = await fetch("/api/top3", { credentials: "include", cache: "no-store" });
-    if (!res.ok) throw new Error(String(res.status));
-    const json = await res.json();
-    return Array.isArray(json.ids) ? json.ids : [];
-  } catch (e) {
-    console.warn("top3 api failed:", e);
-    return []; // render gracefully with an empty list
+    const res = await fetch("/api/top3", { cache: "no-store" })
+    if (!res.ok) {
+      // 401/403/500 – degrade gracefully
+      return []
+    }
+    const json = await res.json()
+    return (json?.ids ?? []).map((x: any) => Number(x)).filter(Number.isFinite)
+  } catch {
+    return []
   }
 }
