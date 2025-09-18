@@ -7,23 +7,26 @@ import {
   useReadContract,
   useWriteContract,
 } from "wagmi"
-import { createPublicClient, getAddress, http } from "viem"
+import { createPublicClient, http } from "viem"
 import { base } from "viem/chains"
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
+import { REGISTRY as REGISTRY_ADDR } from "@/lib/addresses" // ✅ single source of truth (checksummed/validated)
 
-export const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
-// Checksummed (prevents “bad address checksum” at runtime)
-export const REGISTRY_CS = (REGISTRY ? (getAddress(REGISTRY) as `0x${string}`) : undefined)
+/** Expose for legacy imports if needed */
+export const REGISTRY = REGISTRY_ADDR
+export const REGISTRY_CS = REGISTRY_ADDR // kept alias so all existing imports keep working
 
 // Standalone public client for non-hook helpers (usable in Header, server routes, etc.)
-const pc = createPublicClient({ chain: base, transport: http() })
+const pc = createPublicClient({
+  chain: base,
+  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL), // safe if undefined; viem picks default
+})
 
 type WatchOpts = { watch?: boolean }
 const REFRESH_MS = 5_000
 
 /* ───────────────────────────── NON-HOOK HELPERS ───────────────────────────── */
 
-/** Get a single profile tuple by id. */
 export async function getProfile(id: bigint) {
   if (!REGISTRY_CS || !id || id <= 0n) return undefined
   try {
@@ -51,7 +54,7 @@ export async function getProfile(id: bigint) {
 export async function getProfileIdByHandle(handle: string): Promise<bigint> {
   if (!REGISTRY_CS || !handle) return 0n
   try {
-    // You implemented both; prefer the direct id view if it exists.
+    // Prefer direct id lookup if available
     try {
       const id = await pc.readContract({
         address: REGISTRY_CS,
@@ -60,9 +63,7 @@ export async function getProfileIdByHandle(handle: string): Promise<bigint> {
         args: [handle],
       })
       if (typeof id === "bigint" && id > 0n) return id
-    } catch {
-      /* fall through to getProfileByHandle shape */
-    }
+    } catch { /* fall through */ }
 
     const prof = await pc.readContract({
       address: REGISTRY_CS,
@@ -72,7 +73,6 @@ export async function getProfileIdByHandle(handle: string): Promise<bigint> {
     })
     if (typeof prof === "bigint") return prof
     if (Array.isArray(prof)) {
-      // find any bigint field > 0n (some ABIs return (exists, id, ...))
       const candidate = (prof as any[]).find((v) => typeof v === "bigint" && v > 0n)
       return (candidate as bigint) || 0n
     }
@@ -107,15 +107,15 @@ export async function listProfilesFlat(cursor: bigint = 0n, size: bigint = 12n) 
       args: [cursor, size],
     })
     return res as unknown as {
-      0: bigint[]  // ids
-      1: `0x${string}`[] // owners
-      2: string[]  // handles
-      3: string[]  // displayNames
-      4: string[]  // avatars
-      5: string[]  // bios
-      6: bigint[]  // fids
-      7: bigint[]  // createdAts
-      8: bigint    // nextCursor
+      0: bigint[]          // ids
+      1: `0x${string}`[]   // owners
+      2: string[]          // handles
+      3: string[]          // displayNames
+      4: string[]          // avatars
+      5: string[]          // bios
+      6: bigint[]          // fids
+      7: bigint[]          // createdAts
+      8: bigint            // nextCursor
     }
   } catch {
     return undefined
@@ -124,7 +124,6 @@ export async function listProfilesFlat(cursor: bigint = 0n, size: bigint = 12n) 
 
 /* ─────────────────────────────── READ HOOKS ──────────────────────────────── */
 
-/** Paginated flat listing: ids, owners, handles, names, avatars, bios, fids, createdAts, nextCursor */
 export function useListProfiles(cursor: bigint = 0n, size: bigint = 12n, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS
   return useReadContract({
@@ -132,14 +131,10 @@ export function useListProfiles(cursor: bigint = 0n, size: bigint = 12n, opts?: 
     address: REGISTRY_CS,
     functionName: "listProfilesFlat",
     args: enabled ? [cursor, size] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Single profile by id -> (owner_, handle_, displayName_, avatarURI_, bio_, fid_, createdAt_) */
 export function useGetProfile(id?: bigint, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!id && id > 0n
   return useReadContract({
@@ -147,14 +142,10 @@ export function useGetProfile(id?: bigint, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "getProfile",
     args: enabled ? [id as bigint] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Batch flat fetch by ids -> outIds, owners, handles, displayNames, avatarURIs, bios, fids, createdAts */
 export function useGetProfilesFlat(ids?: bigint[], opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!ids && ids.length > 0
   return useReadContract({
@@ -162,14 +153,10 @@ export function useGetProfilesFlat(ids?: bigint[], opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "getProfilesFlat",
     args: enabled ? [ids as bigint[]] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Resolve id from handle */
 export function useGetIdByHandle(handle?: string, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!handle
   return useReadContract({
@@ -177,14 +164,10 @@ export function useGetIdByHandle(handle?: string, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "getIdByHandle",
     args: enabled ? [handle as string] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Resolve full profile by handle (exists, id, owner_, handle_, displayName_, avatarURI_, bio_, fid_, createdAt_) */
 export function useGetProfileByHandle(handle?: string, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!handle
   return useReadContract({
@@ -192,14 +175,10 @@ export function useGetProfileByHandle(handle?: string, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "getProfileByHandle",
     args: enabled ? [handle as string] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** All profile IDs owned by an address */
 export function useProfilesByOwner(owner?: `0x${string}`, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!owner
   return useReadContract({
@@ -207,14 +186,10 @@ export function useProfilesByOwner(owner?: `0x${string}`, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "getProfilesByOwner",
     args: enabled ? [owner as `0x${string}`] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Can a handle be registered? -> (ok, reason) */
 export function useCanRegister(handle?: string, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!handle
   return useReadContract({
@@ -222,14 +197,10 @@ export function useCanRegister(handle?: string, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "canRegister",
     args: enabled ? [handle as string] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Is a handle taken? -> bool */
 export function useHandleTaken(handle?: string, opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS && !!handle
   return useReadContract({
@@ -237,70 +208,50 @@ export function useHandleTaken(handle?: string, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "handleTaken",
     args: enabled ? [handle as string] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Fee info -> (treasury, feeUnits) */
 export function useFeeInfo(opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY_CS,
     functionName: "feeInfo",
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Flat fee units only (e.g., 500_000 for $0.50 with 6dp USDC) */
 export function useFeeUnits(opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY_CS,
     functionName: "feeUnits",
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Next profile id (monotonic) */
 export function useNextId(opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY_CS,
     functionName: "nextId",
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Total profiles created */
 export function useProfileCount(opts?: WatchOpts) {
   const enabled = !!REGISTRY_CS
   return useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY_CS,
     functionName: "profileCount",
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
-/** Preview create for connected user -> (balance, allowance_, fee, okBalance, okAllowance) */
 export function usePreviewCreate(user?: `0x${string}`, opts?: WatchOpts) {
   const { address } = useAccount()
   const who = (user ?? address) as `0x${string}` | undefined
@@ -310,10 +261,7 @@ export function usePreviewCreate(user?: `0x${string}`, opts?: WatchOpts) {
     address: REGISTRY_CS,
     functionName: "previewCreate",
     args: enabled ? [who as `0x${string}`] : undefined,
-    query: {
-      enabled,
-      refetchInterval: opts?.watch ? REFRESH_MS : false,
-    },
+    query: { enabled, refetchInterval: opts?.watch ? REFRESH_MS : false },
   })
 }
 
@@ -400,7 +348,6 @@ export function useChangeHandle() {
   return { change, isPending, error }
 }
 
-/** Optional: transfer a profile to another address */
 export function useTransferProfile() {
   const client = usePublicClient()
   const { address } = useAccount()
