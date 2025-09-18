@@ -9,17 +9,18 @@ import {
   useWriteContract,
 } from "wagmi"
 import { base } from "viem/chains"
-
-const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}`
+import { USDC as USDC_ADDR } from "@/lib/addresses"   // ✅ normalized, checksummed
 
 export function useUSDCAllowance(spender?: Address) {
   const { address } = useAccount()
+  const enabled = !!address && !!spender && !!USDC_ADDR
+
   return useReadContract({
     abi: erc20Abi,
-    address: USDC,
+    address: USDC_ADDR,             // ✅ only call if valid
     functionName: "allowance",
-    args: address && spender ? [address, spender] : undefined,
-    query: { enabled: !!address && !!spender },
+    args: enabled ? [address!, spender!] : undefined,
+    query: { enabled },
   })
 }
 
@@ -28,12 +29,13 @@ export function useUSDCApprove() {
   const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
 
-  // approve and wait for receipt
   const approve = async (spender: Address, amount: bigint = maxUint256) => {
+    if (!USDC_ADDR) throw new Error("USDC contract address is not configured.")
     if (!address) throw new Error("Connect your wallet to approve USDC.")
+
     const hash = await writeContractAsync({
       abi: erc20Abi,
-      address: USDC,
+      address: USDC_ADDR,          // ✅ normalized address
       functionName: "approve",
       args: [spender, amount],
       account: address,
