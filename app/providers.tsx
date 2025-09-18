@@ -5,42 +5,40 @@ import React, { useRef } from "react"
 import { WagmiProvider, createConfig, cookieStorage, createStorage, http } from "wagmi"
 import { base } from "viem/chains"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { RainbowKitProvider, connectorsForWallets, darkTheme } from "@rainbow-me/rainbowkit"
 import {
-  RainbowKitProvider,
-  connectorsForWallets,
-  darkTheme,
-  wallet,
-} from "@rainbow-me/rainbowkit"
+  injectedWallet,
+  metaMaskWallet,
+  walletConnectWallet,
+  coinbaseWallet,
+} from "@rainbow-me/rainbowkit/wallets"
 import "@rainbow-me/rainbowkit/styles.css"
 
-// ---- envs ----
 const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL
 const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "ONLYSTARS"
 
-// ---- RainbowKit connectors (no sdk that touches indexedDB) ----
 const connectors = connectorsForWallets([
   {
     groupName: "Recommended",
     wallets: [
-      wallet.injected({ shimDisconnect: true }),
-      wallet.walletConnect({ projectId: WC_PROJECT_ID }),
-      wallet.coinbase({ appName: "OnlyStars" }),
+      injectedWallet(),
+      metaMaskWallet({ projectId: WC_PROJECT_ID }),
+      walletConnectWallet({ projectId: WC_PROJECT_ID }),
+      coinbaseWallet({ appName: "OnlyStars" }),
     ],
   },
 ])
 
-// ---- Wagmi config with cookie storage (SSR-safe) ----
 const wagmiConfig = createConfig({
   chains: [base],
   transports: { [base.id]: http(RPC_URL) },
-  ssr: true,
   connectors,
-  storage: createStorage({ storage: cookieStorage }),
+  ssr: true,
+  storage: createStorage({ storage: cookieStorage }), // SSR-safe (no indexedDB)
 })
 
-// ---- Theme ----
 const theme = darkTheme({
-  accentColor: "#ec4899", // hot pink
+  accentColor: "#ec4899",
   borderRadius: "large",
   overlayBlur: "small",
 })
@@ -51,7 +49,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   return (
     <WagmiProvider config={wagmiConfig}>
       <QueryClientProvider client={qcRef.current}>
-        <RainbowKitProvider theme={theme} initialChain={base} modalSize="compact">
+        <RainbowKitProvider theme={theme} initialChain={base} modalSize="compact" showRecentTransactions={false}>
           {children}
         </RainbowKitProvider>
       </QueryClientProvider>
