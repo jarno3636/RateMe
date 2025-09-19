@@ -1,35 +1,52 @@
 // app/creator/page.tsx
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import toast from "react-hot-toast"
-import { useAccount, useReadContract, useWriteContract, useChainId } from "wagmi"
-import { Address, createPublicClient, http } from "viem"
+import {
+  useAccount,
+  useReadContract,
+  useWriteContract,
+  useChainId,
+} from "wagmi"
+import { Address } from "viem"
 import { base } from "viem/chains"
 
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
 import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
+import * as ADDR from "@/lib/addresses"
+import { publicClient } from "@/lib/chain"
+import { warpcastShare } from "@/lib/farcaster"
 
-const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}`
-const RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL
-const MAX_AVATAR_BYTES = 1_000_000 // 1MB
+/* ---------------- constants ---------------- */
+const REGISTRY = (ADDR.REGISTRY ?? ADDR.PROFILE_REGISTRY) as `0x${string}` | undefined
+const MAX_AVATAR_BYTES = 1_000_000 // 1 MB
 const AVATAR_FALLBACK = "/avatar.png"
+const HANDLE_RE = /^[a-z0-9_.-]{1,32}$/i
 
-// Client-side public client (do NOT import server-only lib/chain)
-const pc = createPublicClient({
-  chain: base,
-  transport: http(RPC_URL),
-})
+/* ---------------- utils ---------------- */
+const fromUnits6 = (v?: bigint) =>
+  (Number(v ?? 0n) / 1e6).toFixed(2)
 
-const fromUnits6 = (v?: bigint) => (Number(v ?? 0n) / 1e6).toFixed(2)
+function clampStrLen(s: string, n: number) {
+  return s.length > n ? s.slice(0, n) : s
+}
 
+/* ===================== Page ===================== */
 export default function BecomeCreatorPage() {
   const router = useRouter()
   const { address, isConnected } = useAccount()
   const currentChainId = useChainId()
 
-  // form state
+  // guard missing address config early (friendly UX)
+  useEffect(() => {
+    if (!REGISTRY) {
+      toast.error("Profile registry address is not configured.")
+    }
+  }, [])
+
+  /* ------------- form state ------------- */
   const [handle, setHandle] = useState("")
   const [displayName, setDisplayName] = useState("")
   const [avatarURI, setAvatarURI] = useState("")
@@ -42,21 +59,26 @@ export default function BecomeCreatorPage() {
   const [kvOk, setKvOk] = useState<boolean | null>(null)
   const [kvReason, setKvReason] = useState<string>("")
 
-  // normalize handle (on-chain uniqueness)
+  // Memoized normalized handle + quick validation
   const normHandle = useMemo(
     () => handle.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, ""),
     [handle]
   )
+  const handleLooksValid = normHandle.length > 0 && HANDLE_RE.test(normHandle)
 
-  /* ---------- READS ---------- */
+  /* ------------- on-chain reads ------------- */
 
-  // On-chain: canRegister(handle) -> (ok, reason)
-  const { data: canRegRaw, refetch: refetchCanReg, isFetching: checkingHandle } = useReadContract({
+  // canRegister(handle) -> (ok, reason)
+  const {
+    data: canRegRaw,
+    refetch: refetchCanReg,
+    isFetching: checkingHandle,
+  } = useReadContract({
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "canRegister",
-    args: normHandle ? [normHandle] : undefined,
-    query: { enabled: !!normHandle },
+    args: handleLooksValid && REGISTRY ? [normHandle] : undefined,
+    query: { enabled: !!REGISTRY && !!handleLooksValid },
   })
   const canRegOk = Boolean((canRegRaw as any)?.[0])
   const canRegReason = String((canRegRaw as any)?.[1] ?? "")
@@ -66,18 +88,18 @@ export default function BecomeCreatorPage() {
     abi: ProfileRegistry as any,
     address: REGISTRY,
     functionName: "previewCreate",
-    args: address ? [address as Address] : undefined,
-    query: { enabled: !!address },
+    args: address && REGISTRY ? [address as Address] : undefined,
+    query: { enabled: !!REGISTRY && !!address },
   })
   const feeUnits    = (preview as any)?.[2] as bigint | undefined
   const okBalance   = Boolean((preview as any)?.[3])
   const okAllowance = Boolean((preview as any)?.[4])
 
   // USDC allowance/approve (spender = registry)
-  const { data: allowance } = useUSDCAllowance(REGISTRY)
+  const { data: allowance } = useUSDCAllowance(REGISTRY as Address | undefined)
   const { approve, isPending: approving } = useUSDCApprove()
 
-  /* ---------- WRITE: createProfile ---------- */
+  // writes
   const { writeContractAsync, isPending: creating } = useWriteContract()
 
   const needsApproval = useMemo(() => {
@@ -87,7 +109,11 @@ export default function BecomeCreatorPage() {
 
   const approveFee = async () => {
     try {
-      if (!feeUnits || feeUnits <= 0n) return toast.error("No fee required or fee unavailable.")
+      if (!REGISTRY) throw new Error("Registry not configured.")
+      if (!feeUnits || feeUnits <= 0n) {
+        toast("No approval needed", { icon: "✅" })
+        return
+      }
       const t = toast.loading("Approving USDC…")
       await approve(REGISTRY, feeUnits)
       toast.dismiss(t)
@@ -97,13 +123,14 @@ export default function BecomeCreatorPage() {
     }
   }
 
-  // ---------- KV handle check (debounced) ----------
+  /* ------------- KV handle check (debounced) ------------- */
   useEffect(() => {
     let cancelled = false
     setKvOk(null)
     setKvReason("")
-    const run = async () => {
-      if (!normHandle) return
+    if (!handleLooksValid) return
+
+    const t = setTimeout(async () => {
       try {
         const r = await fetch(`/api/check-handle?handle=${encodeURIComponent(normHandle)}`)
         const j = await r.json()
@@ -113,20 +140,30 @@ export default function BecomeCreatorPage() {
         }
       } catch {
         if (!cancelled) {
-          // Non-fatal: if KV fails, just fall back to on-chain check UI
-          setKvOk(null)
+          setKvOk(null) // unknown
           setKvReason("")
         }
       }
-    }
-    const t = setTimeout(run, 250)
+    }, 250)
+
     return () => {
       cancelled = true
       clearTimeout(t)
     }
-  }, [normHandle])
+  }, [normHandle, handleLooksValid])
 
-  // ---------- Avatar upload ----------
+  /* ------------- avatar upload ------------- */
+  const previewRevokeRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (previewRevokeRef.current) {
+        URL.revokeObjectURL(previewRevokeRef.current)
+        previewRevokeRef.current = null
+      }
+    }
+  }, [])
+
   const onPickAvatar: React.ChangeEventHandler<HTMLInputElement> = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -136,6 +173,7 @@ export default function BecomeCreatorPage() {
 
     const previewUrl = URL.createObjectURL(file)
     setAvatarLocal(previewUrl)
+    previewRevokeRef.current = previewUrl
 
     try {
       setUploading(true)
@@ -152,16 +190,16 @@ export default function BecomeCreatorPage() {
       setAvatarURI("")
     } finally {
       setUploading(false)
-      // Revoke the object URL a bit later to avoid flicker
-      setTimeout(() => previewUrl && URL.revokeObjectURL(previewUrl), 2000)
     }
   }
 
-  const createProfile = async () => {
+  /* ------------- create profile ------------- */
+  const onCreate = async () => {
+    if (!REGISTRY) return toast.error("Registry not configured.")
     if (!isConnected || !address) return toast.error("Connect your wallet first.")
     if (currentChainId && currentChainId !== base.id) return toast.error("Please switch to Base.")
-    if (!normHandle) return toast.error("Enter a handle.")
-    // Both checks: KV (fast) + on-chain (source of truth)
+    if (!handleLooksValid) return toast.error("Enter a valid handle.")
+    // Fast check (KV) then source-of-truth (chain)
     if (kvOk === false) return toast.error(kvReason || "Handle unavailable.")
     if (!canRegOk) return toast.error(canRegReason || "Handle unavailable.")
     if (feeUnits === undefined) return toast.error("Fee not available yet.")
@@ -169,37 +207,46 @@ export default function BecomeCreatorPage() {
     if (needsApproval) return toast.error("Please approve USDC first.")
     if (uploading) return toast.error("Please wait for avatar upload to finish.")
 
-    try {
-      const fidBig = fid ? BigInt(fid) : 0n
-      const t = toast.loading("Creating profile…")
+    const nameSafe = clampStrLen(displayName || normHandle, 48)
+    const bioSafe = clampStrLen(bio, 1200)
+    const fidBig = fid ? BigInt(fid) : 0n
 
-      await writeContractAsync({
+    try {
+      const t = toast.loading("Creating profile…")
+      const txHash = await writeContractAsync({
         abi: ProfileRegistry as any,
         address: REGISTRY,
         functionName: "createProfile",
-        args: [normHandle, displayName || normHandle, avatarURI || "", bio || "", fidBig],
+        args: [normHandle, nameSafe, avatarURI || "", bioSafe, fidBig],
         account: address,
-        chainId: currentChainId || base.id,
+        chainId: base.id,
       } as any)
 
       toast.loading("Waiting for confirmation…", { id: t })
+
+      // Wait for receipt using the shared client
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
       toast.dismiss(t)
+
+      if (receipt.status !== "success") {
+        toast.error("Transaction failed")
+        return
+      }
+
       toast.success("Profile created!")
 
-      // Resolve new ID from chain using the client-side viem
+      // Resolve the new profile id (best-effort)
       let newId: bigint | undefined
       try {
-        newId = (await pc.readContract({
+        newId = (await publicClient.readContract({
           abi: ProfileRegistry as any,
           address: REGISTRY,
           functionName: "getIdByHandle",
           args: [normHandle],
         })) as bigint
-      } catch {
-        // ignore
-      }
+      } catch { /* ignore */ }
 
-      // Index in KV (non-blocking)
+      // Background index in KV (non-blocking)
       try {
         if (newId && newId > 0n) {
           await fetch("/api/kv-index", {
@@ -209,15 +256,32 @@ export default function BecomeCreatorPage() {
               id: newId.toString(),
               handle: normHandle,
               owner: address,
-              name: displayName || normHandle,
+              name: nameSafe,
               avatar: avatarURI || "",
-              bio,
+              bio: bioSafe,
             }),
           })
         }
-      } catch {
-        // non-fatal
-      }
+      } catch { /* non-fatal */ }
+
+      // Optional: quick Warpcast share intent toast (power users love this)
+      try {
+        const cast = warpcastShare({
+          text: `I just created my OnlyStars profile @${normHandle} — come rate & subscribe!`,
+          url: typeof window !== "undefined" ? window.location.origin + `/creator/${newId?.toString() ?? ""}` : undefined,
+        })
+        toast((tId) => (
+          <a
+            href={cast}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+            onClick={() => toast.dismiss(tId.id)}
+          >
+            Share on Warpcast →
+          </a>
+        ), { duration: 6000 })
+      } catch { /* ignore */ }
 
       if (newId && newId > 0n) router.push(`/creator/${newId.toString()}/dashboard`)
       else router.push("/discover")
@@ -228,13 +292,14 @@ export default function BecomeCreatorPage() {
 
   // On-chain handle re-check (debounced)
   useEffect(() => {
-    const t = setTimeout(() => { if (normHandle) refetchCanReg() }, 300)
+    if (!handleLooksValid) return
+    const t = setTimeout(() => { void refetchCanReg() }, 300)
     return () => clearTimeout(t)
-  }, [normHandle, refetchCanReg])
+  }, [handleLooksValid, refetchCanReg])
 
-  /* ---------- Derived “premium” readiness badges ---------- */
+  /* ------------- derived badges ------------- */
   const hasAvatar = Boolean(avatarURI || avatarLocal)
-  const handleReady = (kvOk !== false) && canRegOk && !!normHandle
+  const handleReady = (kvOk !== false) && canRegOk && handleLooksValid
   const paymentsReady = !!feeUnits && okBalance && okAllowance && !needsApproval
   const onBase = currentChainId === base.id || currentChainId === undefined
 
@@ -248,6 +313,12 @@ export default function BecomeCreatorPage() {
           <span className="font-medium">{fromUnits6(feeUnits)} USDC</span>.
         </p>
 
+        {!REGISTRY && (
+          <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+            Registry address missing. Ask the app admin to set <code>NEXT_PUBLIC_PROFILE_REGISTRY</code>.
+          </div>
+        )}
+
         {/* Chain hint */}
         {isConnected && currentChainId && currentChainId !== base.id && (
           <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 px-3 py-2 text-xs">
@@ -255,10 +326,17 @@ export default function BecomeCreatorPage() {
           </div>
         )}
 
-        {/* Premium-esque readiness badges */}
+        {/* Readiness badges */}
         <div className="mt-2 flex flex-wrap gap-2 text-xs">
           <Badge ok={onBase} label="On Base" />
-          <Badge ok={handleReady} label={handleReady ? "Handle ready" : checkingHandle ? "Checking handle…" : "Handle not ready"} />
+          <Badge
+            ok={handleReady}
+            label={
+              handleLooksValid
+                ? (checkingHandle ? "Checking handle…" : (handleReady ? "Handle ready" : "Handle not ready"))
+                : "Enter a valid handle"
+            }
+          />
           <Badge ok={hasAvatar} label={hasAvatar ? "Avatar set" : "Avatar pending"} />
           <Badge ok={paymentsReady} label={paymentsReady ? "USDC ready" : "Approve/Top up USDC"} />
         </div>
@@ -278,6 +356,7 @@ export default function BecomeCreatorPage() {
                 className="w-full"
                 autoComplete="off"
                 spellCheck={false}
+                maxLength={32}
               />
             </div>
             {normHandle && (
@@ -294,6 +373,11 @@ export default function BecomeCreatorPage() {
                 )}
               </div>
             )}
+            {!handleLooksValid && handle.trim() !== "" && (
+              <div className="mt-1 text-xs text-amber-200/90">
+                Use 1–32 characters: letters, digits, <code>.</code>, <code>-</code>, <code>_</code>.
+              </div>
+            )}
           </label>
 
           <label className="block">
@@ -303,8 +387,11 @@ export default function BecomeCreatorPage() {
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="OnlyStars Creator"
               className="w-full"
+              maxLength={48}
             />
-            <div className="mt-1 text-xs opacity-60">Display names can duplicate; the handle is unique.</div>
+            <div className="mt-1 text-xs opacity-60">
+              Display names can duplicate; the handle is unique.
+            </div>
           </label>
 
           <label className="block">
@@ -364,20 +451,25 @@ export default function BecomeCreatorPage() {
             <div className="flex items-center gap-2">
               <button
                 onClick={approveFee}
-                disabled={!feeUnits || feeUnits <= 0n || !needsApproval || approving}
+                disabled={!REGISTRY || !feeUnits || feeUnits <= 0n || !needsApproval || approving}
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
-                title={!feeUnits || feeUnits <= 0n ? "No approval needed" : needsApproval ? "" : "Already approved"}
+                title={
+                  !REGISTRY ? "Missing registry address"
+                  : (!feeUnits || feeUnits <= 0n) ? "No approval needed"
+                  : needsApproval ? "" : "Already approved"
+                }
               >
                 {approving ? "Approving…" : (needsApproval ? "Approve USDC" : "Approved")}
               </button>
 
               <button
-                onClick={createProfile}
+                onClick={onCreate}
                 disabled={
+                  !REGISTRY ||
                   creating ||
                   uploading ||
                   !isConnected ||
-                  !normHandle ||
+                  !handleLooksValid ||
                   kvOk === false ||
                   !canRegOk ||
                   !feeUnits ||
@@ -398,7 +490,7 @@ export default function BecomeCreatorPage() {
       <section className="card text-sm opacity-80">
         <div className="mb-1 font-medium">Tips</div>
         <ul className="list-disc space-y-1 pl-5">
-          <li>Handles are lowercase letters, digits, <code>.</code>, <code>-</code>, <code>_</code> (unique on-chain).</li>
+          <li>Handles are lowercase letters, digits, <code>.</code>, <code>-</code>, <code>_</code> (1–32 chars, unique on-chain).</li>
           <li>Display names are for presentation and can duplicate.</li>
           <li>Avatar: single image ≤ 1MB; URL saved on-chain.</li>
           <li>Creation fee is paid in USDC; you may need to approve spending once.</li>
@@ -408,7 +500,7 @@ export default function BecomeCreatorPage() {
   )
 }
 
-/* ---------- Tiny badge component (premium-esque) ---------- */
+/* ---------- Tiny badge component ---------- */
 function Badge({ ok, label }: { ok: boolean; label: string }) {
   return (
     <span
@@ -420,7 +512,6 @@ function Badge({ ok, label }: { ok: boolean; label: string }) {
       ].join(" ")}
       title={label}
     >
-      {/* dot */}
       <span
         aria-hidden
         className={[
