@@ -2,38 +2,213 @@
 "use client"
 
 import { base } from "viem/chains"
-import { useAccount, usePublicClient, useWriteContract } from "wagmi"
+import { Address, erc20Abi, formatUnits, maxUint256 } from "viem"
+import {
+  useAccount,
+  usePublicClient,
+  useWriteContract,
+  useReadContract,
+} from "wagmi"
 import * as ADDR from "@/lib/addresses"
 import { assertAddresses } from "@/lib/addresses"
 import CreatorHubAbi from "@/abi/CreatorHub.json"
 
-/** Resolve and assert HUB address (clear error instead of deep revert) */
-function useHubAddr(): `0x${string}` {
-  assertAddresses("HUB") // throws with a friendly message if missing
-  // ADDR.HUB is guaranteed after assert
-  return ADDR.HUB as `0x${string}`
+/* ─────────────────────────── utils & types ─────────────────────────── */
+
+const ZERO: Address = "0x0000000000000000000000000000000000000000"
+
+function isZeroAddr(a?: Address) {
+  return !!a && a.toLowerCase() === ZERO.toLowerCase()
 }
 
-/** Tiny helper to format unknown errors nicely */
 function toUserError(e: unknown, fallback = "Transaction failed") {
   if (e && typeof e === "object" && "message" in e) return (e as any).message as string
   return String(e ?? fallback)
 }
 
+/** Resolve and assert HUB address (clear error instead of deep revert) */
+function useHubAddr(): `0x${string}` {
+  assertAddresses("HUB") // throws with a friendly message if missing
+  return ADDR.HUB as `0x${string}`
+}
+
+/* ───────────────────────── Payment preview helpers ───────────────────────── */
+
+/**
+ * Preview payment for a Plan:
+ * - Reads plans(planId) to determine token & period price
+ * - Calculates total = pricePerPeriod * periods
+ * - If ERC20, also returns balance & allowance for the HUB spender
+ */
+export function usePreviewSubscribe(planId?: bigint, periods: number = 1) {
+  const hub = useHubAddr()
+  const { address } = useAccount()
+  const client = usePublicClient()
+
+  async function run() {
+    if (!planId || periods <= 0) return null
+    const plan = await client.readContract({
+      abi: CreatorHubAbi as any,
+      address: hub,
+      functionName: "plans",
+      args: [planId],
+    }) as any
+
+    const token = plan?.[1] as Address
+    const pricePerPeriod = plan?.[2] as bigint
+    const total = pricePerPeriod * BigInt(periods)
+
+    if (isZeroAddr(token) || !address) {
+      return { token, isNative: true, pricePerPeriod, total }
+    }
+
+    // ERC20: fetch balance + allowance
+    const [balance, allowance, decimals] = await Promise.all([
+      client.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
+      client.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
+      client.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
+    ])
+
+    return {
+      token,
+      isNative: false,
+      decimals,
+      pricePerPeriod,
+      total,
+      balance,
+      allowance,
+      okBalance: balance >= total,
+      okAllowance: allowance >= total,
+      display: {
+        pricePerPeriod: formatUnits(pricePerPeriod, decimals),
+        total: formatUnits(total, decimals),
+        balance: formatUnits(balance, decimals),
+      },
+    }
+  }
+
+  return { run }
+}
+
+/**
+ * Preview payment for a Post:
+ * - Reads posts(postId) to determine token & price
+ * - If ERC20, also returns balance & allowance for the HUB spender
+ */
+export function usePreviewBuy(postId?: bigint) {
+  const hub = useHubAddr()
+  const { address } = useAccount()
+  const client = usePublicClient()
+
+  async function run() {
+    if (!postId) return null
+    const post = await client.readContract({
+      abi: CreatorHubAbi as any,
+      address: hub,
+      functionName: "posts",
+      args: [postId],
+    }) as any
+
+    const token = post?.[1] as Address
+    const price = post?.[2] as bigint
+
+    if (isZeroAddr(token) || !address) {
+      return { token, isNative: true, price }
+    }
+
+    // ERC20
+    const [balance, allowance, decimals] = await Promise.all([
+      client.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
+      client.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
+      client.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
+    ])
+
+    return {
+      token,
+      isNative: false,
+      decimals,
+      price,
+      balance,
+      allowance,
+      okBalance: balance >= price,
+      okAllowance: allowance >= price,
+      display: {
+        price: formatUnits(price, decimals),
+        balance: formatUnits(balance, decimals),
+      },
+    }
+  }
+
+  return { run }
+}
+
+/* ───────────────────────── ERC20 approval helpers ───────────────────────── */
+
+/**
+ * Read an ERC-20 `allowance(owner, HUB)` for any token address.
+ */
+export function useErc20Allowance(token?: `0x${string}`, ownerOverride?: `0x${string}`) {
+  const hub = useHubAddr()
+  const { address } = useAccount()
+  const owner = (ownerOverride ?? address) as `0x${string}` | undefined
+  const enabled = !!token && !!owner
+
+  return useReadContract({
+    abi: erc20Abi,
+    address: token,
+    functionName: "allowance",
+    args: enabled ? [owner!, hub] : undefined,
+    query: { enabled },
+  })
+}
+
+/**
+ * Approve an ERC-20 for the HUB. Defaults to max approval.
+ */
+export function useApproveErc20() {
+  const hub = useHubAddr()
+  const { address } = useAccount()
+  const client = usePublicClient()
+  const { writeContractAsync, isPending, error } = useWriteContract()
+
+  async function approve(token: `0x${string}`, amount?: bigint) {
+    if (!address) throw new Error("Connect your wallet.")
+    if (!token) throw new Error("Missing token address.")
+
+    // Optional: simulate approve (some ERC20s revert on simulate with 0 gas; skip for safety)
+    const hash = await writeContractAsync({
+      abi: erc20Abi,
+      address: token,
+      functionName: "approve",
+      args: [hub, amount ?? maxUint256],
+      chain: base,
+      account: address,
+    })
+
+    await client.waitForTransactionReceipt({ hash })
+    return hash
+  }
+
+  return { approve, isPending, error }
+}
+
+/* ───────────────────────── Update hooks (from your draft) ───────────────────────── */
+
 /**
  * updatePost(id, token, price, active, accessViaSub, uri)
- * - If `token` is omitted, defaults to ADDR.USDC (and asserts it exists).
- * - Simulates before sending to catch reverts with a readable message.
+ * - If `token` omitted, defaults to ADDR.USDC (asserted).
+ * - Simulates before sending to catch reverts with readable message.
  */
 export function useUpdatePost() {
-  const hub = useHubAddr()
+  assertAddresses("HUB")
+  const hub = ADDR.HUB as `0x${string}`
   const client = usePublicClient()
   const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
 
   async function update(
     id: bigint,
-    tokenOrPrice: `0x${string}` | bigint, // allow (id, price, ...) if you prefer default token
+    tokenOrPrice: `0x${string}` | bigint,
     priceOrActive: bigint | boolean,
     activeOrGate?: boolean,
     gateOrUri?: boolean | string,
@@ -41,7 +216,6 @@ export function useUpdatePost() {
   ) {
     if (!address) throw new Error("Connect your wallet.")
 
-    // Overload handling so devs can call update(id, price, active, gate, uri)
     let token: `0x${string}` | undefined
     let price: bigint
     let active: boolean
@@ -49,14 +223,12 @@ export function useUpdatePost() {
     let uri: string
 
     if (typeof tokenOrPrice === "string") {
-      // Full signature: (id, token, price, active, accessViaSub, uri)
       token = tokenOrPrice as `0x${string}`
       price = priceOrActive as bigint
       active = activeOrGate as boolean
       accessViaSub = gateOrUri as boolean
       uri = (maybeUri ?? "") as string
     } else {
-      // Short signature: (id, price, active, accessViaSub, uri) with default USDC
       assertAddresses("USDC")
       token = ADDR.USDC as `0x${string}`
       price = tokenOrPrice as bigint
@@ -65,7 +237,6 @@ export function useUpdatePost() {
       uri = (gateOrUri ?? "") as string
     }
 
-    // Preflight simulate to surface revert reasons before we send
     try {
       await client.simulateContract({
         abi: CreatorHubAbi as any,
@@ -100,10 +271,10 @@ export function useUpdatePost() {
 
 /**
  * updatePlan(id, name, metadataURI, pricePerPeriod, periodDays, active)
- * - Simulates before send for early revert reasons.
  */
 export function useUpdatePlan() {
-  const hub = useHubAddr()
+  assertAddresses("HUB")
+  const hub = ADDR.HUB as `0x${string}`
   const client = usePublicClient()
   const { address } = useAccount()
   const { writeContractAsync, isPending, error } = useWriteContract()
@@ -118,7 +289,6 @@ export function useUpdatePlan() {
   ) {
     if (!address) throw new Error("Connect your wallet.")
 
-    // Preflight simulate
     try {
       await client.simulateContract({
         abi: CreatorHubAbi as any,
