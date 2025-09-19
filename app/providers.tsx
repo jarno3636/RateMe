@@ -1,9 +1,8 @@
-// /app/providers.tsx
 "use client";
 
 import "@rainbow-me/rainbowkit/styles.css";
 import { useMemo } from "react";
-import type { ReactNode } from "react"; // ← type-only import fixes the error
+import type { ReactNode } from "react"; // type-only (TS verbatimModuleSyntax-safe)
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   WagmiProvider,
@@ -47,14 +46,16 @@ const connectors = [
   ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
 ];
 
-/* ───────────────────────── Wagmi config ───────────────────────── */
+/* ───────────────────────── Wagmi config (v2) ──────────────────── */
 const wagmiConfig = createConfig({
   chains: [base],
-  transports: { [base.id]: http(rpcUrl) },
+  transports: {
+    [base.id]: rpcUrl ? http(rpcUrl) : http(), // safe if env missing
+  },
   connectors,
   storage: createStorage({ storage: cookieStorage }), // SSR-safe persistence
   ssr: true,
-  autoConnect: true,
+  // autoConnect: true, // ❌ wagmi v2 removed this prop
 });
 
 /* ───────────────────────── RainbowKit theme ───────────────────── */
