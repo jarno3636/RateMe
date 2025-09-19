@@ -3,21 +3,33 @@
 
 import RatingsAbi from "@/abi/Ratings.json"
 import { useReadContract } from "wagmi"
-import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
+import { formatUnits } from "viem"
+import { useUSDCAllowance, useUSDCApprove, useUSDCMeta } from "@/hooks/useUsdc"
 import { RATINGS as RATINGS_ADDR } from "@/lib/addresses"  // ✅ normalized
 
+/**
+ * Premium helper for the Ratings USDC fee flow:
+ * - Reads fee() and feeCollector()
+ * - Reads USDC decimals and allowance(owner -> Ratings)
+ * - Returns whether allowance covers fee and how much is missing
+ * - Provides approveForFee() to approve the exact missing amount
+ */
 export function useRatingsAllowance() {
   const ratingsOk = !!RATINGS_ADDR
 
   // fee() -> uint256
-  const { data: feeUnits, isLoading: feeLoading, refetch: refetchFee } = useReadContract({
+  const {
+    data: feeUnits,
+    isLoading: feeLoading,
+    refetch: refetchFee,
+  } = useReadContract({
     abi: RatingsAbi as any,
     address: RATINGS_ADDR,
     functionName: "fee",
     query: { enabled: ratingsOk },
   })
 
-  // feeCollector() -> address (optional)
+  // feeCollector() -> address (optional, for UI transparency)
   const { data: collector } = useReadContract({
     abi: RatingsAbi as any,
     address: RATINGS_ADDR,
@@ -25,26 +37,45 @@ export function useRatingsAllowance() {
     query: { enabled: ratingsOk },
   })
 
-  // USDC allowance for Ratings (spender = Ratings contract)
-  const { data: allowance } = useUSDCAllowance(RATINGS_ADDR)
-  const { approve, isPending } = useUSDCApprove()
+  // USDC metadata & allowance for Ratings (spender = Ratings contract)
+  const { decimals, symbol } = useUSDCMeta()
+  const { data: allowanceRaw, refetch: refetchAllowance } = useUSDCAllowance(RATINGS_ADDR)
+  const { approve, isPending: approving } = useUSDCApprove()
 
   const fee = (feeUnits ?? 0n) as bigint
-  const currentAllowance = (allowance ?? 0n) as bigint
-  const hasAllowance = currentAllowance >= fee
+  const allowance = (allowanceRaw ?? 0n) as bigint
+  const hasAllowance = allowance >= fee
+  const missing = hasAllowance ? 0n : (fee - allowance)
+
+  const display = {
+    fee: formatUnits(fee, decimals),
+    allowance: formatUnits(allowance, decimals),
+    missing: formatUnits(missing, decimals),
+    symbol,
+    decimals,
+  }
 
   const approveForFee = async () => {
     if (!RATINGS_ADDR) throw new Error("Ratings contract address is not configured.")
-    if (fee > 0n) await approve(RATINGS_ADDR, fee)
+    if (missing > 0n) {
+      await approve(RATINGS_ADDR, missing) // approve exactly what's missing (or change to max approval if preferred)
+      await Promise.all([refetchAllowance(), refetchFee()])
+    }
   }
 
   return {
     fee,
     feeCollector: ((collector as `0x${string}`) ?? "0x0000000000000000000000000000000000000000") as `0x${string}`,
+    allowance,
     hasAllowance,
+    missing,
+    display,
     approveForFee,
-    states: { loading: feeLoading, approving: isPending },
+    states: { loading: feeLoading, approving },
     errors: {},
-    refetchFee,
+    refetch: () => {
+      refetchFee()
+      refetchAllowance()
+    },
   }
 }
