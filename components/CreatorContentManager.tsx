@@ -703,10 +703,26 @@ function PlanRow({
   onChanged,
 }: {
   id: bigint;
-  onChanged?: (() => void) | undefined; // allow explicit undefined (exactOptionalPropertyTypes)
+  onChanged?: (() => void) | undefined;
 }) {
-  const { data: plan } = usePlan(id);
-  const price = (plan?.[2] as bigint | undefined) ?? 0n;
+  const { data: planData } = usePlan(id);
+
+  // Describe the tuple that your contract returns.
+  type MaybePlan =
+    | readonly [
+        unknown,                 // [0] unused / id / creator etc. (not used here)
+        `0x${string}` | undefined, // [1] token
+        bigint | undefined,        // [2] price (USDC 6dp)
+        number | bigint | undefined, // [3] period days
+        boolean | undefined,        // [4] active
+        string | undefined,         // [5] name
+        string | undefined          // [6] metadataURI
+      ]
+    | undefined;
+
+  const plan = planData as unknown as MaybePlan;
+
+  const price = (plan?.[2] ?? 0n) as bigint;
   const days = Number(plan?.[3] ?? 30);
   const active = Boolean(plan?.[4] ?? true);
   const name = String(plan?.[5] ?? "Plan");
