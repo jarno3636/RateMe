@@ -2,9 +2,11 @@
 import { NextResponse } from "next/server"
 import { kvGetJSON, kvSetJSON } from "@/lib/kv"
 import { publicClient } from "@/lib/chain"
+
+// ✅ make sure these point at the actual generated JSON ABI files
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
 import CreatorHub from "@/abi/CreatorHub.json"
-import Ratings from "@/abi/Ratings"
+import Ratings from "@/abi/Ratings.json"
 
 const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
 const CREATOR_HUB      = process.env.NEXT_PUBLIC_CREATOR_HUB as `0x${string}` | undefined
@@ -49,8 +51,8 @@ export async function GET(req: Request) {
 
     let cursor = 0n
     let size   = 12n
-    try { cursor = BigInt(cursorStr) } catch { /* keep default */ }
-    try { size   = BigInt(sizeStr)   } catch { /* keep default */ }
+    try { cursor = BigInt(cursorStr) } catch {}
+    try { size   = BigInt(sizeStr)   } catch {}
 
     if (cursor < 0n) cursor = 0n
     if (size   < 1n) size = 1n
@@ -68,9 +70,10 @@ export async function GET(req: Request) {
     }
 
     // 2) Chain read: list page
+    // NOTE: `as const` tuple keeps indexes stable for TS even though ABI is untyped JSON
     const res = await publicClient.readContract({
       address: PROFILE_REGISTRY,
-      abi: ProfileRegistry as any,
+      abi: ProfileRegistry,
       functionName: "listProfilesFlat",
       args: [cursor, size],
     }) as unknown as [
@@ -85,14 +88,15 @@ export async function GET(req: Request) {
       bigint               // nextCursor
     ]
 
-    const idsBn       = (res?.[0] ?? [])
-    const owners      = (res?.[1] ?? [])
-    const handles     = (res?.[2] ?? [])
-    const names       = (res?.[3] ?? [])
-    const avatars     = (res?.[4] ?? [])
-    const fidsBn      = (res?.[6] ?? [])
-    const createdBn   = (res?.[7] ?? [])
-    const nextCursorBn= (res?.[8] ?? 0n)
+    const idsBn        = res?.[0] ?? []
+    const owners       = res?.[1] ?? []
+    const handles      = res?.[2] ?? []
+    const names        = res?.[3] ?? []
+    const avatars      = res?.[4] ?? []
+    const bios         = res?.[5] ?? []
+    const fidsBn       = res?.[6] ?? []
+    const createdBn    = res?.[7] ?? []
+    const nextCursorBn = res?.[8] ?? 0n
 
     const data: WireTuple = [
       idsBn.map(String),
@@ -100,41 +104,44 @@ export async function GET(req: Request) {
       handles,
       names,
       avatars,
-      (res?.[5] ?? []),
+      bios,
       fidsBn.map(String),
       createdBn.map(String),
       String(nextCursorBn),
     ]
 
-    // 3) Optional premium badge data (parallel requests — safe to skip if envs missing)
-    // Plan counts (pro) and rating average (top / rising)
+    // 3) Optional premium badge data (parallel requests — resilient)
     const wantPlans   = Boolean(CREATOR_HUB)
     const wantRatings = Boolean(RATINGS)
 
     const planCounts: number[] = await (async () => {
       if (!wantPlans) return Array(owners.length).fill(0)
       const reads = owners.map((owner) =>
-        publicClient.readContract({
+        (publicClient.readContract({
           address: CREATOR_HUB!,
-          abi: CreatorHub as any,
+          abi: CreatorHub,
           functionName: "getCreatorPlanIds",
           args: [owner],
-        }).then((arr: bigint[]) => arr?.length ?? 0).catch(() => 0)
+        }) as unknown as Promise<bigint[]>)
       )
-      return await Promise.all(reads)
+
+      const settled = await Promise.allSettled(reads)
+      return settled.map((r) => (r.status === "fulfilled" ? (r.value?.length ?? 0) : 0))
     })()
 
     const avgX100s: number[] = await (async () => {
       if (!wantRatings) return Array(owners.length).fill(0)
       const reads = owners.map((owner) =>
-        publicClient.readContract({
+        (publicClient.readContract({
           address: RATINGS!,
-          abi: Ratings as any,
+          abi: Ratings,
           functionName: "getAverage",
           args: [owner],
-        }).then((v: bigint) => Number(v ?? 0n)).catch(() => 0)
+        }) as unknown as Promise<bigint>)
       )
-      return await Promise.all(reads)
+
+      const settled = await Promise.allSettled(reads)
+      return settled.map((r) => (r.status === "fulfilled" ? Number(r.value ?? 0n) : 0))
     })()
 
     // 4) Compute badges per profile (ids-aligned)
