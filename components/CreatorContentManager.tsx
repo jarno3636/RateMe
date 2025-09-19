@@ -1,8 +1,8 @@
 // /components/CreatorContentManager.tsx
 "use client"
 
-import { useRef, useState } from "react"
-import toast from "react-hot-toast"
+import { useCallback, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 import { useAccount } from "wagmi"
 import {
   useCreatorPostIds,
@@ -15,44 +15,153 @@ import {
 import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras"
 import * as ADDR from "@/lib/addresses"
 
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024 // 1MB
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 // 2MB
 
 const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname)
 const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(new URL(u, "http://x").pathname)
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
+const basescanTx = (hash: `0x${string}`) => `https://basescan.org/tx/${hash}`
+
+/* ------------------------------- Inputs ------------------------------- */
 
 function PriceInput({
   value,
   onChange,
   disabled,
+  "aria-label": ariaLabel = "Price in USDC",
 }: {
   value: string
   onChange: (s: string) => void
   disabled?: boolean
+  "aria-label"?: string
 }) {
   return (
     <input
-      type="number"
-      step="0.01"
-      min="0"
+      type="text"
+      inputMode="decimal"
+      pattern="^\d+(\.\d{0,2})?$"
       placeholder="0.00"
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => {
+        // Allow only digits and up to 2 decimals; strip other chars gracefully
+        const raw = e.target.value.replace(/[^\d.]/g, "")
+        const parts = raw.split(".")
+        const safe =
+          parts.length > 1
+            ? `${parts[0].slice(0, 12)}.${parts[1].slice(0, 2)}`
+            : parts[0].slice(0, 12)
+        onChange(safe)
+      }}
+      onBlur={(e) => {
+        const val = e.currentTarget.value
+        if (!val) return onChange("0.00")
+        const n = Number.parseFloat(val)
+        onChange(Number.isFinite(n) ? n.toFixed(2) : "0.00")
+      }}
       disabled={disabled}
       className="w-28 rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
-      inputMode="decimal"
-      aria-label="Price in USDC"
+      aria-label={ariaLabel}
     />
   )
 }
 
+/* ---------------------------- Uploader UI ---------------------------- */
+
+function DropUploader({
+  label = "Choose file",
+  tips = ["Image ≤ 1 MB", "Video ≤ 2 MB", "USDC, non-custodial"],
+  onFile,
+  busy,
+}: {
+  label?: string
+  tips?: string[]
+  onFile: (f: File) => Promise<void> | void
+  busy?: boolean
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+
+  const onDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragOver(false)
+    const f = e.dataTransfer.files?.[0]
+    if (f) await onFile(f)
+  }
+
+  return (
+    <div className="space-y-3">
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setDragOver(true)
+        }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={onDrop}
+        className={[
+          "flex min-h-[104px] items-center justify-center rounded-xl border border-dashed p-3 transition",
+          dragOver ? "border-pink-500/60 bg-pink-500/5" : "border-white/15 bg-black/20",
+        ].join(" ")}
+        role="group"
+        aria-label="Upload area"
+      >
+        <div className="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => inputRef.current?.click()}
+            disabled={busy}
+            aria-label="Choose media file"
+          >
+            {busy ? "Uploading…" : label}
+          </button>
+          <div className="text-xs opacity-70">or drag & drop here</div>
+          <input
+            ref={inputRef}
+            type="file"
+            hidden
+            accept="image/*,video/*"
+            onChange={async (e) => {
+              const f = e.currentTarget.files?.[0]
+              if (f) await onFile(f)
+              e.currentTarget.value = ""
+            }}
+          />
+        </div>
+      </div>
+      {tips?.length ? (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {tips.map((t) => (
+            <span key={t} className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">
+              {t}
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+/* --------------------------- Main Component -------------------------- */
+
 export default function CreatorContentManager({ creator }: { creator: `0x${string}` }) {
   const { address } = useAccount()
-  const isOwner = !!address && address.toLowerCase() === (creator as string).toLowerCase()
+  const isOwner = useMemo(
+    () => !!address && address.toLowerCase() === (creator as string).toLowerCase(),
+    [address, creator]
+  )
 
-  const { data: postIds, isLoading: postsLoading, refetch: refetchPosts } = useCreatorPostIds(creator)
-  const { data: planIds, isLoading: plansLoading, refetch: refetchPlans } = useCreatorPlanIds(creator)
+  const {
+    data: postIds,
+    isLoading: postsLoading,
+    refetch: refetchPosts,
+  } = useCreatorPostIds(creator)
+
+  const {
+    data: planIds,
+    isLoading: plansLoading,
+    refetch: refetchPlans,
+  } = useCreatorPlanIds(creator)
 
   const posts = (postIds as bigint[] | undefined) ?? []
   const plans = (planIds as bigint[] | undefined) ?? []
@@ -79,18 +188,30 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   const [subGate, setSubGate] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [creating, setCreating] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const [shareFarcaster, setShareFarcaster] = useState(false)
 
   const { createPost } = useCreatePostOnchain()
 
-  async function onPick(file: File) {
-    if (!file) return
+  const validateFile = (file: File) => {
     const isImage = file.type.startsWith("image/")
     const isVideoType = file.type.startsWith("video/")
-    if (!isImage && !isVideoType) return toast.error("Pick an image or video")
-    if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
-    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
+    if (!isImage && !isVideoType) {
+      toast.error("Pick an image or video")
+      return false
+    }
+    if (isImage && file.size > MAX_IMAGE_BYTES) {
+      toast.error("Image exceeds 1 MB")
+      return false
+    }
+    if (isVideoType && file.size > MAX_VIDEO_BYTES) {
+      toast.error("Video exceeds 2 MB")
+      return false
+    }
+    return true
+  }
 
+  const onPick = useCallback(async (file: File) => {
+    if (!file || !validateFile(file)) return
     try {
       setUploading(true)
       const fd = new FormData()
@@ -105,20 +226,63 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       toast.error(e?.message || "Upload failed")
     } finally {
       setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ""
     }
-  }
+  }, [])
 
   const onCreate = async () => {
     try {
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
       if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
       if (!uri) return toast.error("Please upload media first")
+
       setCreating(true)
+
       const priceFloat = Number.parseFloat(priceUsd || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6)) // USDC 6dp
-      await createPost(ADDR.USDC, priceUnits, subGate, uri)
-      toast.success("Post created")
+
+      const promise = createPost(ADDR.USDC, priceUnits, subGate, uri)
+      toast.promise(promise, {
+        loading: "Creating post…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>Post created</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Create failed",
+      })
+
+      const hash = (await promise) as `0x${string}`
+
+      // Optional Farcaster share (best-effort; doesn’t block)
+      if (shareFarcaster) {
+        void (async () => {
+          try {
+            const r = await fetch("/api/farcaster/cast", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: "New post on OnlyStars ✨",
+                uri,
+                price: priceFloat,
+                gated: subGate,
+              }),
+            })
+            if (!r.ok) throw new Error("Cast failed")
+            toast.success("Shared to Farcaster")
+          } catch (err: any) {
+            // Non-blocking notice only
+            toast.info(err?.message ?? "Unable to share to Farcaster")
+          }
+        })()
+      }
+
+      // reset
       setUri("")
       setPriceUsd("0.00")
       setSubGate(false)
@@ -135,50 +299,38 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
     <section className="card space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-lg font-semibold">Create a post</div>
-        {/* status chips */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">Image ≤ 1 MB</span>
-          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">Video ≤ 2 MB</span>
-          <span className="rounded-full border border-white/10 px-2 py-0.5 opacity-70">USDC, non-custodial</span>
-        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2">
+        {/* Uploader + preview */}
         <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              className="btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              aria-label="Choose media file"
-            >
-              {uploading ? "Uploading…" : "Choose file"}
-            </button>
-            <input
-              ref={fileInputRef}
-              id="post-file"
-              type="file"
-              accept="image/*,video/*"
-              hidden
-              onChange={(e) => {
-                const f = e.currentTarget.files?.[0]
-                if (f) void onPick(f)
-              }}
-            />
-            <span className="text-xs opacity-70">
-              {uri ? (isImg(uri) ? "Image selected" : isVideo(uri) ? "Video selected" : "File uploaded") : "No file selected"}
-            </span>
-          </div>
-
-          <div className="rounded-xl border border-dashed border-white/15 p-3 text-xs opacity-70">
-            Tip: Short videos load faster and sell better. Images are cached on first view.
+          <DropUploader onFile={onPick} busy={uploading} />
+          <div className="overflow-hidden rounded-xl border border-white/10">
+            {uri ? (
+              isImg(uri) ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={uri}
+                  className="h-auto w-full"
+                  alt=""
+                  onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                />
+              ) : isVideo(uri) ? (
+                <video src={uri} className="h-auto w-full" controls playsInline preload="metadata" />
+              ) : (
+                <div className="bg-black/40 p-4 text-sm opacity-70">File uploaded</div>
+              )
+            ) : (
+              <div className="bg-black/40 p-4 text-sm opacity-70">No file selected</div>
+            )}
           </div>
         </div>
 
-        <div className="space-y-2">
+        {/* Pricing + gating */}
+        <div className="space-y-3">
           <label className="flex items-center gap-2">
             <span className="w-32 text-sm opacity-80">Price (USDC)</span>
-            <PriceInput value={priceUsd} onChange={setPriceUsd} />
+            <PriceInput value={priceUsd} onChange={setPriceUsd} aria-label="Price in USDC per post" />
             <span className="text-xs opacity-60">0 = free</span>
           </label>
 
@@ -191,6 +343,20 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
             />
             <span className="text-sm">Gated by subscription</span>
           </label>
+
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={shareFarcaster}
+              onChange={(e) => setShareFarcaster(e.target.checked)}
+              aria-label="Share to Farcaster"
+            />
+            <span className="text-sm">Share to Farcaster (optional)</span>
+          </label>
+
+          <div className="rounded-xl border border-dashed border-white/15 p-3 text-xs opacity-70">
+            Tip: Short videos load faster and sell better. Images are cached on first view.
+          </div>
         </div>
       </div>
 
@@ -231,13 +397,17 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     if (!isImage && !isVideoType) return toast.error("Pick an image or video")
     if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
     if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
-    const fd = new FormData()
-    fd.append("file", file)
-    const res = await fetch("/api/upload", { method: "POST", body: fd })
-    const json = await res.json()
-    if (!res.ok) return toast.error(json?.error || "Upload failed")
-    setEditUri(String(json.url))
-    toast.success("Replaced file")
+    try {
+      const fd = new FormData()
+      fd.append("file", file)
+      const res = await fetch("/api/upload", { method: "POST", body: fd })
+      const json = await res.json()
+      if (!res.ok) return toast.error(json?.error || "Upload failed")
+      setEditUri(String(json.url))
+      toast.success("Replaced file")
+    } catch (e: any) {
+      toast.error(e?.message || "Upload failed")
+    }
   }
 
   const save = async () => {
@@ -246,8 +416,23 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
       setSaving(true)
       const priceFloat = Number.parseFloat(editPrice || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      await updatePost(id, token, priceUnits, active, editGate, editUri)
-      toast.success("Post updated")
+      const promise = updatePost(id, token, priceUnits, active, editGate, editUri)
+      toast.promise(promise, {
+        loading: "Saving…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>Post updated</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Update failed",
+      })
+      await promise
       onChanged?.()
     } catch (e: any) {
       console.error(e)
@@ -263,8 +448,23 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
       setToggling(true)
       const priceFloat = Number.parseFloat(editPrice || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      await updatePost(id, token, priceUnits, !active, editGate, editUri)
-      toast.success(!active ? "Post activated" : "Post deactivated")
+      const promise = updatePost(id, token, priceUnits, !active, editGate, editUri)
+      toast.promise(promise, {
+        loading: active ? "Deactivating…" : "Activating…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>{!active ? "Post activated" : "Post deactivated"}</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Toggle failed",
+      })
+      await promise
       onChanged?.()
     } catch (e: any) {
       console.error(e)
@@ -397,10 +597,29 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
     try {
       setCreating(true)
       if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
+      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
+
       const priceFloat = Number.parseFloat(priceUsd || "0")
       const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      await createPlan(ADDR.USDC, priceUnits, days, name || "Plan", "")
-      toast.success("Plan created")
+
+      const promise = createPlan(ADDR.USDC, priceUnits, days, (name || "Plan").trim(), "")
+      toast.promise(promise, {
+        loading: "Creating plan…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>Plan created</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Create failed",
+      })
+      await promise
+
       setName("")
       setDays(30)
       setPriceUsd("0.00")
@@ -439,7 +658,7 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
         </label>
         <label className="flex items-center gap-2">
           <span className="w-20 text-sm opacity-80">Price</span>
-          <PriceInput value={priceUsd} onChange={setPriceUsd} />
+          <PriceInput value={priceUsd} onChange={setPriceUsd} aria-label="USDC per period" />
           <span className="text-sm opacity-60">USDC / period</span>
         </label>
       </div>
@@ -466,8 +685,23 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
   const toggleActive = async () => {
     try {
       setToggling(true)
-      await updatePlan(id, name, metadataURI, price, days, !active)
-      toast.success(!active ? "Plan activated" : "Plan deactivated")
+      const promise = updatePlan(id, name, metadataURI, price, days, !active)
+      toast.promise(promise, {
+        loading: active ? "Deactivating…" : "Activating…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>{!active ? "Plan activated" : "Plan deactivated"}</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Toggle failed",
+      })
+      await promise
       onChanged?.()
     } catch (e: any) {
       console.error(e)
@@ -481,8 +715,23 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
     if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return
     try {
       setRetiring(true)
-      await updatePlan(id, name, metadataURI, price, days, false)
-      toast.success("Plan retired")
+      const promise = updatePlan(id, name, metadataURI, price, days, false)
+      toast.promise(promise, {
+        loading: "Retiring…",
+        success: (hash: `0x${string}`) => (
+          <div className="flex flex-col gap-1">
+            <span>Plan retired</span>
+            <button
+              className="underline underline-offset-2 opacity-80 hover:opacity-100 text-left"
+              onClick={() => window.open(basescanTx(hash), "_blank")}
+            >
+              View on BaseScan
+            </button>
+          </div>
+        ),
+        error: (e: any) => e?.shortMessage || e?.message || "Retire failed",
+      })
+      await promise
       onChanged?.()
     } catch (e: any) {
       console.error(e)
