@@ -10,7 +10,7 @@ import {
   useWriteContract,
   useChainId,
 } from "wagmi"
-import { Address } from "viem"
+import type { Address } from "viem" // ← type-only import fixes the TS error
 import { base } from "viem/chains"
 
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
@@ -264,7 +264,7 @@ export default function BecomeCreatorPage() {
         }
       } catch { /* non-fatal */ }
 
-      // Optional: quick Warpcast share intent toast (power users love this)
+      // Optional: quick Warpcast share intent toast
       try {
         const cast = warpcastShare({
           text: `I just created my OnlyStars profile @${normHandle} — come rate & subscribe!`,
