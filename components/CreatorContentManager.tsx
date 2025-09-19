@@ -195,7 +195,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
   const validateFile = (file: File) => {
     const isImage = file.type.startsWith("image/");
-    const isVideoType = file.type.startsWith("video/");
+    the const isVideoType = file.type.startsWith("video/");
     if (!isImage && !isVideoType) {
       toast.error("Pick an image or video");
       return false;
@@ -258,7 +258,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
         error: (e: any) => e?.shortMessage || e?.message || "Create failed",
       });
 
-      const hash = (await promise) as `0x${string}`;
+      await promise;
 
       // Optional Farcaster share (best-effort; doesn’t block)
       if (shareFarcaster) {
@@ -374,26 +374,34 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   );
 }
 
-function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
+function PostRow({
+  id,
+  onChanged,
+}: {
+  id: bigint;
+  onChanged?: (() => void) | undefined; // <-- allow explicit undefined (exactOptionalPropertyTypes)
+}) {
   const { data: postData } = usePost(id);
 
   // Tell TS what indices we read without over-constraining the hook.
-  type MaybePost = readonly [
-    unknown,                 // [0] unused here
-    `0x${string}` | undefined, // [1] token
-    bigint | undefined,        // [2] price (USDC 6dp)
-    boolean | undefined,       // [3] active
-    boolean | undefined,       // [4] subGate
-    string | undefined         // [5] uri
-  ] | undefined;
+  type MaybePost =
+    | readonly [
+        unknown, // [0] unused
+        `0x${string}` | undefined, // [1] token
+        bigint | undefined, // [2] price (USDC 6dp)
+        boolean | undefined, // [3] active
+        boolean | undefined, // [4] subGate
+        string | undefined // [5] uri
+      ]
+    | undefined;
 
   const post = postData as unknown as MaybePost;
 
-  const token   = (post?.[1]) ?? ADDR.USDC;
-  const price   = (post?.[2]) ?? 0n;
-  const active  = (post?.[3] ?? true);
-  const subGate = (post?.[4] ?? false);
-  const uri     = (post?.[5] ?? "");
+  const token = post?.[1] ?? ADDR.USDC;
+  const price = post?.[2] ?? 0n;
+  const active = post?.[3] ?? true;
+  const subGate = post?.[4] ?? false;
+  const uri = post?.[5] ?? "";
 
   const { update: updatePost } = useUpdatePost();
 
@@ -690,7 +698,13 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
   );
 }
 
-function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
+function PlanRow({
+  id,
+  onChanged,
+}: {
+  id: bigint;
+  onChanged?: (() => void) | undefined; // <-- allow explicit undefined (exactOptionalPropertyTypes)
+}) {
   const { data: plan } = usePlan(id);
   const price = (plan?.[2] as bigint | undefined) ?? 0n;
   const days = Number(plan?.[3] ?? 30);
