@@ -9,17 +9,16 @@ import {
 } from "wagmi"
 import { createPublicClient, http } from "viem"
 import { base } from "viem/chains"
+
 import ProfileRegistry from "@/abi/ProfileRegistry.json"
-import { REGISTRY as REGISTRY_ADDR } from "@/lib/addresses" // ✅ single source of truth (checksummed/validated)
-
-/** Expose for legacy imports if needed */
+import { REGISTRY as REGISTRY_ADDR } from "@/lib/addresses" // checksummed
+/** Back-compat alias */
 export const REGISTRY = REGISTRY_ADDR
-export const REGISTRY_CS = REGISTRY_ADDR // kept alias so all existing imports keep working
+export const REGISTRY_CS = REGISTRY_ADDR
 
-// Standalone public client for non-hook helpers (usable in Header, server routes, etc.)
 const pc = createPublicClient({
   chain: base,
-  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL), // safe if undefined; viem picks default
+  transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL),
 })
 
 type WatchOpts = { watch?: boolean }
@@ -50,33 +49,36 @@ export async function getProfile(id: bigint) {
   }
 }
 
-/** Resolve numeric id from a handle. Returns 0n if not found. */
+/** Resolve numeric id from a handle. Returns 0n if not found. (FIXED) */
 export async function getProfileIdByHandle(handle: string): Promise<bigint> {
   if (!REGISTRY_CS || !handle) return 0n
-  try {
-    // Prefer direct id lookup if available
-    try {
-      const id = await pc.readContract({
-        address: REGISTRY_CS,
-        abi: ProfileRegistry as any,
-        functionName: "getIdByHandle",
-        args: [handle],
-      })
-      if (typeof id === "bigint" && id > 0n) return id
-    } catch { /* fall through */ }
 
-    const prof = await pc.readContract({
+  // 1) Direct id (preferred)
+  try {
+    const id = await pc.readContract({
+      address: REGISTRY_CS,
+      abi: ProfileRegistry as any,
+      functionName: "getIdByHandle",
+      args: [handle],
+    })
+    if (typeof id === "bigint" && id > 0n) return id
+  } catch { /* fallthrough */ }
+
+  // 2) Fallback: tuple shape (exists, id, owner, handle, displayName, avatarURI, bio, fid, createdAt)
+  try {
+    const out = await pc.readContract({
       address: REGISTRY_CS,
       abi: ProfileRegistry as any,
       functionName: "getProfileByHandle",
       args: [handle],
     })
-    if (typeof prof === "bigint") return prof
-    if (Array.isArray(prof)) {
-      const candidate = (prof as any[]).find((v) => typeof v === "bigint" && v > 0n)
-      return (candidate as bigint) || 0n
+    if (Array.isArray(out) && out.length >= 2) {
+      const exists = Boolean(out[0])
+      const id = out[1] as bigint
+      return exists && typeof id === "bigint" ? id : 0n
     }
   } catch {}
+
   return 0n
 }
 
