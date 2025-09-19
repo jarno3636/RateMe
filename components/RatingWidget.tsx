@@ -1,35 +1,40 @@
 // /components/RatingWidget.tsx
 "use client"
 
-import { useEffect, useMemo, useState, useCallback } from "react"
-import { useAccount } from "wagmi"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useAccount, useReadContract } from "wagmi"
+import { erc20Abi } from "viem"
 import toast from "react-hot-toast"
 import {
   useAverage,
   useMyRating,
   useRate,
   useUpdateRating,
-  useRatingStats, // ← add this for count
+  useRatingStats,
 } from "@/hooks/useRatings"
 import { useRatingsAllowance } from "@/hooks/useRatingsAllowance"
+import RatingsAbi from "@/abi/Ratings.json"
+import { RATINGS as RATINGS_ADDR } from "@/lib/addresses"
 
-/** Parse result from Ratings.getRating(...) across ABI variations. */
-function parseMyRating(raw: unknown): { score: number; comment: string } {
-  if (!Array.isArray(raw)) return { score: 0, comment: "" }
-  const arr = raw as any[]
-  if (typeof arr[0] === "string" && arr[0]?.startsWith?.("0x")) {
-    const score = Number(arr[2] ?? 0)
-    const comment = String(arr[3] ?? "")
-    return { score: Number.isFinite(score) ? score : 0, comment }
-  }
-  const score = Number(arr[0] ?? 0)
-  const comment = String(arr[1] ?? arr[3] ?? "")
-  return { score: Number.isFinite(score) ? score : 0, comment }
-}
+/* ─────────────────────────── helpers ─────────────────────────── */
 
 const ALLOW_SELF_RATING = false
 const MAX_COMMENT = 240
 
+/** Ratings.getRating(...) per ABI: (score,uint48,uint48,comment) */
+function parseMyRating(raw: unknown): { score: number; comment: string } {
+  if (!Array.isArray(raw)) return { score: 0, comment: "" }
+  // Common layout: [score, createdAt, updatedAt, comment]
+  const arr = raw as any[]
+  const score = Number(arr[0] ?? 0)
+  const comment = String(arr[3] ?? arr[1] ?? "")
+  return {
+    score: Number.isFinite(score) ? score : 0,
+    comment,
+  }
+}
+
+/** Small, accessible star button */
 function Star({
   index,
   filled,
@@ -73,26 +78,57 @@ function Star({
         fill="currentColor"
         aria-hidden
       >
-        <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z"/>
+        <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" />
       </svg>
     </button>
   )
 }
 
+/* ─────────────────────────── component ─────────────────────────── */
+
 export default function RatingWidget({
   creator,
-  owner, // (optional) exact owner addr to block self-rating
+  owner, // optional: exact owner addr to block self-rating
 }: {
   creator: `0x${string}`
   owner?: `0x${string}` | undefined
 }) {
   const { address } = useAccount()
 
-  // Reads
-  const { data: avgX100, isLoading: avgLoading } = useAverage(creator)
-  const { data: countTuple } = useRatingStats(creator) // [count, totalScore]
-  const ratingCount = Number((countTuple as any)?.[0] ?? 0)
-  const { data: myRaw } = useMyRating(creator)
+  // ── Reads
+  const {
+    data: avgX100,
+    isLoading: avgLoading,
+    refetch: refetchAvg,
+  } = useAverage(creator, { watch: true })
+  const {
+    data: statsTuple,
+    refetch: refetchStats,
+  } = useRatingStats(creator, { watch: true }) // [count, totalScore]
+  const ratingCount = Number((statsTuple as any)?.[0] ?? 0)
+  const {
+    data: myRaw,
+    refetch: refetchMine,
+  } = useMyRating(creator, { watch: true })
+
+  // Ratings -> USDC token -> decimals (for correct fee display)
+  const { data: tokenAddr } = useReadContract({
+    abi: RatingsAbi as any,
+    address: RATINGS_ADDR,
+    functionName: "USDC",
+    query: { enabled: !!RATINGS_ADDR },
+  })
+  const usdcAddr = (Array.isArray(tokenAddr) ? tokenAddr[0] : tokenAddr) as `0x${string}` | undefined
+
+  const { data: usdcDecimals } = useReadContract({
+    abi: erc20Abi,
+    address: usdcAddr,
+    functionName: "decimals",
+    query: { enabled: !!usdcAddr },
+  })
+  const decimals = Number(usdcDecimals ?? 6)
+
+  // Parse my rating
   const parsed = useMemo(() => parseMyRating(myRaw), [myRaw])
   const hasExisting = (parsed.score ?? 0) > 0
 
@@ -100,13 +136,15 @@ export default function RatingWidget({
   const [score, setScore] = useState<number>(hasExisting ? parsed.score : 5)
   const [hover, setHover] = useState<number>(0)
   const [comment, setComment] = useState<string>(parsed.comment || "")
+  const [shareCast, setShareCast] = useState<boolean>(false) // optional Farcaster share
 
-  // Sync local state when on-chain rating arrives/changes
+  // Sync local state when rating fetch updates
   useEffect(() => {
     if (hasExisting) {
       setScore(parsed.score)
       setComment(parsed.comment || "")
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasExisting, parsed.score, parsed.comment])
 
   // Fees / approvals
@@ -116,16 +154,13 @@ export default function RatingWidget({
   const { rate, isPending: isRating } = useRate()
   const { update, isPending: isUpdating } = useUpdateRating()
 
+  // Derived
   const avg = useMemo(
     () => (avgX100 || avgLoading ? (avgX100 ? (Number(avgX100) / 100).toFixed(2) : "…") : "-"),
     [avgX100, avgLoading]
   )
 
-  const isSelf =
-    !!address &&
-    !!owner &&
-    address.toLowerCase() === owner.toLowerCase()
-
+  const isSelf = !!address && !!owner && address.toLowerCase() === owner.toLowerCase()
   const clampedScore = Math.max(1, Math.min(5, Math.floor(Number(score) || 5)))
   const commentTrimmed = comment.slice(0, MAX_COMMENT)
 
@@ -135,8 +170,14 @@ export default function RatingWidget({
     clampedScore === (parsed.score || 0) &&
     commentTrimmed === (parsed.comment || "")
 
-  const canRate = ALLOW_SELF_RATING ? !!address : (!!address && !isSelf)
+  const canRate = ALLOW_SELF_RATING ? !!address : !!address && !isSelf
   const submitting = states.approving || isRating || isUpdating
+
+  // Format fee using token decimals (defaults to 6)
+  const feeDisplay =
+    typeof fee === "bigint"
+      ? (Number(fee) / 10 ** (Number.isFinite(decimals) ? decimals : 6)).toFixed(Math.min(4, decimals))
+      : "--"
 
   async function onSubmit() {
     if (!address) return toast.error("Connect a wallet first.")
@@ -144,12 +185,12 @@ export default function RatingWidget({
     if (unchanged) return toast.error("No changes to save.")
 
     try {
-      // If there’s a USDC fee, ensure approval first
+      // Ensure allowance if there’s a fee
       if ((fee ?? 0n) > 0n && !hasAllowance) {
         const t = toast.loading("Approving USDC for rating fee…")
         await approveForFee?.()
         toast.dismiss(t)
-        toast.success("Approval confirmed")
+        toast.success("USDC approved")
       }
 
       const t2 = toast.loading(hasExisting ? "Updating rating…" : "Submitting rating…")
@@ -160,6 +201,18 @@ export default function RatingWidget({
       }
       toast.dismiss(t2)
       toast.success("Rating saved")
+
+      // Manual refetch to refresh UI immediately
+      await Promise.allSettled([refetchAvg?.(), refetchStats?.(), refetchMine?.()])
+
+      // Optional Farcaster share via Warpcast composer (no API key required)
+      if (shareCast) {
+        const text = encodeURIComponent(
+          `I rated ${creator} ${clampedScore}/5 on OnlyStars ✨\n${commentTrimmed ? `"${commentTrimmed}"\n` : ""}`
+        )
+        const url = `https://warpcast.com/~/compose?text=${text}`
+        window.open(url, "_blank", "noopener,noreferrer")
+      }
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Failed to rate")
     }
@@ -172,10 +225,13 @@ export default function RatingWidget({
         <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-xs">
           <span className="opacity-70">Average</span>
           <span className="font-semibold tabular-nums">
-            {avg}{avg !== "-" && avg !== "…" ? " / 5" : ""}
+            {avg}
+            {avg !== "-" && avg !== "…" ? " / 5" : ""}
           </span>
           <span aria-hidden>•</span>
-          <span className="opacity-70">{ratingCount} {ratingCount === 1 ? "rating" : "ratings"}</span>
+          <span className="opacity-70">
+            {ratingCount} {ratingCount === 1 ? "rating" : "ratings"}
+          </span>
         </div>
       </div>
 
@@ -185,13 +241,7 @@ export default function RatingWidget({
           {[1, 2, 3, 4, 5].map((n) => {
             const filled = (hover || clampedScore) >= n
             return (
-              <Star
-                key={n}
-                index={n}
-                filled={filled}
-                setHover={setHover}
-                setScore={setScore}
-              />
+              <Star key={n} index={n} filled={filled} setHover={setHover} setScore={setScore} />
             )
           })}
         </div>
@@ -214,9 +264,19 @@ export default function RatingWidget({
             aria-label="Rating comment"
             maxLength={MAX_COMMENT}
           />
-          <div className="mt-1 text-right text-[11px] opacity-60">
-            {commentTrimmed.length}/{MAX_COMMENT}
+          <div className="mt-1 flex items-center justify-between text-[11px] opacity-60">
+            <span>Fee: <span className="font-medium">{feeDisplay}</span> USDC</span>
+            <span className="tabular-nums">{comment.trim().length}/{MAX_COMMENT}</span>
           </div>
+          <label className="mt-2 inline-flex items-center gap-2 text-xs opacity-80">
+            <input
+              type="checkbox"
+              checked={shareCast}
+              onChange={(e) => setShareCast(e.target.checked)}
+              aria-label="Also share on Farcaster"
+            />
+            Also share this rating on Farcaster
+          </label>
         </div>
 
         <button
@@ -239,21 +299,8 @@ export default function RatingWidget({
               : ""
           }
         >
-          {submitting
-            ? hasExisting
-              ? "Updating…"
-              : "Submitting…"
-            : hasExisting
-            ? "Update rating"
-            : "Submit rating"}
+          {submitting ? (hasExisting ? "Updating…" : "Submitting…") : hasExisting ? "Update rating" : "Submit rating"}
         </button>
-      </div>
-
-      <div className="text-sm opacity-70">
-        Fee:&nbsp;
-        <span className="font-medium">
-          {fee !== undefined ? (Number(fee) / 1e6).toFixed(2) : "--"} USDC
-        </span>
       </div>
     </div>
   )
