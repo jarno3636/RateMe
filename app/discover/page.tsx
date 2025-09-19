@@ -11,7 +11,11 @@ const PAGE_SIZE = 12n;
 const toBig = (v: unknown, d: bigint = 0n) => {
   try {
     if (typeof v === "bigint") return v;
-    if (typeof v === "string" && v.length) return BigInt(v);
+    if (typeof v === "number" && Number.isInteger(v)) return BigInt(v);
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (s) return BigInt(s);
+    }
     return d;
   } catch {
     return d;
@@ -124,7 +128,7 @@ function CreatorCard({
 export default function DiscoverPage() {
   /** Cursor stack for bidirectional paging (server returns nextCursor) */
   const [cursors, setCursors] = useState<bigint[]>([0n]);
-  const cursor = cursors[cursors.length - 1];
+  const cursor = cursors[cursors.length - 1]; // always bigint
 
   /** Client-side enhancements */
   const [q, setQ] = useState(""); // search
@@ -156,7 +160,10 @@ export default function DiscoverPage() {
     names.length,
     avatars.length
   );
-  const ids = useMemo(() => idsRaw.slice(0, rowCount).map((x) => toBig(x)), [idsRaw, rowCount]);
+  const ids = useMemo(
+    () => idsRaw.slice(0, rowCount).map((x) => toBig(x, 0n)),
+    [idsRaw, rowCount]
+  );
 
   // Derived rows
   const rows = useMemo(() => {
@@ -169,13 +176,14 @@ export default function DiscoverPage() {
       badges: string[];
     }> = [];
     for (let i = 0; i < rowCount; i++) {
+      const idBig = toBig(idsRaw[i], 0n);
       out.push({
-        id: toBig(idsRaw[i]),
-        name: toStr(names[i], `Profile #${toBig(idsRaw[i]).toString()}`),
+        id: idBig,
+        name: toStr(names[i], `Profile #${idBig.toString()}`),
         handle: toStr(handles[i], ""),
         avatar: toStr(avatars[i], "/avatar.png"),
         createdAt: toNum(createdAts[i], 0), // seconds since epoch (optional)
-        badges: badgesAll[i] || [],
+        badges: badgesAll[i] ?? [],
       });
     }
     return out;
@@ -195,7 +203,7 @@ export default function DiscoverPage() {
     if (canPrev) setCursors((prev) => prev.slice(0, prev.length - 1));
   }, [canPrev]);
 
-  // Client-side filter/sort (non-destructive, pleasant UX)
+  // Client-side filter/sort (non-destructive)
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     let list = rows;
