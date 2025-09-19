@@ -3,8 +3,12 @@ import Link from "next/link"
 import { headers } from "next/headers"
 import { computeTop3 } from "@/lib/top3"
 import { getProfileSnaps } from "@/lib/profileCache"
+import { publicClient } from "@/lib/chain"
+import RatingsAbi from "@/abi/Ratings.json"
+import { creatorShareLinks } from "@/lib/farcaster"
 
 const AVATAR_FALLBACK = "/avatar.png"
+const RATINGS = process.env.NEXT_PUBLIC_RATINGS as `0x${string}` | undefined
 
 async function getOrigin() {
   try {
@@ -17,7 +21,7 @@ async function getOrigin() {
 }
 
 async function getTop3Ids(): Promise<number[]> {
-  // Try the API first (KV caching); if it hiccups, fall back to direct on-chain compute.
+  // Try the API first (KV-cached), then deterministic on-chain fallback.
   try {
     const origin = await getOrigin()
     const url = origin ? `${origin}/api/top3` : `/api/top3`
@@ -29,6 +33,40 @@ async function getTop3Ids(): Promise<number[]> {
     console.error("getTop3Ids api fallback:", e)
   }
   return await computeTop3(50)
+}
+
+/** Fetch average (x100) + count from Ratings for a list of owners, server-side. */
+async function getRatingsForOwners(
+  owners: `0x${string}`[]
+): Promise<Record<string, { avgX100: number; count: number }>> {
+  const out: Record<string, { avgX100: number; count: number }> = {}
+  if (!RATINGS || owners.length === 0) return out
+
+  await Promise.all(
+    owners.map(async (owner) => {
+      try {
+        const [avg, stats] = await Promise.all([
+          publicClient.readContract({
+            address: RATINGS,
+            abi: RatingsAbi as any,
+            functionName: "getAverage",
+            args: [owner],
+          }) as Promise<bigint>,
+          publicClient.readContract({
+            address: RATINGS,
+            abi: RatingsAbi as any,
+            functionName: "getStats",
+            args: [owner],
+          }) as Promise<[bigint, bigint]>, // [count, totalScore]
+        ])
+        const count = Number((stats?.[0] ?? 0n) as bigint)
+        out[owner.toLowerCase()] = { avgX100: Number(avg ?? 0n), count: Number.isFinite(count) ? count : 0 }
+      } catch {
+        out[owner.toLowerCase()] = { avgX100: 0, count: 0 }
+      }
+    })
+  )
+  return out
 }
 
 // KV-backed profile snapshot fetch (server-side only)
@@ -43,13 +81,16 @@ export default async function HomePage() {
   const ids = await getTop3Ids()
   const profiles = await getProfiles(ids)
 
+  // Ratings overlay (optional; graceful if RATINGS unset)
+  const ratingsMap = await getRatingsForOwners(profiles.map((p) => p.owner))
+
   return (
     <div className="relative space-y-14">
-      {/* Decorative background */}
+      {/* Decorative background (motion-safe) */}
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-        <div className="absolute left-1/2 top-[-8rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-pink-500/20 blur-[90px]" />
-        <div className="absolute right-[-8rem] bottom-[-10rem] h-[26rem] w-[26rem] rounded-full bg-fuchsia-700/20 blur-[100px]" />
-        <div className="absolute left-[-10rem] bottom-[-8rem] h-[22rem] w-[22rem] rounded-full bg-pink-400/10 blur-[100px]" />
+        <div className="absolute left-1/2 top-[-8rem] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-pink-500/20 blur-[90px] motion-reduce:hidden" />
+        <div className="absolute right-[-8rem] bottom-[-10rem] h-[26rem] w-[26rem] rounded-full bg-fuchsia-700/20 blur-[100px] motion-reduce:hidden" />
+        <div className="absolute left-[-10rem] bottom-[-8rem] h-[22rem] w-[22rem] rounded-full bg-pink-400/10 blur-[100px] motion-reduce:hidden" />
       </div>
 
       {/* Hero */}
@@ -72,13 +113,13 @@ export default async function HomePage() {
 
         <div className="mt-6 flex items-center justify-center gap-3">
           <Link
-            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
+            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10 focus-visible:ring-2 focus-visible:ring-pink-500/50"
             href="/discover"
           >
             Discover creators
           </Link>
           <Link
-            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
+            className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10 focus-visible:ring-2 focus-visible:ring-pink-500/50"
             href="/creator"
           >
             Become a creator
@@ -130,11 +171,15 @@ export default async function HomePage() {
               const src = p.avatar?.trim() ? p.avatar : AVATAR_FALLBACK
               const name = p.name?.trim() ? p.name : `Profile #${p.id}`
               const handle = p.handle?.trim() ? p.handle : "unknown"
+              const r = ratingsMap[p.owner.toLowerCase()] || { avgX100: 0, count: 0 }
+              const avg = r.avgX100 > 0 ? (r.avgX100 / 100).toFixed(2) : "—"
+              const countLabel = r.count === 1 ? "rating" : "ratings"
+
+              const share = creatorShareLinks(String(p.id), `Check out @${handle} on OnlyStars`)
               return (
-                <Link
+                <div
                   key={p.id}
-                  href={`/creator/${p.id}`}
-                  className="group card relative overflow-hidden border-white/10 p-4 hover:bg-white/10"
+                  className="group card relative overflow-hidden border-white/10 p-4"
                 >
                   {/* Accent line */}
                   <span
@@ -142,7 +187,7 @@ export default async function HomePage() {
                     className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-pink-500/0 via-pink-500/60 to-pink-500/0 opacity-80"
                   />
 
-                  <div className="flex items-center gap-4">
+                  <Link href={`/creator/${p.id}`} className="flex items-center gap-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/50 rounded-xl">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={src}
@@ -155,6 +200,45 @@ export default async function HomePage() {
                       <div className="truncate text-lg font-medium">{name}</div>
                       <div className="truncate text-sm opacity-70">@{handle}</div>
                     </div>
+                  </Link>
+
+                  {/* Rating + share */}
+                  <div className="mt-3 flex items-center justify-between gap-2">
+                    <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/30 px-2 py-1 text-xs">
+                      <StarIcon />
+                      <span className="tabular-nums">{avg !== "—" ? `${avg} / 5` : "No ratings"}</span>
+                      {avg !== "—" && (
+                        <>
+                          <span aria-hidden>•</span>
+                          <span className="opacity-70">
+                            {r.count} {countLabel}
+                          </span>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={share.cast}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-full border border-white/15 px-3 py-1 text-xs hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/50"
+                        title="Share on Warpcast"
+                        aria-label="Share on Warpcast"
+                      >
+                        Warpcast
+                      </a>
+                      <a
+                        href={share.tweet}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded-full border border-white/15 px-3 py-1 text-xs hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-pink-500/50"
+                        title="Share on X"
+                        aria-label="Share on X"
+                      >
+                        X
+                      </a>
+                    </div>
                   </div>
 
                   {/* subtle hover glow */}
@@ -166,7 +250,7 @@ export default async function HomePage() {
                         "radial-gradient(120px 60px at 20% 0%, rgba(236,72,153,0.35), transparent 70%)",
                     }}
                   />
-                </Link>
+                </div>
               )
             })}
           </div>
@@ -182,13 +266,13 @@ export default async function HomePage() {
           </p>
           <div className="mt-4 flex items-center justify-center gap-3">
             <Link
-              className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10"
+              className="rounded-full border border-pink-500/60 px-5 py-2 text-sm hover:bg-pink-500/10 focus-visible:ring-2 focus-visible:ring-pink-500/50"
               href="/creator"
             >
               Start creating
             </Link>
             <Link
-              className="rounded-full border border-white/15 px-5 py-2 text-sm hover:bg-white/10"
+              className="rounded-full border border-white/15 px-5 py-2 text-sm hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-pink-500/50"
               href="/discover"
             >
               Explore creators
@@ -220,7 +304,7 @@ function CoinIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
       <ellipse cx="12" cy="7" rx="7" ry="3.5" stroke="currentColor" strokeWidth="1.6" fill="none" />
-      <path d="M5 7v10c0 1.9 3.1 3.5 7 3.5s7-1.6 7-3.5V7" stroke="currentColor" strokeWidth="1.6" fill="none" />
+      <path d="M5 7v10c0 1.9 3.5 3.5 7 3.5s7-1.6 7-3.5V7" stroke="currentColor" strokeWidth="1.6" fill="none" />
     </svg>
   )
 }
@@ -236,6 +320,13 @@ function ShieldIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" className="opacity-90" aria-hidden="true">
       <path d="M12 3l7 3v6c0 4-2.7 7.5-7 9-4.3-1.5-7-5-7-9V6l7-3z" stroke="currentColor" strokeWidth="1.6" fill="none" />
       <path d="M9 12l2 2 4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+function StarIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" fill="currentColor" />
     </svg>
   )
 }
