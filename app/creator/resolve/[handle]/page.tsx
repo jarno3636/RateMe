@@ -1,25 +1,28 @@
 // app/creator/resolve/[handle]/page.tsx
 import "server-only"
 import { redirect } from "next/navigation"
-import { createPublicClient, http } from "viem"
-import { base } from "viem/chains"
 
+import { publicServerClient } from "@/lib/chainServer"
 import * as ADDR from "@/lib/addresses"
 import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 import { kvGetJSON, kvSetJSON } from "@/lib/kv"
 
-export const dynamic = "force-dynamic" // redirects depend on live chain/KV
+export const dynamic = "force-dynamic" // depends on live chain & KV
 
-const pc = createPublicClient({ chain: base, transport: http() })
-
+/** Accepts 1–32 chars, alphanumerics plus _ . - ; case-insensitive */
 const HANDLE_RE = /^[a-z0-9_.-]{1,32}$/i
-const CACHE_TTL_SEC = 120 // small but helpful
+const CACHE_TTL_SEC = 120
+
+const REGISTRY = ADDR.REGISTRY ?? ADDR.PROFILE_REGISTRY // tolerate older alias
 
 function normalizeHandle(raw: string) {
-  return decodeURIComponent(raw || "").trim().replace(/^@/, "")
+  return decodeURIComponent(String(raw || "")).trim().replace(/^@/, "")
 }
 function isNumericId(s: string) {
   return /^[0-9]+$/.test(s)
+}
+function cacheKey(handle: string) {
+  return `onlystars:resolve:${REGISTRY ?? "unknown"}:${handle.toLowerCase()}`
 }
 
 export default async function ResolveHandlePage({
@@ -43,26 +46,30 @@ export default async function ResolveHandlePage({
   }
 
   // If the registry addr is missing, don’t blow up—send to onboarding
-  if (!ADDR.PROFILE_REGISTRY) {
+  if (!REGISTRY) {
     redirect("/creator")
   }
 
-  const cacheKey = `onlystars:resolve:${ADDR.PROFILE_REGISTRY}:${handle.toLowerCase()}`
-  // 1) KV cache
-  const cached = await kvGetJSON<{ id: string }>(cacheKey)
-  if (cached?.id) {
-    redirect(`/creator/${cached.id}`)
+  // 1) KV cache hit?
+  try {
+    const cached = await kvGetJSON<{ id: string }>(cacheKey(handle))
+    if (cached?.id) {
+      redirect(`/creator/${cached.id}`)
+    }
+  } catch {
+    // soft-fail: proceed to chain lookup
   }
 
-  // 2) Chain lookup (best-effort)
+  // 2) Chain lookup (best-effort, server client w/ batching)
   let id = 0n
   try {
-    const res = await pc.readContract({
-      address: ADDR.PROFILE_REGISTRY,
+    const res = await publicServerClient.readContract({
+      address: REGISTRY,
       abi: ProfileRegistryAbi as any,
       functionName: "getProfileByHandle",
       args: [handle],
     })
+
     if (typeof res === "bigint") {
       id = res
     } else if (Array.isArray(res)) {
@@ -70,12 +77,16 @@ export default async function ResolveHandlePage({
       if (cand) id = cand as bigint
     }
   } catch {
-    // ignore and fall through to onboarding
+    // ignore; fall through to onboarding
   }
 
   if (id > 0n) {
-    // cache for a short time
-    await kvSetJSON(cacheKey, { id: id.toString() }, CACHE_TTL_SEC)
+    // Cache briefly to smooth repeated resolves
+    try {
+      await kvSetJSON(cacheKey(handle), { id: id.toString() }, CACHE_TTL_SEC)
+    } catch {
+      /* ignore cache errors */
+    }
     redirect(`/creator/${id.toString()}`)
   }
 
