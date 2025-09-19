@@ -54,6 +54,9 @@ const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 const isNumericId = (s: string) => /^[0-9]+$/.test(s)
 const mulSafe = (a: bigint, b: bigint) => a * b // (inputs are small; BigInt guards overflow)
 
+/** Safely treat unknown payloads as array-like (prevents {} index errors) */
+const asTuple = (a: unknown): readonly unknown[] => (Array.isArray(a) ? a : [])
+
 /** Resolve a handle -> profile id via registry ABI */
 async function resolveHandleToId(handle: string): Promise<bigint> {
   if (!ADDR.REGISTRY) return 0n
@@ -135,10 +138,13 @@ function Badge({
 /* ---------- Plans ---------- */
 function PlanRow({ id }: { id: bigint }) {
   const { data: plan } = usePlan(id)
-  const price = (plan?.[2] as bigint | undefined) ?? 0n
-  const days = Number(plan?.[3] ?? 30)
-  const active = Boolean(plan?.[4] ?? true)
-  const name = String(plan?.[5] ?? "Plan")
+
+  // ✅ Safely narrow before indexing
+  const p = asTuple(plan)
+  const price  = BigInt((p[2] as bigint) ?? 0n)
+  const days   = Number(p[3] ?? 30)
+  const active = Boolean(p[4] ?? true)
+  const name   = String(p[5] ?? "Plan")
 
   const [periods, setPeriods] = useState(1)
   const totalCost = useMemo(() => mulSafe(price, BigInt(Math.max(1, periods))), [price, periods])
@@ -218,10 +224,12 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const { address } = useAccount()
   const { data: post } = usePost(id)
 
-  const price = (post?.[2] as bigint | undefined) ?? 0n
-  const active = Boolean(post?.[3] ?? true)
-  const subGate = Boolean(post?.[4] ?? false)
-  const uri = String(post?.[5] ?? "")
+  // ✅ Safely narrow before indexing
+  const p = asTuple(post)
+  const price   = BigInt((p[2] as bigint) ?? 0n)
+  const active  = Boolean(p[3] ?? true)
+  const subGate = Boolean(p[4] ?? false)
+  const uri     = String(p[5] ?? "")
 
   const { data: hasSub } = useIsActive(address as `0x${string}` | undefined, creator)
   const { data: hasAccess } = useHasPostAccess(address as `0x${string}` | undefined, id)
