@@ -14,7 +14,7 @@
     "format": "prettier --cache --write ."
   },
   "dependencies": {
-    "@vercel/kv": "^1.2.0",
+    "@vercel/kv": "^1.0.0",
     "@vercel/blob": "^0.25.1",
     "encoding": "^0.1.13",
     "lucide-react": "0.451.0",
