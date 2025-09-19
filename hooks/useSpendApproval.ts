@@ -1,80 +1,43 @@
 // /hooks/useSpendApproval.ts
 "use client"
 
-import { useEffect, useMemo } from "react"
-import { Address, maxUint256 } from "viem"
-import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
+import { useAccount, useReadContract, useWriteContract, usePublicClient } from "wagmi"
+import { base } from "viem/chains"
+import { erc20Abi, maxUint256 } from "viem"
+import { REGISTRY as REGISTRY_ADDR, USDC as USDC_ADDR } from "@/lib/addresses"
 
-type SpendApproval = {
-  allowance: bigint
-  hasAllowance: boolean
-  needsApproval: boolean
-  approveExact: () => Promise<`0x${string}` | void>
-  approveMax: () => Promise<`0x${string}` | void>
-  isPending: boolean         // tx pending
-  isFetching: boolean        // reading allowance
-  error?: Error | null
-  refetchAllowance: () => void
-  status: "idle" | "fetching" | "pending-tx"
-  /** convenience for buttons/tooltips */
-  ready: boolean
-  reason?: string
+export function useUsdcAllowance(ownerOverride?: `0x${string}`) {
+  const { address } = useAccount()
+  const owner = (ownerOverride ?? address) as `0x${string}` | undefined
+  const enabled = !!owner && !!USDC_ADDR && !!REGISTRY_ADDR
+
+  return useReadContract({
+    abi: erc20Abi,
+    address: USDC_ADDR,
+    functionName: "allowance",
+    args: enabled ? [owner!, REGISTRY_ADDR] : undefined,
+    query: { enabled },
+  })
 }
 
-export function useSpendApproval(spender?: Address, amount?: bigint): SpendApproval {
-  const {
-    data: allowanceRaw,
-    refetch,
-    isFetching,
-  } = useUSDCAllowance(spender)
+export function useApproveUsdc() {
+  const { address } = useAccount()
+  const client = usePublicClient()
+  const { writeContractAsync, isPending, error } = useWriteContract()
 
-  const { approve, isPending, error } = useUSDCApprove()
-
-  const allowance = (allowanceRaw ?? 0n) as bigint
-  const amt = (amount ?? 0n) < 0n ? 0n : (amount ?? 0n)
-
-  const hasAllowance = amt === 0n ? true : allowance >= amt
-  const needsApproval = !hasAllowance && amt > 0n && !!spender
-
-  // Auto-refresh when inputs change (avoid stale reads)
-  useEffect(() => {
-    if (spender) void refetch()
-  }, [spender, amt, refetch])
-
-  const approveExact = async () => {
-    if (!spender || amt <= 0n) return
-    const tx = await approve(spender, amt) // waits for receipt
-    refetch() // optimistic
-    return tx
+  const approve = async (amount?: bigint) => {
+    if (!address) throw new Error("Connect your wallet.")
+    const hash = await writeContractAsync({
+      abi: erc20Abi,
+      address: USDC_ADDR,
+      functionName: "approve",
+      args: [REGISTRY_ADDR, amount ?? maxUint256],
+      account: address,
+      chain: base,
+    })
+    await client.waitForTransactionReceipt({ hash })
+    return hash
   }
 
-  const approveMax = async () => {
-    if (!spender) return
-    const tx = await approve(spender, maxUint256)
-    refetch()
-    return tx
-  }
-
-  const status: SpendApproval["status"] = isPending ? "pending-tx" : isFetching ? "fetching" : "idle"
-
-  const { ready, reason } = useMemo(() => {
-    if (!spender) return { ready: false, reason: "Missing spender address" }
-    if (amt < 0n) return { ready: false, reason: "Invalid approval amount" }
-    return { ready: true, reason: undefined }
-  }, [spender, amt])
-
-  return {
-    allowance,
-    hasAllowance,
-    needsApproval,
-    approveExact,
-    approveMax,
-    isPending,
-    isFetching,
-    error: (error as Error | null) ?? null,
-    refetchAllowance: () => { void refetch() },
-    status,
-    ready,
-    reason,
-  }
+  return { approve, isPending, error }
 }
