@@ -2,6 +2,21 @@
 /** @type {import('next').NextConfig} */
 const IS_PROD = process.env.NODE_ENV === "production";
 
+/** Derive apex + www host from NEXT_PUBLIC_SITE_URL (e.g. https://onlystars.app) */
+function deriveHosts() {
+  const fallback = { apex: "onlystars.app", www: "www.onlystars.app" };
+  try {
+    const raw = process.env.NEXT_PUBLIC_SITE_URL || "https://onlystars.app";
+    const u = new URL(raw);
+    const apex = u.hostname.replace(/^www\./i, "");
+    const www = apex.startsWith("www.") ? apex : `www.${apex}`;
+    return { apex, www };
+  } catch {
+    return fallback;
+  }
+}
+const { apex: APEX_HOST, www: WWW_HOST } = deriveHosts();
+
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
@@ -49,9 +64,7 @@ const nextConfig = {
       // Default: avoid accidental caching of API responses
       {
         source: "/api/:path*",
-        headers: [
-          { key: "Cache-Control", value: "no-store" },
-        ],
+        headers: [{ key: "Cache-Control", value: "no-store" }],
       },
       // Long cache for Next static assets
       {
@@ -75,7 +88,7 @@ const nextConfig = {
    *  - /@handle → /creator/resolve/handle
    *  - /creator/@handle → /creator/resolve/handle
    *  - /c/handle → /creator/resolve/handle
-   *  - www → apex (prod only)
+   *  - www → apex (prod only)  ← fixed: uses literal host, not a RegExp
    */
   async redirects() {
     const redirects = [
@@ -98,10 +111,10 @@ const nextConfig = {
 
     if (IS_PROD) {
       redirects.push({
-        // Drop www → apex
         source: "/:path*",
-        has: [{ type: "host", value: /^www\.(.*)$/i }],
-        destination: "https://:path*",
+        // IMPORTANT: `has.value` must be a literal host string, not a RegExp
+        has: [{ type: "host", value: WWW_HOST }],
+        destination: `https://${APEX_HOST}/:path*`,
         permanent: true,
       });
     }
