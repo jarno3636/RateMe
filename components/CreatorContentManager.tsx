@@ -195,7 +195,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
   const validateFile = (file: File) => {
     const isImage = file.type.startsWith("image/");
-    the const isVideoType = file.type.startsWith("video/");
+    const isVideoType = file.type.startsWith("video/");
     if (!isImage && !isVideoType) {
       toast.error("Pick an image or video");
       return false;
@@ -379,7 +379,7 @@ function PostRow({
   onChanged,
 }: {
   id: bigint;
-  onChanged?: (() => void) | undefined; // <-- allow explicit undefined (exactOptionalPropertyTypes)
+  onChanged?: (() => void) | undefined; // allow explicit undefined (exactOptionalPropertyTypes)
 }) {
   const { data: postData } = usePost(id);
 
@@ -703,7 +703,7 @@ function PlanRow({
   onChanged,
 }: {
   id: bigint;
-  onChanged?: (() => void) | undefined; // <-- allow explicit undefined (exactOptionalPropertyTypes)
+  onChanged?: (() => void) | undefined; // allow explicit undefined (exactOptionalPropertyTypes)
 }) {
   const { data: plan } = usePlan(id);
   const price = (plan?.[2] as bigint | undefined) ?? 0n;
