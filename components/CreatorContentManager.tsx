@@ -49,10 +49,9 @@ function PriceInput({
         // Allow only digits and up to 2 decimals; strip other chars gracefully
         const raw = e.target.value.replace(/[^\d.]/g, "");
         const parts = raw.split(".");
-        const safe =
-          parts.length > 1
-            ? `${parts[0].slice(0, 12)}.${parts[1].slice(0, 2)}`
-            : parts[0].slice(0, 12);
+        const intPart = (parts[0] ?? "").slice(0, 12);
+        const fracPart = (parts[1] ?? "").slice(0, 2);
+        const safe = fracPart ? `${intPart}.${fracPart}` : intPart;
         onChange(safe);
       }}
       onBlur={(e) => {
