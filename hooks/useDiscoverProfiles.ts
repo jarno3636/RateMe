@@ -34,6 +34,15 @@ const toBig = (v: string, d: bigint = 0n) => {
   try { return BigInt(v) } catch { return d }
 }
 
+function isApiTuple(x: unknown): x is ApiTuple {
+  return Array.isArray(x) && x.length === 9 &&
+    Array.isArray(x[0]) && Array.isArray(x[1]) &&
+    Array.isArray(x[2]) && Array.isArray(x[3]) &&
+    Array.isArray(x[4]) && Array.isArray(x[5]) &&
+    Array.isArray(x[6]) && Array.isArray(x[7]) &&
+    typeof x[8] === "string"
+}
+
 function decodeTuple(d: ApiTuple): DiscoverTuple {
   return [
     d[0].map((x) => toBig(x)),
@@ -48,6 +57,8 @@ function decodeTuple(d: ApiTuple): DiscoverTuple {
   ]
 }
 
+const clamp = (n: bigint, lo: bigint, hi: bigint) => (n < lo ? lo : n > hi ? hi : n)
+
 type State = {
   data?: DiscoverTuple
   isLoading: boolean   // first load for these params
@@ -55,8 +66,14 @@ type State = {
   error: Error | null
 }
 
-export function useDiscoverProfiles(cursor: bigint, size: bigint) {
-  const key = useMemo(() => `c:${cursor.toString()}:s:${size.toString()}`, [cursor, size])
+export function useDiscoverProfiles(cursorIn: bigint, sizeIn: bigint) {
+  const cursor = cursorIn < 0n ? 0n : cursorIn
+  const size = clamp(sizeIn, 1n, 48n)
+
+  const key = useMemo(
+    () => `c:${cursor.toString()}:s:${size.toString()}`,
+    [cursor, size]
+  )
   const abortRef = useRef<AbortController | null>(null)
 
   const [state, setState] = useState<State>(() => {
@@ -81,8 +98,9 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
         { cache: "no-store", signal: ctrl.signal },
       )
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
-      const j = (await r.json()) as { data?: ApiTuple }
-      if (!j?.data) throw new Error("Malformed discover payload")
+
+      const j = await r.json()
+      if (!j || !isApiTuple(j.data)) throw new Error("Malformed discover payload")
 
       const decoded = decodeTuple(j.data)
       cache.set(key, decoded)
@@ -90,7 +108,6 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
       setState({ data: decoded, isLoading: false, isFetching: false, error: null })
     } catch (e: any) {
       if (ctrl.signal.aborted) return
-      // small, bounded retry for transient network flakiness
       if (retry < 1) {
         await new Promise((res) => setTimeout(res, 350))
         return fetchOnce(retry + 1)
@@ -104,7 +121,6 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
     }
   }
 
-  // load on param change (keep previous data visible while fetching)
   useEffect(() => {
     const cached = cache.get(key)
     setState({
@@ -118,7 +134,6 @@ export function useDiscoverProfiles(cursor: bigint, size: bigint) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
-  // expose manual refresh (keeps current data during refetch)
   const refresh = () => fetchOnce()
 
   return {
