@@ -6,12 +6,7 @@ function isHexAddr(v: unknown) {
   return typeof v === "string" && /^0x[0-9a-fA-F]{40}$/.test(v)
 }
 function isHttpLike(u: string) {
-  try {
-    const url = new URL(u)
-    return url.protocol === "http:" || url.protocol === "https:"
-  } catch {
-    return false
-  }
+  try { const url = new URL(u); return url.protocol === "http:" || url.protocol === "https:" } catch { return false }
 }
 function normalizeIpfs(u?: string | null) {
   if (!u) return ""
@@ -30,9 +25,7 @@ export async function POST(req: Request) {
       bio?: string
     } | null
 
-    if (!body) {
-      return NextResponse.json({ ok: false, error: "Missing JSON body" }, { status: 400 })
-    }
+    if (!body) return NextResponse.json({ ok: false, error: "Missing JSON body" }, { status: 400 })
 
     // ---- Validate & normalize inputs ----
     const idStr =
@@ -40,32 +33,21 @@ export async function POST(req: Request) {
       : typeof body.id === "number" && Number.isFinite(body.id) ? Math.trunc(body.id).toString()
       : typeof body.id === "string" ? body.id.trim()
       : ""
+    if (!/^[0-9]+$/.test(idStr)) return NextResponse.json({ ok: false, error: "Invalid id" }, { status: 400 })
 
-    if (!/^[0-9]+$/.test(idStr)) {
-      return NextResponse.json({ ok: false, error: "Invalid id" }, { status: 400 })
-    }
-
-    const normHandle = String(body.handle ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9_.-]/g, "")
-
-    if (!normHandle) {
-      return NextResponse.json({ ok: false, error: "Invalid handle" }, { status: 400 })
-    }
+    const normHandle = String(body.handle ?? "").trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "")
+    if (!normHandle) return NextResponse.json({ ok: false, error: "Invalid handle" }, { status: 400 })
 
     const owner = String(body.owner ?? "").trim()
-    if (!isHexAddr(owner)) {
-      return NextResponse.json({ ok: false, error: "Invalid owner address" }, { status: 400 })
-    }
+    if (!isHexAddr(owner)) return NextResponse.json({ ok: false, error: "Invalid owner address" }, { status: 400 })
     const ownerLc = owner.toLowerCase()
 
-    // Premium: sanitize text fields to avoid trashy KV entries
+    // Sanitize text
     const name = String(body.name ?? "").slice(0, 80)
-    const bio = String(body.bio ?? "").slice(0, 1200)
+    const bio  = String(body.bio ?? "").slice(0, 1200)
 
     // Avatar normalization + SSR-safe fallback
-    const rawAvatar = String(body.avatar ?? "").trim()
+    const rawAvatar  = String(body.avatar ?? "").trim()
     const normAvatar = normalizeIpfs(rawAvatar)
     const avatar =
       (normAvatar && (normAvatar.startsWith("https://ipfs.io/ipfs/") || isHttpLike(normAvatar)))
@@ -73,29 +55,21 @@ export async function POST(req: Request) {
         : FALLBACK_AVATAR
 
     // ---- KV writes ----
-    // Minimal keys for fast lookups:
-    //  - handle:<handle> -> id
-    //  - owner:<owner>   -> id
-    //  - profile:<id>    -> hash of denormalized metadata (speeds up discover/profile header)
+    const profileKey = `profile:${idStr}`
+    const profileObj = { handle: normHandle, name, avatar, bio, owner: ownerLc }
+
+    // Some @vercel/kv type versions mark hset as optional.
+    const hset = (kv as any).hset as undefined | ((key: string, data: Record<string, unknown>) => Promise<unknown>)
+
     await Promise.all([
       kv.set(`handle:${normHandle}`, idStr),
       kv.set(`owner:${ownerLc}`, idStr),
-      kv.hset(`profile:${idStr}`, {
-        handle: normHandle,
-        name,
-        avatar, // already normalized with fallback
-        bio,
-        owner: ownerLc,
-      }),
+      hset ? hset(profileKey, profileObj) : kv.set(profileKey, JSON.stringify(profileObj)),
     ])
 
     return NextResponse.json({ ok: true, id: idStr, handle: normHandle })
   } catch (e: any) {
-    // Don’t leak internals; keep a clean error shape
     console.error("[api/kv-index] error:", e)
-    return NextResponse.json(
-      { ok: false, error: e?.message || "index failed" },
-      { status: 500 }
-    )
+    return NextResponse.json({ ok: false, error: e?.message || "index failed" }, { status: 500 })
   }
 }
