@@ -2,12 +2,26 @@
 "use client";
 
 import "@rainbow-me/rainbowkit/styles.css";
-import { ReactNode, useMemo } from "react";
+import { useMemo } from "react";
+import type { ReactNode } from "react"; // ← type-only import fixes the error
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { WagmiProvider, createConfig, createStorage, cookieStorage, http, useAccount, useChainId } from "wagmi";
+import {
+  WagmiProvider,
+  createConfig,
+  createStorage,
+  cookieStorage,
+  http,
+  useAccount,
+  useChainId,
+} from "wagmi";
 import { base } from "viem/chains";
 import { injected, coinbaseWallet, walletConnect } from "wagmi/connectors";
-import { RainbowKitProvider, darkTheme, useChainModal, useConnectModal } from "@rainbow-me/rainbowkit";
+import {
+  RainbowKitProvider,
+  darkTheme,
+  useChainModal,
+  useConnectModal,
+} from "@rainbow-me/rainbowkit";
 
 /* ───────────────────────── React Query ───────────────────────── */
 const queryClient = new QueryClient({
@@ -106,7 +120,12 @@ export default function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <WagmiProvider config={cfg}>
-        <RainbowKitProvider theme={theme} initialChain={base} modalSize="compact" appInfo={{ appName: "OnlyStars" }}>
+        <RainbowKitProvider
+          theme={theme}
+          initialChain={base}
+          modalSize="compact"
+          appInfo={{ appName: "OnlyStars" }}
+        >
           <ChainGate>{children}</ChainGate>
         </RainbowKitProvider>
       </WagmiProvider>
