@@ -375,12 +375,25 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 }
 
 function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
-  const { data: post } = usePost(id);
-  const token = (post?.[1] as `0x${string}` | undefined) ?? ADDR.USDC;
-  const price = (post?.[2] as bigint | undefined) ?? 0n;
-  const active = Boolean(post?.[3] ?? true);
-  const subGate = Boolean(post?.[4] ?? false);
-  const uri = String(post?.[5] ?? "");
+  const { data: postData } = usePost(id);
+
+  // Tell TS what indices we read without over-constraining the hook.
+  type MaybePost = readonly [
+    unknown,                 // [0] unused here
+    `0x${string}` | undefined, // [1] token
+    bigint | undefined,        // [2] price (USDC 6dp)
+    boolean | undefined,       // [3] active
+    boolean | undefined,       // [4] subGate
+    string | undefined         // [5] uri
+  ] | undefined;
+
+  const post = postData as unknown as MaybePost;
+
+  const token   = (post?.[1]) ?? ADDR.USDC;
+  const price   = (post?.[2]) ?? 0n;
+  const active  = (post?.[3] ?? true);
+  const subGate = (post?.[4] ?? false);
+  const uri     = (post?.[5] ?? "");
 
   const { update: updatePost } = useUpdatePost();
 
