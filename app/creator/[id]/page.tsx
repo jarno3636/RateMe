@@ -2,12 +2,14 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useCallback } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { useAccount } from "wagmi"
-import { createPublicClient, http } from "viem"
-import { base } from "viem/chains"
+
+import { publicClient } from "@/lib/chain"
+import * as ADDR from "@/lib/addresses"
+import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
 
 import { useGetProfile } from "@/hooks/useProfileRegistry"
 import {
@@ -20,20 +22,17 @@ import {
   useSubscribe,
   useBuyPost,
 } from "@/hooks/useCreatorHub"
-import { useSpendApproval } from "@/hooks/useSpendApproval"
-
-import * as ADDR from "@/lib/addresses"
-import ProfileRegistryAbi from "@/abi/ProfileRegistry.json"
+import { useUSDCAllowance, useUSDCApprove } from "@/hooks/useUsdc"
 
 import StatsSection from "@/components/StatsSection"
 import CreatorContentManager from "@/components/CreatorContentManager"
 import ShareBar from "@/components/ShareBar"
 import EditProfileBox from "./EditProfileBox"
 import RatingWidget from "@/components/RatingWidget"
+import toast from "react-hot-toast"
 
 const FALLBACK_AVATAR = "/avatar.png"
 const HUB = ADDR.HUB
-const pc = createPublicClient({ chain: base, transport: http(process.env.NEXT_PUBLIC_BASE_RPC_URL) })
 
 /* ---------------- helpers ---------------- */
 function normalizeIpfs(u?: string | null) {
@@ -53,11 +52,14 @@ function isVideo(u: string) {
 }
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 const isNumericId = (s: string) => /^[0-9]+$/.test(s)
+const mulSafe = (a: bigint, b: bigint) => a * b // (inputs are small; BigInt guards overflow)
 
+/** Resolve a handle -> profile id via registry ABI */
 async function resolveHandleToId(handle: string): Promise<bigint> {
+  if (!ADDR.REGISTRY) return 0n
   try {
-    const res = await pc.readContract({
-      address: ADDR.REGISTRY as `0x${string}`,
+    const res = await publicClient.readContract({
+      address: ADDR.REGISTRY,
       abi: ProfileRegistryAbi as any,
       functionName: "getProfileByHandle",
       args: [handle],
@@ -139,17 +141,42 @@ function PlanRow({ id }: { id: bigint }) {
   const name = String(plan?.[5] ?? "Plan")
 
   const [periods, setPeriods] = useState(1)
-  const { subscribe, isPending: subscribing } = useSubscribe()
-  const { approveExact, hasAllowance, isPending: approving, status } = useSpendApproval(
-    price > 0n && HUB ? HUB : undefined,
-    price > 0n ? price : undefined
-  )
+  const totalCost = useMemo(() => mulSafe(price, BigInt(Math.max(1, periods))), [price, periods])
 
-  const subscribeFlow = async () => {
+  const { subscribe, isPending: subscribing } = useSubscribe()
+
+  // USDC approvals for HUB spender
+  const { data: allowance } = useUSDCAllowance(HUB)
+  const { approve, isPending: approving } = useUSDCApprove()
+  const hasAllowance = (allowance ?? 0n) >= totalCost
+
+  const subscribeFlow = useCallback(async () => {
     if (!active || periods < 1) return
-    if (price > 0n && !hasAllowance) await approveExact?.()
-    await subscribe(id, periods)
-  }
+    if (price > 0n) {
+      if (!HUB) return toast.error("Missing HUB contract address")
+      if (!hasAllowance) {
+        const t = toast.loading("Approving USDC…")
+        try {
+          await approve(HUB, totalCost)
+          toast.success("Approval confirmed")
+        } catch (e: any) {
+          toast.error(e?.shortMessage || e?.message || "Approval failed")
+          toast.dismiss(t)
+          return
+        }
+        toast.dismiss(t)
+      }
+    }
+    const t2 = toast.loading("Subscribing…")
+    try {
+      await subscribe(id, Math.max(1, periods))
+      toast.success("Subscription confirmed")
+    } catch (e: any) {
+      toast.error(e?.shortMessage || e?.message || "Subscription failed")
+    } finally {
+      toast.dismiss(t2)
+    }
+  }, [active, periods, price, id, approve, hasAllowance])
 
   return (
     <div className="card flex flex-wrap items-center gap-3">
@@ -178,8 +205,8 @@ function PlanRow({ id }: { id: bigint }) {
           {price === 0n
             ? "Subscribe"
             : hasAllowance
-            ? (subscribing ? "Subscribing…" : "Subscribe")
-            : (status === "pending-tx" ? "Approving…" : "Approve & Subscribe")}
+            ? (subscribing ? "Subscribing…" : `Subscribe (${fmt6(totalCost)} USDC)`)
+            : (approving ? "Approving…" : `Approve & Subscribe (${fmt6(totalCost)} USDC)`)}
         </button>
       </div>
     </div>
@@ -201,16 +228,30 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const canView = !!hasAccess || (!!hasSub && subGate) || (!subGate && price === 0n)
 
   const { buy, isPending: buying } = useBuyPost()
-  const { approveExact, hasAllowance, isPending: approving, status } = useSpendApproval(
-    price > 0n && HUB ? HUB : undefined,
-    price > 0n ? price : undefined
-  )
 
-  const buyFlow = async () => {
+  // USDC approvals for HUB spender
+  const { data: allowance } = useUSDCAllowance(HUB)
+  const { approve, isPending: approving } = useUSDCApprove()
+  const hasAllowance = (allowance ?? 0n) >= price
+
+  const buyFlow = useCallback(async () => {
     if (!active || price === 0n) return
-    if (!hasAllowance) await approveExact?.()
-    await buy(id)
-  }
+    if (!HUB) return toast.error("Missing HUB contract address")
+    try {
+      if (!hasAllowance) {
+        const t = toast.loading("Approving USDC…")
+        await approve(HUB, price)
+        toast.dismiss(t)
+        toast.success("Approval confirmed")
+      }
+      const t2 = toast.loading("Buying post…")
+      await buy(id)
+      toast.dismiss(t2)
+      toast.success("Purchase complete")
+    } catch (e: any) {
+      toast.error(e?.shortMessage || e?.message || "Purchase failed")
+    }
+  }, [active, price, hasAllowance, approve, buy, id])
 
   return (
     <div className="card space-y-3">
@@ -263,8 +304,8 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
             title={!HUB ? "Missing HUB contract address" : !active ? "Post inactive" : ""}
           >
             {hasAllowance
-              ? (buying ? "Buying…" : "Buy post")
-              : (status === "pending-tx" ? "Approving…" : "Approve & Buy")}
+              ? (buying ? "Buying…" : `Buy post (${fmt6(price)} USDC)`)
+              : (approving ? "Approving…" : `Approve & Buy (${fmt6(price)} USDC)`)}
           </button>
         </div>
       )}
@@ -388,7 +429,7 @@ function CreatorPublicPageImpl() {
         </div>
       )}
 
-      {/* Rating widget (kept visible for public view, hidden for owner) */}
+      {/* Rating widget (public view) */}
       {!isOwner && creator !== "0x0000000000000000000000000000000000000000" && (
         <section className="card">
           <RatingWidget creator={creator} owner={creator} />
