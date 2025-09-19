@@ -24,7 +24,7 @@ import {
 } from "@rainbow-me/rainbowkit";
 import ChainGate from "@/components/ChainGate";
 
-/** React Query: tuned defaults */
+/* ───────────────────────── React Query ───────────────────────── */
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -37,28 +37,43 @@ const queryClient = new QueryClient({
   },
 });
 
-/** Wagmi: Base-only, SSR-safe */
+/* ───────────────────────── RPC transport ─────────────────────── */
+const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL;
+if (!rpcUrl) {
+  // Safe to warn on the client; viem will fall back to a default, but it’s rate-limited.
+  // Prefer setting NEXT_PUBLIC_BASE_RPC_URL to an Alchemy/QuickNode/etc. endpoint.
+  console.warn("[providers] NEXT_PUBLIC_BASE_RPC_URL not set; using viem default (rate-limited).");
+}
+
+/* ───────────────────────── Connectors (guarded) ───────────────── */
+const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_ID;
+const connectors = [
+  injected({ shimDisconnect: true }),
+  coinbaseWallet({
+    appName: "OnlyStars",
+    preference: "smartWallet",
+  }),
+  // Only add WalletConnect if a project id is provided, so we don't crash in local dev.
+  ...(wcProjectId
+    ? [walletConnect({ projectId: wcProjectId })]
+    : (console.warn("[providers] NEXT_PUBLIC_WALLETCONNECT_ID not set; WalletConnect disabled."), [])),
+];
+
+/* ───────────────────────── Wagmi config ───────────────────────── */
 const wagmiConfig = createConfig({
   chains: [base],
   transports: {
-    [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC_URL),
+    [base.id]: http(rpcUrl),
   },
-  connectors: [
-    injected({ shimDisconnect: true }),
-    coinbaseWallet({
-      appName: "OnlyStars",
-      preference: "smartWallet",
-    }),
-    walletConnect({
-      projectId: process.env.NEXT_PUBLIC_WALLETCONNECT_ID!,
-    }),
-  ],
-  storage: createStorage({ storage: cookieStorage }),
+  connectors,
+  storage: createStorage({
+    storage: cookieStorage, // SSR-safe persistence
+  }),
   ssr: true,
   autoConnect: true,
 });
 
-/** RainbowKit: premium dark with OnlyStars accent */
+/* ───────────────────────── RainbowKit theme ───────────────────── */
 const rkTheme = darkTheme({
   accentColor: "#FF4ECD",
   accentColorForeground: "#0A0A0A",
@@ -75,14 +90,12 @@ export default function Providers({ children }: { children: ReactNode }) {
       <WagmiProvider config={cfg}>
         <RainbowKitProvider
           theme={theme}
-          modalSize="compact"
           initialChain={base}
+          modalSize="compact"
           appInfo={{ appName: "OnlyStars" }}
           showRecentTransactions
         >
-          {/* GLOBAL Base-only guard.
-              If you prefer per-page gating, remove ChainGate here
-              and wrap only the pages that need it. */}
+          {/* Global Base-only guard. Remove here and wrap specific pages if you prefer per-route gating. */}
           <ChainGate>{children}</ChainGate>
         </RainbowKitProvider>
       </WagmiProvider>
