@@ -19,7 +19,7 @@ function NavLink({
 }: {
   href: string
   children: React.ReactNode
-  onClick?: () => void
+  onClick?: React.MouseEventHandler<HTMLAnchorElement> // <-- use proper type
   /** If true, mark active when pathname startsWith href (good for section roots) */
   activeWhenStartsWith?: boolean
 }) {
@@ -28,10 +28,13 @@ function NavLink({
     ? pathname === href || pathname.startsWith(`${href}/`)
     : pathname === href
 
+  // Only include onClick when defined (avoids passing `undefined` under exactOptionalPropertyTypes)
+  const clickProp = onClick ? { onClick } : {}
+
   return (
     <Link
       href={href}
-      onClick={onClick}
+      {...clickProp}
       aria-current={isActive ? "page" : undefined}
       className={[
         "inline-flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-sm transition",
