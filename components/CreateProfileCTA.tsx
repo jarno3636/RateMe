@@ -1,12 +1,23 @@
 // /components/CreateProfileCTA.tsx
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useAccount } from "wagmi"
-import { formatUnits, parseUnits } from "viem"
+import { useState } from "react";
+import { useAccount } from "wagmi";
+import { formatUnits } from "viem";
 
-import { usePreviewCreate, useCreateProfile } from "@/hooks/useProfileRegistry"
-import { useApproveUsdc, useUsdcAllowance } from "@/hooks/useUsdcApproval"
+import { usePreviewCreate, useCreateProfile } from "@/hooks/useProfileRegistry";
+import { useApproveUsdc, useUsdcAllowance } from "@/hooks/useUsdcApproval";
+
+/** Contract return type for previewCreate:
+ * [balance, allowance, fee, okBalance, okAllowance]
+ */
+type PreviewTuple = readonly [
+  balance: bigint,
+  allowance: bigint,
+  fee: bigint,
+  okBalance: boolean,
+  okAllowance: boolean
+];
 
 export default function CreateProfileCTA({
   handle,
@@ -15,61 +26,94 @@ export default function CreateProfileCTA({
   bio,
   fid,
 }: {
-  handle: string
-  displayName: string
-  avatarURI: string
-  bio: string
-  fid: bigint
+  handle: string;
+  displayName: string;
+  avatarURI: string;
+  bio: string;
+  fid: bigint;
 }) {
-  const { address } = useAccount()
-  const { data: preview } = usePreviewCreate()
-  const { data: allowance } = useUsdcAllowance()
-  const { approve, isPending: approving } = useApproveUsdc()
-  const { create, isPending: creating } = useCreateProfile()
-  const [err, setErr] = useState<string | null>(null)
-  const [okMsg, setOkMsg] = useState<string | null>(null)
+  const { address } = useAccount();
 
-  const fee = preview?.[2] as bigint | undefined
-  const okBalance = !!preview?.[3]
-  const okAllowance = !!preview?.[4]
+  // Reads/writes
+  const { data: previewData } = usePreviewCreate();
+  const preview = previewData as PreviewTuple | undefined;
+
+  // If you're not using allowance in this component, feel free to remove this line.
+  const { data: allowance } = useUsdcAllowance();
+
+  const { approve, isPending: approving } = useApproveUsdc();
+  const { create, isPending: creating } = useCreateProfile();
+
+  // UI state
+  const [err, setErr] = useState<string | null>(null);
+  const [okMsg, setOkMsg] = useState<string | null>(null);
+
+  // Safely read tuple elements with defaults
+  const fee = preview?.[2];
+  const okBalance = preview?.[3] ?? false;
+  const okAllowance = preview?.[4] ?? false;
 
   const onApprove = async () => {
-    setErr(null)
+    setErr(null);
     try {
-      // approve exact fee or max; fee is 6 decimals for USDC
-      const amt = typeof fee === "bigint" && fee > 0n ? fee : undefined
-      const h = await approve(amt)
-      setOkMsg(`Approved USDC: ${h}`)
+      // Approve exact fee if we have it; your hook should default to max if undefined.
+      const amt = typeof fee === "bigint" && fee > 0n ? fee : undefined;
+      const txHash = await approve(amt);
+      setOkMsg(`Approved USDC: ${txHash}`);
     } catch (e: any) {
-      setErr(e?.message || String(e))
+      setErr(e?.message || String(e));
     }
-  }
+  };
 
   const onCreate = async () => {
-    setErr(null)
-    setOkMsg(null)
+    setErr(null);
+    setOkMsg(null);
     try {
-      const h = await create(handle.trim(), displayName.trim(), avatarURI.trim(), bio.trim(), fid)
-      setOkMsg(`Profile created: ${h}`)
+      const txHash = await create(
+        handle.trim(),
+        displayName.trim(),
+        avatarURI.trim(),
+        bio.trim(),
+        fid
+      );
+      setOkMsg(`Profile created: ${txHash}`);
     } catch (e: any) {
-      setErr(e?.message || String(e))
+      setErr(e?.message || String(e));
     }
-  }
+  };
 
   if (!address) {
-    return <button className="btn btn-primary" disabled>Connect wallet to continue</button>
+    return (
+      <button className="btn btn-primary" disabled>
+        Connect wallet to continue
+      </button>
+    );
   }
 
   if (!okBalance) {
-    const need = typeof fee === "bigint" ? Number(formatUnits(fee, 6)).toFixed(2) : "?"
+    const need = typeof fee === "bigint" ? Number(formatUnits(fee, 6)).toFixed(2) : "?";
     return (
       <div className="space-y-2">
         <div className="text-sm text-red-500">Insufficient USDC balance.</div>
         <div className="text-xs opacity-70">Required fee: ~{need} USDC</div>
-        <a href="https://bridge.base.org/" target="_blank" rel="noreferrer" className="btn btn-secondary">Bridge to Base</a>
-        <a href="https://app.uniswap.org/#/swap?inputCurrency=ETH&outputCurrency=USDC&chain=base" target="_blank" rel="noreferrer" className="btn btn-ghost">Swap for USDC</a>
+        <a
+          href="https://bridge.base.org/"
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-secondary"
+        >
+          Bridge to Base
+        </a>
+        <a
+          href="https://app.uniswap.org/#/swap?inputCurrency=ETH&outputCurrency=USDC&chain=base"
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-ghost"
+        >
+          Swap for USDC
+        </a>
       </div>
-    )
+    );
   }
 
   if (!okAllowance) {
@@ -81,7 +125,7 @@ export default function CreateProfileCTA({
         {err && <div className="text-xs text-red-500">{err}</div>}
         {okMsg && <div className="text-xs text-green-500">{okMsg}</div>}
       </div>
-    )
+    );
   }
 
   return (
@@ -92,5 +136,5 @@ export default function CreateProfileCTA({
       {err && <div className="text-xs text-red-500">{err}</div>}
       {okMsg && <div className="text-xs text-green-500">{okMsg}</div>}
     </div>
-  )
+  );
 }
