@@ -1,9 +1,9 @@
 // /components/CreatorContentManager.tsx
-"use client"
+"use client";
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import { toast } from "sonner"
-import { useAccount } from "wagmi"
+import { useCallback, useMemo, useRef, useState } from "react";
+import toast from "react-hot-toast";
+import { useAccount } from "wagmi";
 import {
   useCreatorPostIds,
   useCreatorPlanIds,
@@ -11,17 +11,19 @@ import {
   usePlan,
   useCreatePost as useCreatePostOnchain,
   useCreatePlan as useCreatePlanOnchain,
-} from "@/hooks/useCreatorHub"
-import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras"
-import * as ADDR from "@/lib/addresses"
+} from "@/hooks/useCreatorHub";
+import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras";
+import * as ADDR from "@/lib/addresses";
 
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024 // 1MB
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024 // 2MB
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024; // 1MB
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024; // 2MB
 
-const isImg = (u: string) => !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname)
-const isVideo = (u: string) => !!u && /\.(mp4|webm|ogg)$/i.test(new URL(u, "http://x").pathname)
-const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
-const basescanTx = (hash: `0x${string}`) => `https://basescan.org/tx/${hash}`
+const isImg = (u: string) =>
+  !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname);
+const isVideo = (u: string) =>
+  !!u && /\.(mp4|webm|ogg)$/i.test(new URL(u, "http://x").pathname);
+const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2);
+const basescanTx = (hash: `0x${string}`) => `https://basescan.org/tx/${hash}`;
 
 /* ------------------------------- Inputs ------------------------------- */
 
@@ -31,39 +33,39 @@ function PriceInput({
   disabled,
   "aria-label": ariaLabel = "Price in USDC",
 }: {
-  value: string
-  onChange: (s: string) => void
-  disabled?: boolean
-  "aria-label"?: string
+  value: string;
+  onChange: (s: string) => void;
+  disabled?: boolean;
+  "aria-label"?: string;
 }) {
   return (
     <input
       type="text"
       inputMode="decimal"
-      pattern="^\d+(\.\d{0,2})?$"
+      pattern="^\\d+(\\.\\d{0,2})?$"
       placeholder="0.00"
       value={value}
       onChange={(e) => {
         // Allow only digits and up to 2 decimals; strip other chars gracefully
-        const raw = e.target.value.replace(/[^\d.]/g, "")
-        const parts = raw.split(".")
+        const raw = e.target.value.replace(/[^\d.]/g, "");
+        const parts = raw.split(".");
         const safe =
           parts.length > 1
             ? `${parts[0].slice(0, 12)}.${parts[1].slice(0, 2)}`
-            : parts[0].slice(0, 12)
-        onChange(safe)
+            : parts[0].slice(0, 12);
+        onChange(safe);
       }}
       onBlur={(e) => {
-        const val = e.currentTarget.value
-        if (!val) return onChange("0.00")
-        const n = Number.parseFloat(val)
-        onChange(Number.isFinite(n) ? n.toFixed(2) : "0.00")
+        const val = e.currentTarget.value;
+        if (!val) return onChange("0.00");
+        const n = Number.parseFloat(val);
+        onChange(Number.isFinite(n) ? n.toFixed(2) : "0.00");
       }}
       disabled={disabled}
       className="w-28 rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
       aria-label={ariaLabel}
     />
-  )
+  );
 }
 
 /* ---------------------------- Uploader UI ---------------------------- */
@@ -74,27 +76,27 @@ function DropUploader({
   onFile,
   busy,
 }: {
-  label?: string
-  tips?: string[]
-  onFile: (f: File) => Promise<void> | void
-  busy?: boolean
+  label?: string;
+  tips?: string[];
+  onFile: (f: File) => Promise<void> | void;
+  busy?: boolean;
 }) {
-  const inputRef = useRef<HTMLInputElement | null>(null)
-  const [dragOver, setDragOver] = useState(false)
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   const onDrop = async (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    setDragOver(false)
-    const f = e.dataTransfer.files?.[0]
-    if (f) await onFile(f)
-  }
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files?.[0];
+    if (f) await onFile(f);
+  };
 
   return (
     <div className="space-y-3">
       <div
         onDragOver={(e) => {
-          e.preventDefault()
-          setDragOver(true)
+          e.preventDefault();
+          setDragOver(true);
         }}
         onDragLeave={() => setDragOver(false)}
         onDrop={onDrop}
@@ -122,9 +124,9 @@ function DropUploader({
             hidden
             accept="image/*,video/*"
             onChange={async (e) => {
-              const f = e.currentTarget.files?.[0]
-              if (f) await onFile(f)
-              e.currentTarget.value = ""
+              const f = e.currentTarget.files?.[0];
+              if (f) await onFile(f);
+              e.currentTarget.value = "";
             }}
           />
         </div>
@@ -139,35 +141,35 @@ function DropUploader({
         </div>
       ) : null}
     </div>
-  )
+  );
 }
 
 /* --------------------------- Main Component -------------------------- */
 
 export default function CreatorContentManager({ creator }: { creator: `0x${string}` }) {
-  const { address } = useAccount()
+  const { address } = useAccount();
   const isOwner = useMemo(
     () => !!address && address.toLowerCase() === (creator as string).toLowerCase(),
     [address, creator]
-  )
+  );
 
   const {
     data: postIds,
     isLoading: postsLoading,
     refetch: refetchPosts,
-  } = useCreatorPostIds(creator)
+  } = useCreatorPostIds(creator);
 
   const {
     data: planIds,
     isLoading: plansLoading,
     refetch: refetchPlans,
-  } = useCreatorPlanIds(creator)
+  } = useCreatorPlanIds(creator);
 
-  const posts = (postIds as bigint[] | undefined) ?? []
-  const plans = (planIds as bigint[] | undefined) ?? []
+  const posts = (postIds as bigint[] | undefined) ?? [];
+  const plans = (planIds as bigint[] | undefined) ?? [];
 
   if (!isOwner) {
-    return <div className="card border-red-500/40 text-red-200">Only the owner can manage content.</div>
+    return <div className="card border-red-500/40 text-red-200">Only the owner can manage content.</div>;
   }
 
   return (
@@ -177,70 +179,70 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
       <PlanCreator onCreated={refetchPlans} />
       <PlanList ids={plans} loading={plansLoading} onChanged={refetchPlans} />
     </div>
-  )
+  );
 }
 
 /* ------------------------------ Posts ------------------------------ */
 
 function PostCreator({ onCreated }: { onCreated?: () => void }) {
-  const [uri, setUri] = useState("")
-  const [priceUsd, setPriceUsd] = useState("0.00")
-  const [subGate, setSubGate] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [creating, setCreating] = useState(false)
-  const [shareFarcaster, setShareFarcaster] = useState(false)
+  const [uri, setUri] = useState("");
+  const [priceUsd, setPriceUsd] = useState("0.00");
+  const [subGate, setSubGate] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [shareFarcaster, setShareFarcaster] = useState(false);
 
-  const { createPost } = useCreatePostOnchain()
+  const { createPost } = useCreatePostOnchain();
 
   const validateFile = (file: File) => {
-    const isImage = file.type.startsWith("image/")
-    const isVideoType = file.type.startsWith("video/")
+    const isImage = file.type.startsWith("image/");
+    const isVideoType = file.type.startsWith("video/");
     if (!isImage && !isVideoType) {
-      toast.error("Pick an image or video")
-      return false
+      toast.error("Pick an image or video");
+      return false;
     }
     if (isImage && file.size > MAX_IMAGE_BYTES) {
-      toast.error("Image exceeds 1 MB")
-      return false
+      toast.error("Image exceeds 1 MB");
+      return false;
     }
     if (isVideoType && file.size > MAX_VIDEO_BYTES) {
-      toast.error("Video exceeds 2 MB")
-      return false
+      toast.error("Video exceeds 2 MB");
+      return false;
     }
-    return true
-  }
+    return true;
+  };
 
   const onPick = useCallback(async (file: File) => {
-    if (!file || !validateFile(file)) return
+    if (!file || !validateFile(file)) return;
     try {
-      setUploading(true)
-      const fd = new FormData()
-      fd.append("file", file)
-      const res = await fetch("/api/upload", { method: "POST", body: fd })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json?.error || "Upload failed")
-      setUri(String(json.url))
-      toast.success("Uploaded")
+      setUploading(true);
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Upload failed");
+      setUri(String(json.url));
+      toast.success("Uploaded");
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.message || "Upload failed")
+      console.error(e);
+      toast.error(e?.message || "Upload failed");
     } finally {
-      setUploading(false)
+      setUploading(false);
     }
-  }, [])
+  }, []);
 
   const onCreate = async () => {
     try {
-      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
-      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
-      if (!uri) return toast.error("Please upload media first")
+      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).");
+      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).");
+      if (!uri) return toast.error("Please upload media first");
 
-      setCreating(true)
+      setCreating(true);
 
-      const priceFloat = Number.parseFloat(priceUsd || "0")
-      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6)) // USDC 6dp
+      const priceFloat = Number.parseFloat(priceUsd || "0");
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6)); // USDC 6dp
 
-      const promise = createPost(ADDR.USDC, priceUnits, subGate, uri)
+      const promise = createPost(ADDR.USDC, priceUnits, subGate, uri);
       toast.promise(promise, {
         loading: "Creating post…",
         success: (hash: `0x${string}`) => (
@@ -255,9 +257,9 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Create failed",
-      })
+      });
 
-      const hash = (await promise) as `0x${string}`
+      const hash = (await promise) as `0x${string}`;
 
       // Optional Farcaster share (best-effort; doesn’t block)
       if (shareFarcaster) {
@@ -272,28 +274,27 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
                 price: priceFloat,
                 gated: subGate,
               }),
-            })
-            if (!r.ok) throw new Error("Cast failed")
-            toast.success("Shared to Farcaster")
+            });
+            if (!r.ok) throw new Error("Cast failed");
+            toast.success("Shared to Farcaster");
           } catch (err: any) {
-            // Non-blocking notice only
-            toast.info(err?.message ?? "Unable to share to Farcaster")
+            toast(`Unable to share to Farcaster: ${err?.message ?? "Unknown error"}`, { icon: "ℹ️" });
           }
-        })()
+        })();
       }
 
       // reset
-      setUri("")
-      setPriceUsd("0.00")
-      setSubGate(false)
-      onCreated?.()
+      setUri("");
+      setPriceUsd("0.00");
+      setSubGate(false);
+      onCreated?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.shortMessage || e?.message || "Create failed")
+      console.error(e);
+      toast.error(e?.shortMessage || e?.message || "Create failed");
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
-  }
+  };
 
   return (
     <section className="card space-y-4">
@@ -371,52 +372,52 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
         )}
       </div>
     </section>
-  )
+  );
 }
 
 function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
-  const { data: post } = usePost(id)
-  const token = (post?.[1] as `0x${string}` | undefined) ?? ADDR.USDC
-  const price = (post?.[2] as bigint | undefined) ?? 0n
-  const active = Boolean(post?.[3] ?? true)
-  const subGate = Boolean(post?.[4] ?? false)
-  const uri = String(post?.[5] ?? "")
+  const { data: post } = usePost(id);
+  const token = (post?.[1] as `0x${string}` | undefined) ?? ADDR.USDC;
+  const price = (post?.[2] as bigint | undefined) ?? 0n;
+  const active = Boolean(post?.[3] ?? true);
+  const subGate = Boolean(post?.[4] ?? false);
+  const uri = String(post?.[5] ?? "");
 
-  const { update: updatePost } = useUpdatePost()
+  const { update: updatePost } = useUpdatePost();
 
-  const [editUri, setEditUri] = useState(uri)
-  const [editPrice, setEditPrice] = useState(fmt6(price))
-  const [editGate, setEditGate] = useState(subGate)
-  const [saving, setSaving] = useState(false)
-  const [toggling, setToggling] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [editUri, setEditUri] = useState(uri);
+  const [editPrice, setEditPrice] = useState(fmt6(price));
+  const [editGate, setEditGate] = useState(subGate);
+  const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function pickReplace(file: File) {
-    const isImage = file.type.startsWith("image/")
-    const isVideoType = file.type.startsWith("video/")
-    if (!isImage && !isVideoType) return toast.error("Pick an image or video")
-    if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
-    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB")
+    const isImage = file.type.startsWith("image/");
+    const isVideoType = file.type.startsWith("video/");
+    if (!isImage && !isVideoType) return toast.error("Pick an image or video");
+    if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB");
+    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB");
     try {
-      const fd = new FormData()
-      fd.append("file", file)
-      const res = await fetch("/api/upload", { method: "POST", body: fd })
-      const json = await res.json()
-      if (!res.ok) return toast.error(json?.error || "Upload failed")
-      setEditUri(String(json.url))
-      toast.success("Replaced file")
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: fd });
+      const json = await res.json();
+      if (!res.ok) return toast.error(json?.error || "Upload failed");
+      setEditUri(String(json.url));
+      toast.success("Replaced file");
     } catch (e: any) {
-      toast.error(e?.message || "Upload failed")
+      toast.error(e?.message || "Upload failed");
     }
   }
 
   const save = async () => {
     try {
-      if (!token) throw new Error("Missing token (USDC) address.")
-      setSaving(true)
-      const priceFloat = Number.parseFloat(editPrice || "0")
-      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      const promise = updatePost(id, token, priceUnits, active, editGate, editUri)
+      if (!token) throw new Error("Missing token (USDC) address.");
+      setSaving(true);
+      const priceFloat = Number.parseFloat(editPrice || "0");
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6));
+      const promise = updatePost(id, token, priceUnits, active, editGate, editUri);
       toast.promise(promise, {
         loading: "Saving…",
         success: (hash: `0x${string}`) => (
@@ -431,24 +432,24 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Update failed",
-      })
-      await promise
-      onChanged?.()
+      });
+      await promise;
+      onChanged?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.shortMessage || e?.message || "Update failed")
+      console.error(e);
+      toast.error(e?.shortMessage || e?.message || "Update failed");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   const toggleActive = async () => {
     try {
-      if (!token) throw new Error("Missing token (USDC) address.")
-      setToggling(true)
-      const priceFloat = Number.parseFloat(editPrice || "0")
-      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
-      const promise = updatePost(id, token, priceUnits, !active, editGate, editUri)
+      if (!token) throw new Error("Missing token (USDC) address.");
+      setToggling(true);
+      const priceFloat = Number.parseFloat(editPrice || "0");
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6));
+      const promise = updatePost(id, token, priceUnits, !active, editGate, editUri);
       toast.promise(promise, {
         loading: active ? "Deactivating…" : "Activating…",
         success: (hash: `0x${string}`) => (
@@ -463,36 +464,36 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Toggle failed",
-      })
-      await promise
-      onChanged?.()
+      });
+      await promise;
+      onChanged?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.shortMessage || e?.message || "Toggle failed")
+      console.error(e);
+      toast.error(e?.shortMessage || e?.message || "Toggle failed");
     } finally {
-      setToggling(false)
+      setToggling(false);
     }
-  }
+  };
 
   const softDelete = async () => {
-    if (!confirm("Delete this post? This hides it in the app (soft delete).")) return
+    if (!confirm("Delete this post? This hides it in the app (soft delete).")) return;
     try {
-      setDeleting(true)
+      setDeleting(true);
       const res = await fetch("/api/content/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind: "post", id: id.toString() }),
-      })
-      if (!res.ok) throw new Error("Delete failed")
-      toast.success("Post deleted (hidden)")
-      onChanged?.()
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      toast.success("Post deleted (hidden)");
+      onChanged?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.message || "Delete failed")
+      console.error(e);
+      toast.error(e?.message || "Delete failed");
     } finally {
-      setDeleting(false)
+      setDeleting(false);
     }
-  }
+  };
 
   return (
     <div className="card space-y-3">
@@ -529,9 +530,9 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
               accept="image/*,video/*"
               hidden
               onChange={(e) => {
-                const f = e.currentTarget.files?.[0]
-                if (f) void pickReplace(f)
-                e.currentTarget.value = ""
+                const f = e.currentTarget.files?.[0];
+                if (f) void pickReplace(f);
+                e.currentTarget.value = "";
               }}
             />
             <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
@@ -564,13 +565,21 @@ function PostRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
-function PostList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolean; onChanged?: () => void }) {
-  if (loading) return <div className="card">Loading posts…</div>
-  const empty = !ids || ids.length === 0
-  if (empty) return <div className="opacity-70">No posts yet.</div>
+function PostList({
+  ids,
+  loading,
+  onChanged,
+}: {
+  ids: bigint[];
+  loading?: boolean;
+  onChanged?: () => void;
+}) {
+  if (loading) return <div className="card">Loading posts…</div>;
+  const empty = !ids || ids.length === 0;
+  if (empty) return <div className="opacity-70">No posts yet.</div>;
   return (
     <section className="space-y-3">
       <h2 className="text-xl font-semibold">Your posts</h2>
@@ -580,29 +589,29 @@ function PostList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolea
         ))}
       </div>
     </section>
-  )
+  );
 }
 
 /* ------------------------------ Plans ------------------------------ */
 
 function PlanCreator({ onCreated }: { onCreated?: () => void }) {
-  const [name, setName] = useState("")
-  const [days, setDays] = useState(30)
-  const [priceUsd, setPriceUsd] = useState("0.00")
-  const [creating, setCreating] = useState(false)
+  const [name, setName] = useState("");
+  const [days, setDays] = useState(30);
+  const [priceUsd, setPriceUsd] = useState("0.00");
+  const [creating, setCreating] = useState(false);
 
-  const { createPlan } = useCreatePlanOnchain()
+  const { createPlan } = useCreatePlanOnchain();
 
   const onCreate = async () => {
     try {
-      setCreating(true)
-      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).")
-      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).")
+      setCreating(true);
+      if (!ADDR.USDC) throw new Error("Missing USDC address (NEXT_PUBLIC_USDC).");
+      if (!ADDR.HUB) throw new Error("Missing HUB address (NEXT_PUBLIC_CREATOR_HUB).");
 
-      const priceFloat = Number.parseFloat(priceUsd || "0")
-      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6))
+      const priceFloat = Number.parseFloat(priceUsd || "0");
+      const priceUnits = BigInt(Math.round((Number.isFinite(priceFloat) ? priceFloat : 0) * 1e6));
 
-      const promise = createPlan(ADDR.USDC, priceUnits, days, (name || "Plan").trim(), "")
+      const promise = createPlan(ADDR.USDC, priceUnits, days, (name || "Plan").trim(), "");
       toast.promise(promise, {
         loading: "Creating plan…",
         success: (hash: `0x${string}`) => (
@@ -617,20 +626,20 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Create failed",
-      })
-      await promise
+      });
+      await promise;
 
-      setName("")
-      setDays(30)
-      setPriceUsd("0.00")
-      onCreated?.()
+      setName("");
+      setDays(30);
+      setPriceUsd("0.00");
+      onCreated?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.shortMessage || e?.message || "Create failed")
+      console.error(e);
+      toast.error(e?.shortMessage || e?.message || "Create failed");
     } finally {
-      setCreating(false)
+      setCreating(false);
     }
-  }
+  };
 
   return (
     <section className="card space-y-3">
@@ -666,26 +675,26 @@ function PlanCreator({ onCreated }: { onCreated?: () => void }) {
         {creating ? "Creating…" : "Create plan"}
       </button>
     </section>
-  )
+  );
 }
 
 function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
-  const { data: plan } = usePlan(id)
-  const price = (plan?.[2] as bigint | undefined) ?? 0n
-  const days = Number(plan?.[3] ?? 30)
-  const active = Boolean(plan?.[4] ?? true)
-  const name = String(plan?.[5] ?? "Plan")
-  const metadataURI = String(plan?.[6] ?? "")
+  const { data: plan } = usePlan(id);
+  const price = (plan?.[2] as bigint | undefined) ?? 0n;
+  const days = Number(plan?.[3] ?? 30);
+  const active = Boolean(plan?.[4] ?? true);
+  const name = String(plan?.[5] ?? "Plan");
+  const metadataURI = String(plan?.[6] ?? "");
 
-  const { update: updatePlan } = useUpdatePlan()
+  const { update: updatePlan } = useUpdatePlan();
 
-  const [toggling, setToggling] = useState(false)
-  const [retiring, setRetiring] = useState(false)
+  const [toggling, setToggling] = useState(false);
+  const [retiring, setRetiring] = useState(false);
 
   const toggleActive = async () => {
     try {
-      setToggling(true)
-      const promise = updatePlan(id, name, metadataURI, price, days, !active)
+      setToggling(true);
+      const promise = updatePlan(id, name, metadataURI, price, days, !active);
       toast.promise(promise, {
         loading: active ? "Deactivating…" : "Activating…",
         success: (hash: `0x${string}`) => (
@@ -700,22 +709,22 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Toggle failed",
-      })
-      await promise
-      onChanged?.()
+      });
+      await promise;
+      onChanged?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.shortMessage || e?.message || "Toggle failed")
+      console.error(e);
+      toast.error(e?.shortMessage || e?.message || "Toggle failed");
     } finally {
-      setToggling(false)
+      setToggling(false);
     }
-  }
+  };
 
   const retirePlan = async () => {
-    if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return
+    if (!confirm("Retire this plan? New users won’t see it; current subscribers keep access.")) return;
     try {
-      setRetiring(true)
-      const promise = updatePlan(id, name, metadataURI, price, days, false)
+      setRetiring(true);
+      const promise = updatePlan(id, name, metadataURI, price, days, false);
       toast.promise(promise, {
         loading: "Retiring…",
         success: (hash: `0x${string}`) => (
@@ -730,16 +739,16 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
           </div>
         ),
         error: (e: any) => e?.shortMessage || e?.message || "Retire failed",
-      })
-      await promise
-      onChanged?.()
+      });
+      await promise;
+      onChanged?.();
     } catch (e: any) {
-      console.error(e)
-      toast.error(e?.message || "Retire failed")
+      console.error(e);
+      toast.error(e?.message || "Retire failed");
     } finally {
-      setRetiring(false)
+      setRetiring(false);
     }
-  }
+  };
 
   return (
     <div className="card flex flex-wrap items-center gap-3">
@@ -758,12 +767,20 @@ function PlanRow({ id, onChanged }: { id: bigint; onChanged?: () => void }) {
         </button>
       </div>
     </div>
-  )
+  );
 }
 
-function PlanList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolean; onChanged?: () => void }) {
-  if (loading) return <div className="card">Loading plans…</div>
-  if (!ids || ids.length === 0) return <div className="opacity-70">No plans yet.</div>
+function PlanList({
+  ids,
+  loading,
+  onChanged,
+}: {
+  ids: bigint[];
+  loading?: boolean;
+  onChanged?: () => void;
+}) {
+  if (loading) return <div className="card">Loading plans…</div>;
+  if (!ids || ids.length === 0) return <div className="opacity-70">No plans yet.</div>;
   return (
     <section className="space-y-3">
       <h2 className="text-xl font-semibold">Your plans</h2>
@@ -773,5 +790,5 @@ function PlanList({ ids, loading, onChanged }: { ids: bigint[]; loading?: boolea
         ))}
       </div>
     </section>
-  )
+  );
 }
