@@ -13,8 +13,21 @@ import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 import * as ADDR from "@/lib/addresses"
 import { assertAddresses } from "@/lib/addresses"
+import { Address, isAddressEqual } from "viem"
+
+/* ─────────────────────────── Types & utils ─────────────────────────── */
 
 type WatchOpt = { watch?: boolean }
+const ZERO: Address = "0x0000000000000000000000000000000000000000"
+
+function toUserError(e: unknown, fallback = "Transaction failed") {
+  if (e && typeof e === "object" && "message" in e) return (e as any).message as string
+  return String(e ?? fallback)
+}
+
+function isZeroAddr(a?: Address) {
+  return !!a && isAddressEqual(a, ZERO)
+}
 
 /* Small helper to refetch on new blocks when opt.watch = true */
 function useRefetchOnBlock(refetch?: () => void, watch?: boolean) {
@@ -27,9 +40,10 @@ function useRefetchOnBlock(refetch?: () => void, watch?: boolean) {
   }, [watch, blockNumber, refetch])
 }
 
-const HUB = ADDR.HUB // checksummed or undefined
+/* Shared HUB address (checksummed or undefined) */
+const HUB = ADDR.HUB // may be undefined if not configured
 
-/* ----------------------------- READS ----------------------------- */
+/* ────────────────────────────── READS ────────────────────────────── */
 
 export function useCreatorPlanIds(creator?: `0x${string}`, opt?: WatchOpt) {
   const read = useReadContract({
@@ -55,6 +69,7 @@ export function useCreatorPostIds(creator?: `0x${string}`, opt?: WatchOpt) {
   return read
 }
 
+/** plans(id) → { creator, token, pricePerPeriod, periodDays, active, name, metadataURI } */
 export function usePlan(id?: bigint, opt?: WatchOpt) {
   const read = useReadContract({
     abi: CreatorHub as any,
@@ -67,6 +82,7 @@ export function usePlan(id?: bigint, opt?: WatchOpt) {
   return read
 }
 
+/** posts(id) → { creator, token, price, active, accessViaSub, uri } */
 export function usePost(id?: bigint, opt?: WatchOpt) {
   const read = useReadContract({
     abi: CreatorHub as any,
@@ -103,13 +119,14 @@ export function useIsActive(subscriber?: `0x${string}`, creator?: `0x${string}`,
   return read
 }
 
-/* ----------------------------- WRITES ----------------------------- */
+/* ───────────────────────────── WRITES ───────────────────────────── */
 
-function toUserError(e: unknown, fallback = "Transaction failed") {
-  if (e && typeof e === "object" && "message" in e) return (e as any).message as string
-  return String(e ?? fallback)
-}
-
+/**
+ * subscribe(planId, periods)
+ * - Auto-detects token type from plans(planId).
+ * - If token == 0x0, pays native with value = pricePerPeriod * periods.
+ * - Else, ERC20 path (no value). Use payment preview + allowance flow from extras.
+ */
 export function useSubscribe() {
   const client = usePublicClient()
   const { address } = useAccount()
@@ -119,7 +136,27 @@ export function useSubscribe() {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
 
-    // Preflight: revert reasons before signature
+    // Read plan to determine token & price
+    const plan = await client.readContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "plans",
+      args: [planId],
+    }) as unknown as {
+      0: `0x${string}` // creator
+      1: `0x${string}` // token
+      2: bigint        // pricePerPeriod
+      3: number        // periodDays
+      4: boolean       // active
+      5: string        // name
+      6: string        // metadataURI
+    }
+
+    const token = plan?.[1] as Address | undefined
+    const pricePerPeriod = plan?.[2] as bigint
+    const total = pricePerPeriod * BigInt(periods)
+
+    // Preflight simulate (with or without value)
     await client.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
@@ -127,6 +164,7 @@ export function useSubscribe() {
       args: [planId, periods],
       account: address,
       chain: base,
+      ...(isZeroAddr(token) ? { value: total } : {}),
     }).catch((e) => { throw new Error(toUserError(e, "Subscribe would revert")) })
 
     const hash = await writeContractAsync({
@@ -136,13 +174,22 @@ export function useSubscribe() {
       args: [planId, periods],
       account: address,
       chain: base,
+      ...(isZeroAddr(token) ? { value: total } : {}),
     })
+
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
+
   return { subscribe, isPending, error }
 }
 
+/**
+ * buyPost(postId)
+ * - Auto-detects token type from posts(postId).
+ * - If token == 0x0, pays native with value = price.
+ * - Else, ERC20 path (no value). Use payment preview + allowance flow from extras.
+ */
 export function useBuyPost() {
   const client = usePublicClient()
   const { address } = useAccount()
@@ -152,6 +199,24 @@ export function useBuyPost() {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
 
+    const post = await client.readContract({
+      abi: CreatorHub as any,
+      address: ADDR.HUB as `0x${string}`,
+      functionName: "posts",
+      args: [postId],
+    }) as unknown as {
+      0: `0x${string}` // creator
+      1: `0x${string}` // token
+      2: bigint        // price
+      3: boolean       // active
+      4: boolean       // accessViaSub
+      5: string        // uri
+    }
+
+    const token = post?.[1] as Address | undefined
+    const price = post?.[2] as bigint
+
+    // Preflight simulate (value only for native)
     await client.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
@@ -159,6 +224,7 @@ export function useBuyPost() {
       args: [postId],
       account: address,
       chain: base,
+      ...(isZeroAddr(token) ? { value: price } : {}),
     }).catch((e) => { throw new Error(toUserError(e, "Purchase would revert")) })
 
     const hash = await writeContractAsync({
@@ -168,13 +234,18 @@ export function useBuyPost() {
       args: [postId],
       account: address,
       chain: base,
+      ...(isZeroAddr(token) ? { value: price } : {}),
     })
     await client.waitForTransactionReceipt({ hash })
     return hash
   }
+
   return { buy, isPending, error }
 }
 
+/**
+ * createPlan(token, pricePerPeriod, periodDays, name, metadataURI)
+ */
 export function useCreatePlan() {
   const client = usePublicClient()
   const { address } = useAccount()
@@ -214,6 +285,9 @@ export function useCreatePlan() {
   return { createPlan, isPending, error }
 }
 
+/**
+ * createPost(token, price, accessViaSub, uri)
+ */
 export function useCreatePost() {
   const client = usePublicClient()
   const { address } = useAccount()
