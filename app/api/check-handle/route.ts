@@ -1,102 +1,165 @@
 // /app/api/check-handle/route.ts
-import { NextResponse } from "next/server"
-import { kv } from "@/lib/kv"
+import { NextResponse } from "next/server";
+import { kv } from "@/lib/kv";
 
-// Registry-aware namespace so preview checks don't collide across deployments
-const REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY || "unknown"
+/** Force dynamic (depends on live KV/env), and enable fast Edge runtime */
+export const dynamic = "force-dynamic";
+export const runtime = "edge";
 
-// Reason strings are user-safe (shown in UI)
-const RESERVED = new Set([
-  "admin", "moderator", "owner", "onlystars", "support", "help",
-  "root", "team", "staff", "about", "contact", "api",
-])
+/** Registry-aware namespace so checks don't collide across deployments */
+const REGISTRY = (process.env.NEXT_PUBLIC_PROFILE_REGISTRY || "unknown").toLowerCase();
 
-const MIN = 3
-const MAX = 24
-const allowed = /^[a-z0-9._-]+$/
-const badEdges = /^[._-]|[._-]$/
-const dblSep = /[._-]{2,}/
+/** Reason strings are user-safe (shown in UI) */
+const RESERVED = new Set<string>([
+  "admin",
+  "moderator",
+  "owner",
+  "support",
+  "help",
+  "root",
+  "team",
+  "staff",
+  "about",
+  "contact",
+  "api",
+  "settings",
+  "create",
+  "dashboard",
+  "discover",
+  "profile",
+  "profiles",
+  "pricing",
+  "terms",
+  "privacy",
+  "login",
+  "logout",
+  "signup",
+]);
+
+const MIN = 3;
+const MAX = 24;
+/** allowed chars; we also ban leading/trailing sep and doubles */
+const allowed = /^[a-z0-9._-]+$/;
+const badEdges = /^[._-]|[._-]$/; // leading or trailing ., _, -
+const dblSep = /[._-]{2,}/; // repeated separators
 
 function sanitize(raw: string) {
-  return raw.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "")
+  return raw.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
 }
 
-// NOTE: This API is advisory-only. You still MUST verify on-chain (`canRegister`).
+function json(
+  body: Record<string, unknown>,
+  init?: ResponseInit & { noStore?: boolean }
+) {
+  const headers = new Headers(init?.headers || {});
+  if (init?.noStore !== false) headers.set("cache-control", "no-store");
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("x-onlystars-advisory", "true"); // remind clients this is advisory-only
+  return new NextResponse(JSON.stringify(body), { ...init, headers });
+}
+
+/**
+ * NOTE: This API is advisory-only. You MUST still verify on-chain via `canRegister`.
+ *
+ * Wire format:
+ * {
+ *   ok: boolean,
+ *   reason?: string,         // user-safe reason if ok=false or degraded
+ *   advisoryOnly: true,      // always true (client UI can display subtle banner)
+ *   sanitized: string        // server-side normalized handle (lowercase etc)
+ * }
+ */
 export async function GET(req: Request) {
   try {
-    const { searchParams } = new URL(req.url)
-    const raw = searchParams.get("handle") || ""
-    const handle = sanitize(raw)
+    const { searchParams } = new URL(req.url);
+    // accept both ?handle= and ?h=
+    const raw = searchParams.get("handle") ?? searchParams.get("h") ?? "";
+    const handle = sanitize(raw);
 
-    // Basic shape validation
     if (!handle) {
-      return NextResponse.json({ ok: false, reason: "No handle", sanitized: "" }, { status: 400 })
+      return json(
+        { ok: false, reason: "No handle provided", advisoryOnly: true, sanitized: "" },
+        { status: 400 }
+      );
     }
     if (handle.length < MIN || handle.length > MAX) {
-      return NextResponse.json({
-        ok: false,
-        reason: `Handle must be ${MIN}-${MAX} chars`,
-        sanitized: handle,
-      }, { status: 422 })
+      return json(
+        {
+          ok: false,
+          reason: `Handle must be ${MIN}-${MAX} chars`,
+          advisoryOnly: true,
+          sanitized: handle,
+        },
+        { status: 422 }
+      );
     }
     if (!allowed.test(handle)) {
-      return NextResponse.json({
-        ok: false,
-        reason: "Only letters, numbers, dot, dash, underscore",
-        sanitized: handle,
-      }, { status: 422 })
+      return json(
+        {
+          ok: false,
+          reason: "Only letters, numbers, dot, dash, underscore",
+          advisoryOnly: true,
+          sanitized: handle,
+        },
+        { status: 422 }
+      );
     }
     if (badEdges.test(handle) || dblSep.test(handle)) {
-      return NextResponse.json({
-        ok: false,
-        reason: "No leading/trailing or repeated separators",
-        sanitized: handle,
-      }, { status: 422 })
+      return json(
+        {
+          ok: false,
+          reason: "No leading/trailing or repeated separators",
+          advisoryOnly: true,
+          sanitized: handle,
+        },
+        { status: 422 }
+      );
     }
     if (RESERVED.has(handle)) {
-      return NextResponse.json({
-        ok: false,
-        reason: "Reserved handle",
-        sanitized: handle,
-      }, { status: 409 })
+      return json(
+        { ok: false, reason: "Reserved handle", advisoryOnly: true, sanitized: handle },
+        { status: 409 }
+      );
     }
 
-    // KV quick check (advisory)
-    const kvKey = `onlystars:${REGISTRY}:handle:${handle}`
-    let exists = false
+    // KV quick check (advisory).
+    // Convention: `onlystars:${REGISTRY}:handle:${handle}` -> JSON/owner string
+    const kvKey = `onlystars:${REGISTRY}:handle:${handle}`;
     try {
-      const v = await kv.get<string>(kvKey)
-      exists = Boolean(v)
+      const exists = Boolean(await kv.get<string>(kvKey));
+      if (exists) {
+        return json(
+          { ok: false, reason: "Already registered", advisoryOnly: true, sanitized: handle },
+          { status: 409 }
+        );
+      }
     } catch {
-      // KV misconfig or transient error — fall back to advisory "unknown"
-      return NextResponse.json({
+      // KV misconfig or transient error — degrade gracefully; client will still rely on on-chain check
+      return json({
         ok: true,
-        advisoryOnly: true,  // surface to client that on-chain check matters even more
+        advisoryOnly: true,
         sanitized: handle,
         reason: "KV unavailable; will rely on on-chain check",
-      })
-    }
-
-    if (exists) {
-      return NextResponse.json({
-        ok: false,
-        reason: "Already registered",
-        sanitized: handle,
-      }, { status: 409 })
+      });
     }
 
     // Success (still advisory)
-    return NextResponse.json({
-      ok: true,
-      advisoryOnly: true,
-      sanitized: handle,
-    }, {
-      headers: { "cache-control": "no-store" },
-    })
+    return json({ ok: true, advisoryOnly: true, sanitized: handle });
   } catch {
-    return NextResponse.json(
-      { ok: true, advisoryOnly: true, reason: "Validation service soft-failed" },
-      { headers: { "cache-control": "no-store" } },
-    )
+    // Soft-fail: do not block UX; make sure the client knows to rely on on-chain result
+    return json(
+      {
+        ok: true,
+        advisoryOnly: true,
+        reason: "Validation service soft-failed",
+        sanitized: "",
+      },
+      { status: 200 }
+    );
   }
+}
+
+/** Optional: lightweight health/allow preflight */
+export async function HEAD() {
+  return json({ ok: true, advisoryOnly: true, sanitized: "" });
 }
