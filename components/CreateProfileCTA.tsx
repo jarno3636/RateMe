@@ -6,7 +6,8 @@ import { useAccount } from "wagmi";
 import { formatUnits } from "viem";
 
 import { usePreviewCreate, useCreateProfile } from "@/hooks/useProfileRegistry";
-import { useApproveUsdc, useUsdcAllowance } from "@/hooks/useUsdcApproval";
+import { useApproveUsdc } from "@/hooks/useUsdcApproval";
+import * as ADDR from "@/lib/addresses";
 
 /** Contract return type for previewCreate:
  * [balance, allowance, fee, okBalance, okAllowance]
@@ -18,6 +19,8 @@ type PreviewTuple = readonly [
   okBalance: boolean,
   okAllowance: boolean
 ];
+
+const REGISTRY = (ADDR.REGISTRY ?? ADDR.PROFILE_REGISTRY) as `0x${string}` | undefined;
 
 export default function CreateProfileCTA({
   handle,
@@ -38,9 +41,6 @@ export default function CreateProfileCTA({
   const { data: previewData } = usePreviewCreate();
   const preview = previewData as PreviewTuple | undefined;
 
-  // If you're not using allowance in this component, feel free to remove this line.
-  const { data: allowance } = useUsdcAllowance();
-
   const { approve, isPending: approving } = useApproveUsdc();
   const { create, isPending: creating } = useCreateProfile();
 
@@ -56,9 +56,10 @@ export default function CreateProfileCTA({
   const onApprove = async () => {
     setErr(null);
     try {
-      // Approve exact fee if we have it; your hook should default to max if undefined.
+      if (!REGISTRY) throw new Error("Registry address not configured.");
+      // Approve exact fee if we have it; your hook may default to max if amount is omitted.
       const amt = typeof fee === "bigint" && fee > 0n ? fee : undefined;
-      const txHash = await approve(amt);
+      const txHash = await approve(REGISTRY, amt);
       setOkMsg(`Approved USDC: ${txHash}`);
     } catch (e: any) {
       setErr(e?.message || String(e));
@@ -91,7 +92,8 @@ export default function CreateProfileCTA({
   }
 
   if (!okBalance) {
-    const need = typeof fee === "bigint" ? Number(formatUnits(fee, 6)).toFixed(2) : "?";
+    const need =
+      typeof fee === "bigint" ? Number(formatUnits(fee, 6)).toFixed(2) : "?";
     return (
       <div className="space-y-2">
         <div className="text-sm text-red-500">Insufficient USDC balance.</div>
