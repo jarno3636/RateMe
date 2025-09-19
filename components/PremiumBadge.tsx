@@ -2,16 +2,19 @@
 "use client"
 
 import * as React from "react"
+import { Sparkles, BadgeCheck, Crown, DollarSign, Star, Power, Pause, Plus } from "lucide-react"
 
 type Kind =
-  | "pro"          // e.g., top creators, verified, etc.
-  | "subscriber"   // user has an active sub (viewer-side) or sub-gated content
+  | "pro"          // top creators / verified / premium
+  | "subscriber"   // user has an active subscription / sub-gated content
   | "free"         // free content
   | "paid"         // one-off paid post
   | "inactive"     // plan/post not active
   | "new"          // recently created
 
-const LABELS: Record<Kind, string> = {
+type Size = "xs" | "sm" | "md"
+
+const DEFAULT_LABELS: Record<Kind, string> = {
   pro: "Pro",
   subscriber: "Subscriber",
   free: "Free",
@@ -20,36 +23,180 @@ const LABELS: Record<Kind, string> = {
   new: "New",
 }
 
-export default function PremiumBadge({
-  kind,
-  className,
-  title,
-}: {
+const KIND_STYLES: Record<Kind, string> = {
+  pro: "bg-gradient-to-r from-pink-500/90 to-fuchsia-500/90 text-white ring-white/25 shadow-[0_0_18px_rgba(236,72,153,.35)]",
+  subscriber: "bg-emerald-500 text-white ring-white/20",
+  free: "bg-white/15 text-white ring-white/20",
+  paid: "bg-amber-400 text-black ring-white/20",
+  inactive: "bg-zinc-700/90 text-zinc-200 ring-white/10",
+  new: "bg-sky-500 text-white ring-white/20",
+}
+
+const SIZE_STYLES: Record<Size, string> = {
+  xs: "text-[9px] px-1.5 py-0.5 gap-1",
+  sm: "text-[10px] px-2 py-0.5 gap-1.5",
+  md: "text-[11px] px-2.5 py-0.5 gap-1.5",
+}
+
+const ICONS: Record<Kind, React.ComponentType<{ className?: string }>> = {
+  pro: Crown,
+  subscriber: BadgeCheck,
+  free: Star,
+  paid: DollarSign,
+  inactive: Pause,
+  new: Sparkles,
+}
+
+function cx(...classes: (string | false | null | undefined)[]) {
+  return classes.filter(Boolean).join(" ")
+}
+
+export type PremiumBadgeProps = {
   kind: Kind
-  className?: string
+  /**
+   * Override the default label (e.g., "VIP")
+   */
+  labelOverride?: string
+  /**
+   * Size variant
+   */
+  size?: Size
+  /**
+   * Add subtle animated shimmer for attention (nice for "new" or "pro")
+   */
+  pulse?: boolean
+  /**
+   * If true, hide the icon
+   */
+  hideIcon?: boolean
+  /**
+   * Optional custom icon component
+   */
+  iconOverride?: React.ComponentType<{ className?: string }>
+  /**
+   * Title for native tooltip / a11y
+   */
   title?: string
-}) {
-  // Subtle color tweaks per kind
-  const styles: Record<Kind, string> = {
-    pro: "bg-gradient-to-r from-pink-500/80 to-fuchsia-500/80 text-white",
-    subscriber: "bg-emerald-500/80 text-white",
-    free: "bg-white/20 text-white",
-    paid: "bg-amber-500/90 text-black",
-    inactive: "bg-zinc-700/80 text-zinc-200",
-    new: "bg-sky-500/90 text-white",
+  /**
+   * Extra class names
+   */
+  className?: string
+  /**
+   * Render as interactive element. If `as="a"`, provide href.
+   */
+  as?: "span" | "button" | "a"
+  href?: string
+  onClick?: React.MouseEventHandler<HTMLElement>
+  disabled?: boolean
+  /**
+   * Data attributes for analytics/testing
+   */
+  "data-attr"?: string
+} & React.HTMLAttributes<HTMLElement>
+
+const PremiumBadge = React.forwardRef<HTMLElement, PremiumBadgeProps>(function PremiumBadge(
+  {
+    kind,
+    labelOverride,
+    size = "sm",
+    pulse,
+    hideIcon,
+    iconOverride,
+    title,
+    className,
+    as = "span",
+    href,
+    onClick,
+    disabled,
+    "data-attr": dataAttr,
+    ...rest
+  },
+  ref
+) {
+  // Choose icon
+  const Icon = iconOverride ?? ICONS[kind] ?? Plus
+  const label = labelOverride ?? DEFAULT_LABELS[kind]
+
+  const base = cx(
+    "inline-flex select-none items-center rounded-full uppercase tracking-wide ring-1",
+    KIND_STYLES[kind],
+    SIZE_STYLES[size],
+    // Elevation + hover affordance for interactive versions
+    as !== "span" && !disabled && "transition-shadow hover:shadow-[0_0_20px_rgba(255,255,255,.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
+    disabled && "opacity-60 cursor-not-allowed",
+    pulse && "relative overflow-hidden",
+    className
+  )
+
+  // Optional shimmer overlay (non-distracting)
+  const shimmer = pulse ? (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute inset-0 [mask-image:linear-gradient(90deg,transparent,white,transparent)]"
+    >
+      <span className="absolute -inset-y-2 -left-full w-1/2 translate-x-0 animate-[shimmer_1.8s_infinite] bg-white/20" />
+      <style jsx>{`
+        @keyframes shimmer {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(200%); }
+        }
+      `}</style>
+    </span>
+  ) : null
+
+  const content = (
+    <>
+      {!hideIcon && (
+        <Icon
+          aria-hidden
+          className={cx(
+            size === "xs" ? "h-2.5 w-2.5" : "h-3 w-3",
+            kind === "paid" ? "stroke-[2.25]" : "stroke-[2]"
+          )}
+        />
+      )}
+      <span className="font-medium">{label}</span>
+      {shimmer}
+    </>
+  )
+
+  const commonProps = {
+    ref: ref as any,
+    className: base,
+    title: title ?? label,
+    role: as === "button" ? "button" : undefined,
+    "aria-disabled": disabled || undefined,
+    "data-kind": kind,
+    "data-attr": dataAttr,
+    ...rest,
+  }
+
+  if (as === "a") {
+    return (
+      <a {...(commonProps as React.AnchorHTMLAttributes<HTMLAnchorElement>)} href={href} onClick={onClick}>
+        {content}
+      </a>
+    )
+  }
+
+  if (as === "button") {
+    return (
+      <button
+        {...(commonProps as React.ButtonHTMLAttributes<HTMLButtonElement>)}
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+      >
+        {content}
+      </button>
+    )
   }
 
   return (
-    <span
-      className={[
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-wide",
-        "ring-1 ring-white/20 shadow-sm",
-        styles[kind],
-        className || "",
-      ].join(" ")}
-      title={title || LABELS[kind]}
-    >
-      {LABELS[kind]}
+    <span {...(commonProps as React.HTMLAttributes<HTMLSpanElement>)} onClick={onClick as any}>
+      {content}
     </span>
   )
-}
+})
+
+export default PremiumBadge
