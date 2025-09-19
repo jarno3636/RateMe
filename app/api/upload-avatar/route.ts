@@ -41,7 +41,7 @@ function looksLike(type: string, buf: Buffer) {
     return buf.length > 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
   }
   if (type === "image/jpeg" || type === "image/jpg") {
-    // FF D8 ... FF D9 (we only check start)
+    // FF D8 ... (check start)
     return buf.length > 2 && buf[0] === 0xff && buf[1] === 0xd8;
   }
   if (type === "image/gif") {
@@ -57,7 +57,7 @@ function looksLike(type: string, buf: Buffer) {
     );
   }
   if (type === "image/avif") {
-    // ISO Base Media File (ftypavif/ftypavis); check minimal "ftyp" presence
+    // ISO BMFF with "ftyp"
     return buf.length > 12 && buf.slice(4, 8).toString("ascii") === "ftyp";
   }
   return false;
@@ -75,19 +75,17 @@ export async function POST(req: Request) {
       return bad(415, "Expected multipart/form-data");
     }
 
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
+    const form = (await req.formData()) as unknown as { get?: (k: string) => unknown };
+    const file = (form.get ? form.get("file") : null) as File | null;
     if (!file) return bad(400, "No file");
 
-    const type = (file as any).type as string;
+    const type = (file as any).type as string | undefined;
     const size = Number((file as any).size ?? 0);
-
-    if (!IMAGE_TYPES.has(type)) return bad(400, "Only PNG, JPEG, WEBP, GIF, or AVIF allowed");
+    if (!type || !IMAGE_TYPES.has(type)) return bad(400, "Only PNG, JPEG, WEBP, GIF, or AVIF allowed");
     if (!Number.isFinite(size) || size <= 0) return bad(400, "Empty upload");
     if (size > MAX_BYTES) return bad(400, "Image must be ≤ 1MB");
 
     // Read bytes
-    // @ts-ignore: File in Next runtime supports arrayBuffer()
     const arrayBuf = await (file as any).arrayBuffer();
     const buffer = Buffer.from(arrayBuf);
 
@@ -96,7 +94,7 @@ export async function POST(req: Request) {
       return bad(400, "File content does not match declared image type");
     }
 
-    // Deterministic path: avatars/<sha256>.<ext> (with uuid jitter to avoid rare collisions)
+    // Deterministic path: avatars/<sha256>-<uuid>.<ext>
     const sha = createHash("sha256").update(buffer).digest("hex").slice(0, 40);
     const ext = EXT_FROM_MIME[type] || "jpg";
     const key = `avatars/${sha}-${randomUUID()}.${ext}`;
@@ -105,23 +103,11 @@ export async function POST(req: Request) {
       access: "public",
       contentType: type,
       addRandomSuffix: false,
-      // cacheControl is not available in older @vercel/blob versions; leave default
     });
 
     return new NextResponse(
-      JSON.stringify({
-        url: blob.url,
-        key,
-        size,
-        type,
-      }),
-      {
-        status: 200,
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      }
+      JSON.stringify({ url: blob.url, key, size, type }),
+      { status: 200, headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } }
     );
   } catch (err: any) {
     console.error("[/api/upload-avatar] error:", err);
@@ -129,7 +115,6 @@ export async function POST(req: Request) {
   }
 }
 
-// Optional: reject non-POST if you want to be explicit in the future
 export async function GET() {
   return bad(405, "Method not allowed");
 }
