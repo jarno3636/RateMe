@@ -351,11 +351,13 @@ function CreatorPublicPageImpl() {
   // Profile read
   const { data: prof, isLoading: profLoading, error: profError } = useGetProfile(id)
 
-  const creator = (prof?.[0] as `0x${string}` | undefined) ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
-  const handle = String(prof?.[1] ?? "")
-  const name = String(prof?.[2] ?? (id ? `Profile #${id}` : "Profile"))
-  const avatar = String(prof?.[3] ?? "")
-  const bio = String(prof?.[4] ?? "")
+  // ✅ Safely narrow profile tuple before indexing
+  const t = asTuple(prof)
+  const creator = (t[0] as `0x${string}` | undefined) ?? ("0x0000000000000000000000000000000000000000" as `0x${string}`)
+  const handle  = String(t[1] ?? "")
+  const name    = String(t[2] ?? (id ? `Profile #${id}` : "Profile"))
+  const avatar  = String(t[3] ?? "")
+  const bio     = String(t[4] ?? "")
 
   const { data: planIds, isLoading: plansLoading } = useCreatorPlanIds(creator)
   const { data: postIds, isLoading: postsLoading } = useCreatorPostIds(creator)
