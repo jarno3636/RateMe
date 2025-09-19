@@ -31,6 +31,11 @@ function numberOr(v: unknown, d: number) {
 }
 function isSameAddr(a?: string, b?: string) { return !!a && !!b && a.toLowerCase() === b.toLowerCase() }
 
+/** Safely treat unknown profile payloads as array-like. */
+function asTuple(a: unknown): readonly unknown[] {
+  return Array.isArray(a) ? a : []
+}
+
 /* ---------- atoms ---------- */
 function Badge({
   label,
@@ -94,12 +99,14 @@ export default function CreatorDashboardPage() {
   const { data: prof, isLoading: profileLoading, refetch: refetchProfile } = useGetProfile(id)
   const { update, isPending: savingProfile } = useUpdateProfile()
 
-  const owner  = (prof?.[0] as `0x${string}` | undefined) ?? undefined
-  const handle = String(prof?.[1] ?? "")
-  const name   = String(prof?.[2] ?? "")
-  const avatar = String(prof?.[3] ?? "")
-  const bio    = String(prof?.[4] ?? "")
-  const fid    = (prof?.[5] as bigint) ?? 0n
+  // Safely narrow the tuple from the hook
+  const p = asTuple(prof)
+  const owner  = (p[0] as `0x${string}` | undefined) ?? undefined
+  const handle = String(p[1] ?? "")
+  const name   = String(p[2] ?? "")
+  const avatar = String(p[3] ?? "")
+  const bio    = String(p[4] ?? "")
+  const fid    = (p[5] as bigint) ?? 0n
 
   const isOwner = isSameAddr(owner, address)
 
@@ -520,10 +527,10 @@ function StatCard({ label, value, loading }: { label: string; value: number | st
 function PlanRow({ id }: { id: bigint }) {
   const { data: plan } = usePlan(id)
   // plans -> [creator, token, pricePerPeriod, periodDays, active, name, metadataURI]
-  const price  = BigInt(plan?.[2] ?? 0n)
-  const days   = Number(plan?.[3] ?? 30)
-  const active = Boolean(plan?.[4] ?? true)
-  const name   = String(plan?.[5] ?? "Plan")
+  const price  = BigInt((asTuple(plan)[2] as bigint) ?? 0n)
+  const days   = Number((asTuple(plan)[3] ?? 30))
+  const active = Boolean((asTuple(plan)[4] ?? true))
+  const name   = String((asTuple(plan)[5] ?? "Plan"))
 
   const softDelete = async () => {
     try {
@@ -561,10 +568,11 @@ function PlanRow({ id }: { id: bigint }) {
 function PostRow({ id }: { id: bigint }) {
   const { data: post } = usePost(id)
   // posts -> [creator, token, price, active, accessViaSub, uri]
-  const price   = BigInt(post?.[2] ?? 0n)
-  const active  = Boolean(post?.[3] ?? true)
-  const subGate = Boolean(post?.[4] ?? false)
-  const uri     = String(post?.[5] ?? "")
+  const p = asTuple(post)
+  const price   = BigInt((p[2] as bigint) ?? 0n)
+  const active  = Boolean(p[3] ?? true)
+  const subGate = Boolean(p[4] ?? false)
+  const uri     = String(p[5] ?? "")
 
   const softDelete = async () => {
     try {
