@@ -479,8 +479,8 @@ export default function BecomeCreatorPage() {
                   !feeUnits ||
                   !okBalance ||
                   needsApproval ||
-                  (currentChainId && currentChainId !== base.id)
-                }
+                  (currentChainId !== undefined && currentChainId !== base.id) // ← make it strictly boolean
+               }
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
               >
                 {creating ? "Creating…" : (uploading ? "Uploading…" : "Create profile")}
