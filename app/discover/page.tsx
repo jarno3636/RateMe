@@ -128,7 +128,7 @@ function CreatorCard({
 export default function DiscoverPage() {
   /** Cursor stack for bidirectional paging (server returns nextCursor) */
   const [cursors, setCursors] = useState<bigint[]>([0n]);
-  const cursor = cursors[cursors.length - 1]; // always bigint
+  const cursor = (cursors[cursors.length - 1] ?? 0n) as bigint;
 
   /** Client-side enhancements */
   const [q, setQ] = useState(""); // search
