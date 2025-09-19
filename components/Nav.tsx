@@ -3,7 +3,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useAccount } from "wagmi"
 import { useProfilesByOwner, useGetProfile } from "@/hooks/useProfileRegistry"
 import Connect from "./Connect"
@@ -45,9 +45,17 @@ function NavLink({
   )
 }
 
-function MiniAvatar({ src, size = 18, alt = "" }: { src?: string; size?: number; alt?: string }) {
+function MiniAvatar({
+  src,
+  size = 18,
+  alt = "",
+}: {
+  src?: string
+  size?: number
+  alt?: string
+}) {
   const [err, setErr] = useState(false)
-  const finalSrc = !err && (src?.trim() || AVATAR_FALLBACK) ? src : AVATAR_FALLBACK
+  const finalSrc = !err && src && src.trim().length > 0 ? src : AVATAR_FALLBACK
   // eslint-disable-next-line @next/next/no-img-element
   return (
     <img
@@ -61,6 +69,13 @@ function MiniAvatar({ src, size = 18, alt = "" }: { src?: string; size?: number;
       onError={() => setErr(true)}
     />
   )
+}
+
+/** Resolve site origin for share/cast links (client-safe). */
+function getSiteOrigin() {
+  if (typeof window !== "undefined" && window.location?.origin) return window.location.origin
+  const env = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "")
+  return env || "https://onlystars.app" // fallback; change to your prod domain if desired
 }
 
 export default function Nav() {
@@ -79,9 +94,18 @@ export default function Nav() {
     return ids.length ? ids[0] : 0n
   }, [ownedIds])
 
-  // Optionally read profile for avatar (only if we have an id)
-  const { data: prof } = useGetProfile(myId > 0n ? myId : (undefined as unknown as bigint))
-  const myAvatar = String((prof?.[3] as string) || "") || AVATAR_FALLBACK
+  // Read profile only when id exists (avoids unnecessary hook calls)
+  const { data: prof } = useGetProfile(myId > 0n ? myId : undefined)
+  const myAvatar = useMemo(() => {
+    const uri = (prof?.[3] as string) || ""
+    return uri || AVATAR_FALLBACK
+  }, [prof])
+
+  // Also determine if we have a Farcaster fid
+  const myFid = useMemo(() => {
+    const fid = prof?.[5] as bigint | undefined
+    return typeof fid === "bigint" ? fid : 0n
+  }, [prof])
 
   // Build the target for "My profile"
   const myProfileHref = useMemo(() => {
@@ -111,6 +135,16 @@ export default function Nav() {
     }
   }, [open])
 
+  // Farcaster compose (Warpcast) helper
+  const onCast = useCallback(() => {
+    const origin = getSiteOrigin()
+    const url = `${origin}${myProfileHref}`
+    const text = encodeURIComponent("Check out my OnlyStars profile ✨")
+    const embed = encodeURIComponent(url)
+    const compose = `https://warpcast.com/~/compose?text=${text}&embeds[]=${embed}`
+    window.open(compose, "_blank", "noopener,noreferrer")
+  }, [myProfileHref])
+
   return (
     <header className="sticky top-0 z-40 border-b border-white/10 bg-black/60 backdrop-blur supports-[backdrop-filter]:bg-black/50">
       <a
@@ -120,7 +154,7 @@ export default function Nav() {
         Skip to content
       </a>
 
-      {/* Three-zone layout to prevent overlap: Left logo, center nav, right connect */}
+      {/* Three-zone layout to prevent overlap: Left logo, center nav, right actions */}
       <div className="mx-auto grid h-16 max-w-5xl grid-cols-[auto,1fr,auto] items-center gap-3 px-4">
         {/* Left: logo */}
         <Link href="/" className="flex min-w-0 items-center gap-2" aria-label="OnlyStars home">
@@ -128,7 +162,7 @@ export default function Nav() {
           <span className="truncate font-semibold tracking-wide">OnlyStars</span>
         </Link>
 
-        {/* Center: desktop nav (never overlaps right column) */}
+        {/* Center: desktop nav */}
         <nav className="hidden min-w-0 justify-center md:flex" aria-label="Primary">
           <div className="flex max-w-full flex-wrap items-center gap-3">
             <NavLink href="/" activeWhenStartsWith>Home</NavLink>
@@ -137,7 +171,7 @@ export default function Nav() {
             <NavLink href={myProfileHref} activeWhenStartsWith>
               {myId > 0n && (
                 <span className="-ml-1 inline-flex items-center gap-2">
-                  <MiniAvatar src={myAvatar} />
+                  <MiniAvatar src={myAvatar} alt="Your avatar" />
                   <span>My profile</span>
                 </span>
               )}
@@ -146,13 +180,42 @@ export default function Nav() {
           </div>
         </nav>
 
-        {/* Right: Connect (desktop) + Menu (mobile) */}
+        {/* Right: Connect + (optional) Farcaster cast */}
         <div className="flex items-center gap-2">
+          {/* Cast button (desktop) shows when fid exists */}
+          {myFid > 0n && (
+            <button
+              type="button"
+              onClick={onCast}
+              title="Cast to Farcaster"
+              className={[
+                "hidden md:inline-flex items-center gap-1 rounded-full px-3 py-1.5 text-xs transition",
+                "border border-violet-400/60 hover:bg-violet-400/10",
+                "focus:outline-none focus:ring-2 focus:ring-violet-400/50",
+              ].join(" ")}
+            >
+              <span aria-hidden className="block h-2 w-2 rounded-full bg-violet-400" />
+              Cast
+            </button>
+          )}
           <div className="hidden md:block">
             <Connect />
           </div>
           {/* Mobile: connect + menu */}
           <div className="md:hidden flex items-center gap-2">
+            {/* Mobile cast button (icon-only) */}
+            {myFid > 0n && (
+              <button
+                type="button"
+                onClick={onCast}
+                title="Cast to Farcaster"
+                className="rounded-full border border-violet-400/60 p-2 hover:bg-violet-400/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/50"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
             <Connect compact />
             <button
               type="button"
@@ -207,6 +270,17 @@ export default function Nav() {
               >
                 My profile
               </Link>
+
+              {/* Cast quick action in the grid (shows only when fid) */}
+              {myFid > 0n && (
+                <button
+                  type="button"
+                  onClick={() => { onCast(); setOpen(false) }}
+                  className="truncate rounded-full border border-violet-400/60 px-3 py-1.5 text-center text-xs hover:bg-violet-400/10"
+                >
+                  Cast
+                </button>
+              )}
             </div>
           </div>
         </div>
