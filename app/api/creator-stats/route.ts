@@ -1,100 +1,99 @@
 // /app/api/creator-stats/route.ts
-import { NextResponse } from "next/server"
-import { publicClient } from "@/lib/chain"
-import ProfileRegistry from "@/abi/ProfileRegistry.json"
-import CreatorHub from "@/abi/CreatorHub.json"
-// NOTE: make sure the Ratings ABI path matches your repo (.json)
-import Ratings from "@/abi/Ratings.json"
+import { NextResponse } from "next/server";
+import { publicServerClient as publicClient } from "@/lib/chainServer";
+import ProfileRegistry from "@/abi/ProfileRegistry.json";
+import CreatorHub from "@/abi/CreatorHub.json";
+import Ratings from "@/abi/Ratings.json";
+import { kvGetJSON, kvSetJSON } from "@/lib/kv";
+import * as ADDR from "@/lib/addresses";
 
-import { kvGetJSON, kvSetJSON } from "@/lib/kv"
+export const dynamic = "force-dynamic"; // we manage caching via KV
+export const runtime = "nodejs";        // viem http + server-side batching
 
-export const dynamic = "force-dynamic" // we decide caching via KV
-
-const PROFILE_REGISTRY = process.env.NEXT_PUBLIC_PROFILE_REGISTRY as `0x${string}` | undefined
-const CREATOR_HUB     = process.env.NEXT_PUBLIC_CREATOR_HUB     as `0x${string}` | undefined
-const RATINGS         = process.env.NEXT_PUBLIC_RATINGS         as `0x${string}` | undefined
-
-// TTL for KV cache (seconds)
-const TTL_SEC = 45
+/** Cache TTL (seconds) */
+const TTL_SEC = 45;
 
 type StatsPayload = {
-  subs: number
-  sales: number
-  mrr: number
-  ratingAvgX100: number
-  ratingCount: number
-  planCount?: number
-  postCount?: number
-}
+  subs: number;           // placeholder (indexer-ready)
+  sales: number;          // placeholder (indexer-ready)
+  mrr: number;            // summed active plan pricePerPeriod (USDC, 6dp)
+  ratingAvgX100: number;  // avg * 100
+  ratingCount: number;
+  planCount?: number;
+  postCount?: number;
+};
 
 function empty(): StatsPayload {
-  return { subs: 0, mrr: 0, sales: 0, ratingAvgX100: 0, ratingCount: 0 }
+  return { subs: 0, mrr: 0, sales: 0, ratingAvgX100: 0, ratingCount: 0 };
+}
+
+function json(body: unknown, init?: ResponseInit) {
+  const headers = new Headers(init?.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  // short edge/CDN hint; API remains dynamic because we KV it
+  if (!headers.has("cache-control")) {
+    headers.set(
+      "cache-control",
+      "public, max-age=15, s-maxage=15, stale-while-revalidate=60"
+    );
+  }
+  return new NextResponse(JSON.stringify(body), { ...init, headers });
 }
 
 export async function GET(req: Request) {
   try {
-    // Basic input parse + guard
-    const { searchParams } = new URL(req.url)
-    const idStr = (searchParams.get("id") || "").trim()
-    let id = 0n
-    try { id = idStr ? BigInt(idStr) : 0n } catch { id = 0n }
-
-    // If no id, return benign zeros (UI expects stable shape)
-    if (!id) {
-      return NextResponse.json(empty(), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      })
+    // -------- Parse & guard
+    const { searchParams } = new URL(req.url);
+    const idStr = (searchParams.get("id") || "").trim();
+    let id = 0n;
+    try {
+      id = idStr ? BigInt(idStr) : 0n;
+    } catch {
+      id = 0n;
     }
 
-    // Missing envs? Don’t explode — return zeros (but log once)
-    if (!PROFILE_REGISTRY || !CREATOR_HUB || !RATINGS) {
-      return NextResponse.json(empty(), {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "no-store",
-        },
-      })
+    if (!id) return json(empty(), { headers: { "cache-control": "no-store" } });
+
+    // -------- Env / address sanity (don’t explode on misconfig)
+    const REGISTRY = ADDR.PROFILE_REGISTRY;
+    const HUB = ADDR.HUB;
+    const RATINGS = ADDR.RATINGS;
+    if (!REGISTRY || !HUB || !RATINGS) {
+      return json(empty(), { headers: { "cache-control": "no-store" } });
     }
 
-    // KV cache first
-    const cacheKey = `onlystars:creator-stats:id:${idStr}`
-    const cached = await kvGetJSON<StatsPayload>(cacheKey).catch(() => null)
-    if (cached) {
-      return NextResponse.json(cached, {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          // Client may still re-hit; we keep API “dynamic” but OK to hint
-          "cache-control": "public, max-age=15, s-maxage=15, stale-while-revalidate=60",
-        },
-      })
+    // -------- KV cache (namespaced by registry for multi-env safety)
+    const cacheKey = `onlystars:${REGISTRY}:creator-stats:id:${idStr}`;
+    const cached = await kvGetJSON<StatsPayload>(cacheKey).catch(() => null);
+    if (cached) return json(cached);
+
+    // -------- Resolve owner from profile
+    // getProfile(id) -> (owner, handle, name, avatar, bio, fid, createdAt)
+    let owner: `0x${string}` | undefined;
+    try {
+      const prof = (await publicClient.readContract({
+        address: REGISTRY,
+        abi: ProfileRegistry as any,
+        functionName: "getProfile",
+        args: [id],
+      })) as unknown as [`0x${string}`, ...unknown[]];
+
+      owner = prof?.[0] as `0x${string}` | undefined;
+    } catch {
+      owner = undefined;
     }
 
-    // getProfile(id) -> (owner_, handle_, displayName_, avatarURI_, bio_, fid_, createdAt_)
-    const prof = (await publicClient.readContract({
-      address: PROFILE_REGISTRY,
-      abi: ProfileRegistry as any,
-      functionName: "getProfile",
-      args: [id],
-    })) as unknown as [`0x${string}`, ...unknown[]]
-
-    const owner = prof?.[0] as `0x${string}` | undefined
-    if (!owner || owner === "0x0000000000000000000000000000000000000000") {
-      const payload = empty()
-      // cache empty too so we don’t spam chain when an id is invalid
-      await kvSetJSON(cacheKey, payload, TTL_SEC).catch(() => null)
-      return NextResponse.json(payload, {
-        headers: {
-          "content-type": "application/json; charset=utf-8",
-          "cache-control": "public, max-age=15, s-maxage=15, stale-while-revalidate=60",
-        },
-      })
+    if (
+      !owner ||
+      owner === "0x0000000000000000000000000000000000000000"
+    ) {
+      const payload = empty();
+      await kvSetJSON(cacheKey, payload, TTL_SEC).catch(() => null);
+      return json(payload);
     }
 
-    // Parallel reads: ratings + creator plan/post ids
-    const [avgX100Bn, stats, planIds, postIds] = await Promise.all([
+    // -------- Parallel reads (resilient)
+    const [avgRes, statsRes, planIdsRes, postIdsRes] = await Promise.allSettled([
       publicClient.readContract({
         address: RATINGS,
         abi: Ratings as any,
@@ -108,69 +107,81 @@ export async function GET(req: Request) {
         args: [owner],
       }) as Promise<[bigint, bigint]>, // [count, totalScore]
       publicClient.readContract({
-        address: CREATOR_HUB,
+        address: HUB,
         abi: CreatorHub as any,
         functionName: "getCreatorPlanIds",
         args: [owner],
       }) as Promise<bigint[]>,
       publicClient.readContract({
-        address: CREATOR_HUB,
+        address: HUB,
         abi: CreatorHub as any,
         functionName: "getCreatorPostIds",
         args: [owner],
       }) as Promise<bigint[]>,
-    ])
+    ]);
 
-    const ratingAvgX100 = Number(avgX100Bn ?? 0n)
-    const ratingCount   = Number(stats?.[0] ?? 0n)
+    const avgX100Bn =
+      avgRes.status === "fulfilled" ? avgRes.value || 0n : 0n;
 
-    // Estimate MRR as sum of active plan pricePerPeriod (USDC has 6dp)
-    let mrrUnits = 0n
-    if (Array.isArray(planIds) && planIds.length > 0) {
-      const plans = await Promise.all(
+    const ratingStats =
+      statsRes.status === "fulfilled" ? statsRes.value : [0n, 0n];
+
+    const planIds =
+      planIdsRes.status === "fulfilled" ? planIdsRes.value || [] : [];
+
+    const postIds =
+      postIdsRes.status === "fulfilled" ? postIdsRes.value || [] : [];
+
+    const ratingAvgX100 = Number(avgX100Bn);
+    const ratingCount = Number(ratingStats?.[0] ?? 0n);
+
+    // -------- Compute MRR as sum of active plan pricePerPeriod (USDC 6dp)
+    let mrrUnits = 0n;
+    if (planIds.length > 0) {
+      const details = await Promise.allSettled(
         planIds.map((pid) =>
           publicClient.readContract({
-            address: CREATOR_HUB,
+            address: HUB,
             abi: CreatorHub as any,
             functionName: "plans",
             args: [pid],
-          }) as Promise<[ `0x${string}`, `0x${string}`, bigint, bigint, boolean, string, string ]>
+          }) as Promise<
+            [
+              `0x${string}`, // creator
+              `0x${string}`, // token
+              bigint,        // pricePerPeriod
+              bigint,        // periodDays
+              boolean,       // active
+              string,        // name
+              string         // metadataURI
+            ]
+          >
         )
-      )
-      for (const p of plans) {
-        const active = Boolean(p?.[4])
-        const pricePerPeriod = BigInt(p?.[2] ?? 0n)
-        if (active) mrrUnits += pricePerPeriod
+      );
+
+      for (const d of details) {
+        if (d.status !== "fulfilled") continue;
+        const price = BigInt(d.value?.[2] ?? 0n);
+        const active = Boolean(d.value?.[4]);
+        if (active && price > 0n) mrrUnits += price;
       }
     }
 
     const payload: StatsPayload = {
-      subs: 0,               // needs indexer; keep UI stable
-      sales: 0,              // needs indexer; keep UI stable
+      subs: 0, // requires indexer — keep stable
+      sales: 0, // requires indexer — keep stable
       mrr: Number(mrrUnits) / 1e6,
       ratingAvgX100,
       ratingCount,
-      planCount: planIds?.length ?? 0,
-      postCount: postIds?.length ?? 0,
-    }
+      planCount: planIds.length,
+      postCount: postIds.length,
+    };
 
-    // Cache (best-effort)
-    await kvSetJSON(cacheKey, payload, TTL_SEC).catch(() => null)
+    await kvSetJSON(cacheKey, payload, TTL_SEC).catch(() => null);
 
-    return NextResponse.json(payload, {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "public, max-age=15, s-maxage=15, stale-while-revalidate=60",
-      },
-    })
+    return json(payload);
   } catch (e) {
-    console.error("creator-stats api error:", e)
-    // Return stable shape so UI never explodes
-    return NextResponse.json(empty(), {
-      headers: {
-        "content-type": "application/json; charset=utf-8",
-        "cache-control": "no-store",
-      },
-    })
+    // Keep shape stable on any failure
+    return json(empty(), { headers: { "cache-control": "no-store" } });
   }
 }
