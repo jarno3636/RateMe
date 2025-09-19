@@ -26,8 +26,7 @@ const AVATAR_FALLBACK = "/avatar.png"
 const HANDLE_RE = /^[a-z0-9_.-]{1,32}$/i
 
 /* ---------------- utils ---------------- */
-const fromUnits6 = (v?: bigint) =>
-  (Number(v ?? 0n) / 1e6).toFixed(2)
+const fromUnits6 = (v?: bigint): string => (Number(v ?? 0n) / 1e6).toFixed(2)
 
 function clampStrLen(s: string, n: number) {
   return s.length > n ? s.slice(0, n) : s
@@ -38,6 +37,7 @@ export default function BecomeCreatorPage() {
   const router = useRouter()
   const { address, isConnected } = useAccount()
   const currentChainId = useChainId()
+  const onWrongNetwork = currentChainId !== undefined && currentChainId !== base.id
 
   // guard missing address config early (friendly UX)
   useEffect(() => {
@@ -197,7 +197,7 @@ export default function BecomeCreatorPage() {
   const onCreate = async () => {
     if (!REGISTRY) return toast.error("Registry not configured.")
     if (!isConnected || !address) return toast.error("Connect your wallet first.")
-    if (currentChainId && currentChainId !== base.id) return toast.error("Please switch to Base.")
+    if (onWrongNetwork) return toast.error("Please switch to Base.")
     if (!handleLooksValid) return toast.error("Enter a valid handle.")
     // Fast check (KV) then source-of-truth (chain)
     if (kvOk === false) return toast.error(kvReason || "Handle unavailable.")
@@ -253,7 +253,7 @@ export default function BecomeCreatorPage() {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              id: newId.toString(),
+              id: newId.toString(), // BigInt -> string for JSON
               handle: normHandle,
               owner: address,
               name: nameSafe,
@@ -269,7 +269,7 @@ export default function BecomeCreatorPage() {
         const shareUrl =
           typeof window !== "undefined"
             ? `${window.location.origin}/creator/${newId?.toString() ?? ""}`
-            : "" // must be string; ShareParams.url is required
+            : "" // ShareParams.url requires a string
         const cast = warpcastShare({
           text: `I just created my OnlyStars profile @${normHandle} — come rate & subscribe!`,
           url: shareUrl,
@@ -305,7 +305,7 @@ export default function BecomeCreatorPage() {
   const hasAvatar = Boolean(avatarURI || avatarLocal)
   const handleReady = (kvOk !== false) && canRegOk && handleLooksValid
   const paymentsReady = !!feeUnits && okBalance && okAllowance && !needsApproval
-  const onBase = currentChainId === base.id || currentChainId === undefined
+  const onBase = !onWrongNetwork // true if base or unknown
 
   return (
     <div className="space-y-8">
@@ -324,7 +324,7 @@ export default function BecomeCreatorPage() {
         )}
 
         {/* Chain hint */}
-        {isConnected && currentChainId && currentChainId !== base.id && (
+        {isConnected && onWrongNetwork && (
           <div className="rounded-xl border border-yellow-400/30 bg-yellow-500/10 px-3 py-2 text-xs">
             You’re connected to the wrong network. Please switch to <span className="font-medium">Base</span>.
           </div>
@@ -479,8 +479,8 @@ export default function BecomeCreatorPage() {
                   !feeUnits ||
                   !okBalance ||
                   needsApproval ||
-                  (currentChainId !== undefined && currentChainId !== base.id) // ← make it strictly boolean
-               }
+                  onWrongNetwork
+                }
                 className="rounded-full border border-pink-500/50 px-4 py-2 text-sm hover:bg-pink-500/10 disabled:opacity-50"
               >
                 {creating ? "Creating…" : (uploading ? "Uploading…" : "Create profile")}
