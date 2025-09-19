@@ -19,7 +19,7 @@ function NavLink({
 }: {
   href: string
   children: React.ReactNode
-  onClick?: React.MouseEventHandler<HTMLAnchorElement> // <-- use proper type
+  onClick?: React.MouseEventHandler<HTMLAnchorElement> // proper handler type
   /** If true, mark active when pathname startsWith href (good for section roots) */
   activeWhenStartsWith?: boolean
 }) {
@@ -28,7 +28,7 @@ function NavLink({
     ? pathname === href || pathname.startsWith(`${href}/`)
     : pathname === href
 
-  // Only include onClick when defined (avoids passing `undefined` under exactOptionalPropertyTypes)
+  // Only pass onClick when it's defined (avoids passing `undefined` under exactOptionalPropertyTypes)
   const clickProp = onClick ? { onClick } : {}
 
   return (
