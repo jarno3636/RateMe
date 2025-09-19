@@ -5,11 +5,17 @@ import * as React from "react"
 import { ConnectButton } from "@rainbow-me/rainbowkit"
 import { base } from "viem/chains"
 
+/** Nicely truncates 0x… addresses */
 function truncate(addr?: string, left = 4, right = 4) {
   if (!addr) return ""
   return `${addr.slice(0, left)}…${addr.slice(-right)}`
 }
 
+/**
+ * Compact-aware Connect button using RainbowKit modal controls.
+ * - Shows "Switch to Base" when connected to wrong network (works alongside ChainGate)
+ * - Hydration-safe by hiding UI until RainbowKit is mounted
+ */
 export default function Connect({ compact = false }: { compact?: boolean }) {
   return (
     <ConnectButton.Custom>
@@ -29,7 +35,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
         const address = account?.address
         const label = connected ? truncate(address) : "Connect"
 
-        // Decide intent & click
+        // Determine click intent
         const showSwitch = connected && !onBase
         const onClick = showSwitch
           ? openChainModal
@@ -37,7 +43,6 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
           ? openAccountModal
           : openConnectModal
 
-        // Button text logic (compact keeps things tidy on small screens)
         const text = showSwitch
           ? "Switch to Base"
           : connected
@@ -51,7 +56,6 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
             : label
           : "Connect"
 
-        // Accessibility & SSR style guard
         const styleGuard: React.CSSProperties = ready
           ? {}
           : { opacity: 0, pointerEvents: "none" }
@@ -78,15 +82,15 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
             }
             style={styleGuard}
             className={[
-              "group inline-flex max-w-[180px] items-center justify-center gap-1",
+              "group inline-flex max-w-[200px] items-center justify-center gap-1",
               "truncate rounded-full px-3 py-1.5 text-xs transition",
               showSwitch
                 ? "border border-amber-400/60 bg-amber-400/10 hover:bg-amber-400/20"
-                : "border border-pink-500/50 hover:bg-pink-500/10",
+                : "border border-pink-500/60 hover:bg-pink-500/10",
               "focus:outline-none focus:ring-2 focus:ring-pink-500/50",
             ].join(" ")}
           >
-            {/* Leading dot as a subtle status indicator */}
+            {/* Leading status dot */}
             <span
               aria-hidden
               className={[
@@ -98,9 +102,7 @@ export default function Connect({ compact = false }: { compact?: boolean }) {
                   : "bg-white/70",
               ].join(" ")}
             />
-            <span className="truncate">
-              {text}
-            </span>
+            <span className="truncate">{text}</span>
           </button>
         )
       }}
