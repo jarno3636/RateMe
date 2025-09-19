@@ -98,17 +98,19 @@ export async function POST(req: Request) {
     }
 
     // Enforce multipart form uploads
-    const ctype = req.headers.get("content-type") || "";
-    if (!ctype.toLowerCase().includes("multipart/form-data")) {
+    const ctype = (req.headers.get("content-type") || "").toLowerCase();
+    if (!ctype.includes("multipart/form-data")) {
       return bad(415, "Expected multipart/form-data");
     }
 
-    const form = await req.formData();
-    const file = form.get("file") as File | null;
+    // Cast to a shape with optional .get to satisfy TS on Vercel’s build
+    const form = (await req.formData()) as unknown as { get?: (k: string) => unknown };
+    const file = (form.get ? (form.get("file") as File | null) : null);
     if (!file) return bad(400, "No file provided");
 
-    const type = (file as any).type as string;
+    const type = (file as any).type as string | undefined;
     const size = Number((file as any).size ?? 0);
+    if (!type) return bad(400, "Missing MIME type");
 
     const isImage = isImageType(type);
     const isVideo = isVideoType(type);
