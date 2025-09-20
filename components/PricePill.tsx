@@ -75,7 +75,13 @@ export default function PricePill({
   className,
 }: PricePillProps) {
   const text = useMemo(
-    () => formatPrice({ amount: value, decimals, symbol, isNative }),
+    () =>
+      formatPrice({
+        amount: value,
+        ...(decimals !== undefined ? { decimals } : {}),
+        ...(symbol !== undefined ? { symbol } : {}),
+        ...(isNative !== undefined ? { isNative } : {}),
+      }),
     [value, decimals, symbol, isNative]
   )
 
@@ -83,9 +89,7 @@ export default function PricePill({
     <span
       className={[
         "inline-flex items-center rounded-full border px-2 py-0.5",
-        emphasis
-          ? "border-pink-500/70 bg-pink-500/15"
-          : "border-white/15 bg-white/5",
+        emphasis ? "border-pink-500/70 bg-pink-500/15" : "border-white/15 bg-white/5",
         compact ? "text-[11px] leading-4" : "text-xs",
         className || "",
       ].join(" ")}
