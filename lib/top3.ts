@@ -52,8 +52,8 @@ async function fetchOwnersFromRegistry(maxScan: number): Promise<{ ids: number[]
 
     const n = Math.min(batchIds.length, batchOwners.length)
     for (let i = 0; i < n && ids.length < maxScan; i++) {
-      ids.push(batchIds[i])
-      owners.push(batchOwners[i])
+      ids.push(batchIds[i]!)
+      owners.push(batchOwners[i]!)
     }
 
     if (!nextCursor || nextCursor === 0n) break
@@ -107,8 +107,8 @@ async function readRatingsForOwners(ids: number[], owners: `0x${string}`[]): Pro
     }
 
     entries.push({
-      id: ids[i],
-      owner: owners[i],
+      id: ids[i]!,
+      owner: owners[i]!,
       avgX100: Number.isFinite(avgVal) ? avgVal : 0,
       count,
     })
