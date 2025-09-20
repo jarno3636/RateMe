@@ -23,10 +23,10 @@ export async function getTop3Ids(opts: GetTop3Options = {}): Promise<number[]> {
     })
     if (!res.ok) return []
     const json = await res.json().catch(() => ({}))
-    const raw = Array.isArray((json as any)?.ids) ? (json as any).ids : []
+    const raw: unknown[] = Array.isArray((json as any)?.ids) ? (json as any).ids : []
     return raw
       .map((x: unknown) => Number(x))
-      .filter((n) => Number.isFinite(n) && n > 0)
+      .filter((n: number) => Number.isFinite(n) && n > 0)
   } catch {
     return []
   }
