@@ -18,12 +18,14 @@ const keyFor = (maxScan: number, minCount: number) =>
   `top3:${PROFILE_REGISTRY ?? "unknown"}:${RATINGS ?? "unknown"}:${maxScan}:${minCount}`
 
 /**
- * Internal: page through registry until we hit `maxScan` or run out.
+ * Page through the registry until we hit `maxScan` or run out.
  */
-async function fetchOwnersFromRegistry(maxScan: number): Promise<{ ids: number[]; owners: `0x${string}`[] }> {
+async function fetchOwnersFromRegistry(
+  maxScan: number
+): Promise<{ ids: number[]; owners: `0x${string}`[] }> {
   if (!PROFILE_REGISTRY) return { ids: [], owners: [] }
 
-  const pageSize = Math.min(Math.max(10, maxScan), 100) // sane bounds
+  const pageSize = Math.min(Math.max(10, maxScan), 100)
   let cursor = 0n
   const ids: number[] = []
   const owners: `0x${string}`[] = []
@@ -52,8 +54,8 @@ async function fetchOwnersFromRegistry(maxScan: number): Promise<{ ids: number[]
 
     const n = Math.min(batchIds.length, batchOwners.length)
     for (let i = 0; i < n && ids.length < maxScan; i++) {
-      ids.push(batchIds[i]!)
-      owners.push(batchOwners[i]!)
+      ids.push(batchIds[i]!)        // non-null: bounded by n
+      owners.push(batchOwners[i]!)  // non-null: bounded by n
     }
 
     if (!nextCursor || nextCursor === 0n) break
@@ -64,10 +66,13 @@ async function fetchOwnersFromRegistry(maxScan: number): Promise<{ ids: number[]
 }
 
 /**
- * Internal: read averages & counts for a set of owners via multicall.
+ * Read averages & counts for a set of owners via multicall.
  * Returns entries aligned to `ids/owners` input order.
  */
-async function readRatingsForOwners(ids: number[], owners: `0x${string}`[]): Promise<TopEntry[]> {
+async function readRatingsForOwners(
+  ids: number[],
+  owners: `0x${string}`[]
+): Promise<TopEntry[]> {
   if (!RATINGS || !ids.length) return []
 
   // Build a single multicall batch: first all averages, then all stats.
@@ -85,7 +90,8 @@ async function readRatingsForOwners(ids: number[], owners: `0x${string}`[]): Pro
     args: [owner],
   } as const))
 
-  const { results } = await publicServerClient.multicall({
+  // viem@^2 returns an array, not { results }
+  const results = await publicServerClient.multicall({
     allowFailure: true,
     contracts: [...avgCalls, ...statCalls],
   })
@@ -107,7 +113,7 @@ async function readRatingsForOwners(ids: number[], owners: `0x${string}`[]): Pro
     }
 
     entries.push({
-      id: ids[i]!,
+      id: ids[i]!,           // non-null: same length as owners in fetch step
       owner: owners[i]!,
       avgX100: Number.isFinite(avgVal) ? avgVal : 0,
       count,
@@ -121,7 +127,7 @@ async function readRatingsForOwners(ids: number[], owners: `0x${string}`[]): Pro
  * Detailed Top list (unsliced) for UI/leaderboards.
  * - Filters out entries with avg = 0
  * - Applies `minCount` threshold
- * - Sorts by avg desc, then count desc, then id asc (stable, UX-friendly)
+ * - Sorts by avg desc, then count desc, then id asc
  */
 export async function computeTopDetailed(
   maxScan = 50,
