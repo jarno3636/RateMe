@@ -8,7 +8,8 @@ import {
   usePublicClient,
 } from "wagmi"
 import { base } from "viem/chains"
-import { Address, erc20Abi, maxUint256 } from "viem"
+import type { Address } from "viem"           // ✅ type-only import
+import { erc20Abi, maxUint256 } from "viem"
 import { REGISTRY as REGISTRY_ADDR, USDC as USDC_ADDR } from "@/lib/addresses"
 
 /* ───────────────────────────── Helpers ───────────────────────────── */
@@ -45,7 +46,7 @@ export function useUsdcAllowance(
 
   return useReadContract({
     abi: erc20Abi,
-    address: enabled ? (USDC_ADDR as Address) : undefined,
+    address: enabled ? (USDC_ADDR as `0x${string}`) : undefined,
     functionName: "allowance",
     args: enabled ? [owner!, spender!] : undefined,
     query: { enabled },
@@ -73,17 +74,19 @@ export function useApproveUsdc(spenderOverride?: `0x${string}`) {
     assertAddr("USDC", USDC_ADDR)
     assertAddr("spender (REGISTRY)", spender)
     if (!address) throw new Error("Connect your wallet.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     const amt = amount ?? maxUint256
     const hash = await writeContractAsync({
       abi: erc20Abi,
-      address: USDC_ADDR as Address,
+      address: USDC_ADDR as `0x${string}`,
       functionName: "approve",
-      args: [spender as Address, amt],
+      args: [spender as `0x${string}`, amt],
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -116,6 +119,7 @@ export function useEnsureUsdcAllowance(
   spenderOverride?: `0x${string}`,
 ) {
   const { address } = useAccount()
+  const pub = usePublicClient() // ✅ capture hook result here (not inside function)
   const owner = (ownerOverride ?? address) as `0x${string}` | undefined
   const spender = (spenderOverride ?? (REGISTRY_ADDR as `0x${string}` | undefined)) as
     | `0x${string}`
@@ -132,16 +136,17 @@ export function useEnsureUsdcAllowance(
     const required = toNonNegBig(minAmount)
     if (required === 0n) return { ok: true as const, missing: 0n as const }
 
-    // If query hasn't resolved yet, try a one-off read to be safe.
+    // If query hasn't resolved yet, do a one-off read as a fallback.
     let current = allowanceQuery.data as bigint | undefined
     if (current === undefined) {
       try {
-        const client = usePublicClient()
-        current = (await client.readContract({
+        const c = pub
+        if (!c) throw new Error("Public client not initialized")
+        current = (await c.readContract({
           abi: erc20Abi,
-          address: USDC_ADDR as Address,
+          address: USDC_ADDR as `0x${string}`,
           functionName: "allowance",
-          args: [owner as Address, spender as Address],
+          args: [owner as `0x${string}`, spender as `0x${string}`],
         })) as bigint
       } catch {
         current = 0n
