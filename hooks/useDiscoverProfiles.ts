@@ -79,7 +79,7 @@ export function useDiscoverProfiles(cursorIn: bigint, sizeIn: bigint) {
   const [state, setState] = useState<State>(() => {
     const cached = cache.get(key)
     return {
-      data: cached,
+      ...(cached !== undefined ? { data: cached } : {}),
       isLoading: !cached,
       isFetching: false,
       error: null,
@@ -124,7 +124,7 @@ export function useDiscoverProfiles(cursorIn: bigint, sizeIn: bigint) {
   useEffect(() => {
     const cached = cache.get(key)
     setState({
-      data: cached,
+      ...(cached !== undefined ? { data: cached } : {}),
       isLoading: !cached,
       isFetching: false,
       error: null,
