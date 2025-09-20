@@ -114,13 +114,15 @@ export function useRate() {
   const rate = async (ratee: `0x${string}`, score: number, comment: string) => {
     if (!RATINGS_ADDR) throw new Error("Ratings contract address is not configured.")
     if (!address) throw new Error("Connect your wallet to rate.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     const argScore = BigInt(clampScore(score))
     const argComment = String(comment ?? "").trim()
 
     // Preflight simulate to surface allowance or require conditions
     try {
-      await client.simulateContract({
+      await c.simulateContract({
         abi: RatingsAbi as any,
         address: RATINGS_ADDR,
         functionName: "rate",
@@ -141,7 +143,7 @@ export function useRate() {
       chain: base,
     })
 
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -157,12 +159,14 @@ export function useUpdateRating() {
   const update = async (ratee: `0x${string}`, newScore: number, newComment: string) => {
     if (!RATINGS_ADDR) throw new Error("Ratings contract address is not configured.")
     if (!address) throw new Error("Connect your wallet to update a rating.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     const argScore = BigInt(clampScore(newScore))
     const argComment = String(newComment ?? "").trim()
 
     try {
-      await client.simulateContract({
+      await c.simulateContract({
         abi: RatingsAbi as any,
         address: RATINGS_ADDR,
         functionName: "updateRating",
@@ -183,7 +187,7 @@ export function useUpdateRating() {
       chain: base,
     })
 
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
