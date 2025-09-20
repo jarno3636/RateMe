@@ -192,12 +192,18 @@ export default function StatsSection({ creator, profileId, watch = false, handle
 
         {/* 3-up stats */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <StatBox label="Posts" value={postsLoading ? undefined : String(posts.length)} />
-          <StatBox label="Plans" value={plansLoading ? undefined : String(plans.length)} />
+          <StatBox
+            label="Posts"
+            {...(!postsLoading ? { value: String(posts.length) } : {})}
+          />
+          <StatBox
+            label="Plans"
+            {...(!plansLoading ? { value: String(plans.length) } : {})}
+          />
           <StatBox
             label="Avg rating"
-            value={avgLoading ? undefined : avg}
             tooltip="Average community rating (out of 5)"
+            {...(!avgLoading ? { value: avg } : {})}
           />
         </div>
 
