@@ -9,18 +9,24 @@
 export type GetTop3Options = {
   /** Defaults to "/api/top3" */
   path?: string
-  /** Pass through an AbortSignal to cancel */
-  signal?: AbortSignal
+  /** Pass through an AbortSignal to cancel (allow null for strict RequestInit typing) */
+  signal?: AbortSignal | null
 }
 
 export async function getTop3Ids(opts: GetTop3Options = {}): Promise<number[]> {
   const path = opts.path ?? "/api/top3"
   try {
-    const res = await fetch(path, { cache: "no-store", signal: opts.signal })
+    const res = await fetch(path, {
+      cache: "no-store",
+      // With exactOptionalPropertyTypes, RequestInit.signal is AbortSignal | null
+      signal: opts.signal ?? null,
+    })
     if (!res.ok) return []
     const json = await res.json().catch(() => ({}))
-    const raw = Array.isArray(json?.ids) ? json.ids : []
-    return raw.map((x: unknown) => Number(x)).filter((n) => Number.isFinite(n) && n > 0)
+    const raw = Array.isArray((json as any)?.ids) ? (json as any).ids : []
+    return raw
+      .map((x: unknown) => Number(x))
+      .filter((n) => Number.isFinite(n) && n > 0)
   } catch {
     return []
   }
