@@ -42,7 +42,7 @@ function isBuy(p: Props): p is BuyProps {
   return p.mode === "buyPost"
 }
 
-// Preview type guards (soft; rely on property existence)
+// Preview type guards
 function hasTotal(p: unknown): p is { total: bigint } {
   return !!p && typeof p === "object" && "total" in (p as any)
 }
@@ -56,27 +56,27 @@ function hasToken(p: unknown): p is { token: `0x${string}` } {
   return !!p && typeof p === "object" && "token" in (p as any)
 }
 
-// Lightweight tuple typings to index safely
+// Lightweight tuple typings
 type MaybePlanTuple =
   | readonly [
-      unknown,                     // [0] (unused)
-      `0x${string}` | undefined,   // [1] token
-      bigint | undefined,          // [2] price
-      number | bigint | undefined, // [3] days
-      boolean | undefined,         // [4] active
-      string | undefined,          // [5] name
-      string | undefined           // [6] metadataURI
+      unknown,
+      `0x${string}` | undefined,
+      bigint | undefined,
+      number | bigint | undefined,
+      boolean | undefined,
+      string | undefined,
+      string | undefined
     ]
   | undefined
 
 type MaybePostTuple =
   | readonly [
-      unknown,                   // [0] (unused)
-      `0x${string}` | undefined, // [1] token
-      bigint | undefined,        // [2] price
-      boolean | undefined,       // [3] active
-      boolean | undefined,       // [4] subGate
-      string | undefined         // [5] uri
+      unknown,
+      `0x${string}` | undefined,
+      bigint | undefined,
+      boolean | undefined,
+      boolean | undefined,
+      string | undefined
     ]
   | undefined
 
@@ -186,7 +186,7 @@ export default function PayButton(props: Props) {
     return (
       <PricePill
         value={priceInfo.amount}
-        decimals={undefined} // defaults inside PricePill: 18 for native, 6 for ERC20
+        /* removed decimals to satisfy exactOptionalPropertyTypes */
         symbol={props.symbolOverride}
         isNative={priceInfo.isNative}
         emphasis
