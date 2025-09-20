@@ -81,6 +81,18 @@ function getSiteOrigin() {
   return env || "https://onlystars.app" // fallback; change to your prod domain if desired
 }
 
+// Optional: light tuple type for profile so [3]/[5] index is TS-safe
+type MaybeProfileTuple =
+  | readonly [
+      unknown,             // [0]
+      unknown,             // [1]
+      unknown,             // [2]
+      string | undefined,  // [3] avatar URI (by your contract layout)
+      unknown,             // [4]
+      bigint | undefined   // [5] fid
+    ]
+  | undefined
+
 export default function Nav() {
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement | null>(null)
@@ -91,28 +103,30 @@ export default function Nav() {
     isConnected && address ? (address as `0x${string}`) : undefined
   )
 
-  // First owned profile id (if any)
-  const myId = useMemo(() => {
-    const ids = (ownedIds as bigint[] | undefined) ?? []
-    return ids.length ? ids[0] : 0n
+  // First owned profile id (if any) — force the memo's type to bigint
+  const myId = useMemo<bigint>(() => {
+    const list = ownedIds as bigint[] | undefined
+    return (list && list.length > 0 ? list[0] : 0n) // always returns a bigint
   }, [ownedIds])
 
   // Read profile only when id exists (avoids unnecessary hook calls)
-  const { data: prof } = useGetProfile(myId > 0n ? myId : undefined)
+  const { data: profRaw } = useGetProfile(myId > 0n ? myId : undefined)
+  const prof = profRaw as unknown as MaybeProfileTuple
+
   const myAvatar = useMemo(() => {
-    const uri = (prof?.[3] as string) || ""
+    const uri = (prof?.[3] ?? "") as string
     return uri || AVATAR_FALLBACK
   }, [prof])
 
   // Also determine if we have a Farcaster fid
   const myFid = useMemo(() => {
-    const fid = prof?.[5] as bigint | undefined
+    const fid = prof?.[5]
     return typeof fid === "bigint" ? fid : 0n
   }, [prof])
 
   // Build the target for "My profile"
   const myProfileHref = useMemo(() => {
-    if (myId && myId > 0n) return `/creator/${myId.toString()}`
+    if (myId > 0n) return `/creator/${myId.toString()}`
     return "/creator" // onboarding / become a creator
   }, [myId])
 
