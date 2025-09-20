@@ -78,12 +78,12 @@ export async function getProfileSnaps(ids: number[]): Promise<Snap[]> {
         bigint[]           // createdAts (unused here)
       ]
 
-      const outIds     = res?.[0] ?? []
-      const owners     = res?.[1] ?? []
-      const handles    = res?.[2] ?? []
-      const names      = res?.[3] ?? []
-      const avatars    = res?.[4] ?? []
-      const fidsArr    = res?.[6] ?? []
+      const outIds  = res?.[0] ?? []
+      const owners  = res?.[1] ?? []
+      const handles = res?.[2] ?? []
+      const names   = res?.[3] ?? []
+      const avatars = res?.[4] ?? []
+      const fidsArr = res?.[6] ?? []
 
       const len = Math.min(
         outIds.length,
@@ -96,15 +96,14 @@ export async function getProfileSnaps(ids: number[]): Promise<Snap[]> {
 
       const fresh: Snap[] = []
       for (let i = 0; i < len; i++) {
-        const bid = outIds[i]
-        const id = Number(bid)
-        const owner = owners[i] || "0x0000000000000000000000000000000000000000"
+        const bid    = outIds[i]
+        const id     = Number(bid)
+        const owner  = owners[i] || "0x0000000000000000000000000000000000000000"
         const handle = String(handles[i] ?? "")
-        const name = String(names[i] ?? (Number.isFinite(id) ? `Profile #${id}` : "Profile"))
+        const name   = String(names[i] ?? (Number.isFinite(id) ? `Profile #${id}` : "Profile"))
         const avatar = String(avatars[i] || DEFAULT_AVATAR)
-        const fidBn = fidsArr[i]
-        const fid = typeof fidBn === "bigint" ? Number(fidBn) : 0
-        const fcUrl = fid > 0 ? `https://warpcast.com/~/profiles/${fid}` : undefined
+        const fidBn  = fidsArr[i]
+        const fid    = typeof fidBn === "bigint" ? Number(fidBn) : 0
 
         fresh.push({
           id,
@@ -112,7 +111,7 @@ export async function getProfileSnaps(ids: number[]): Promise<Snap[]> {
           handle,
           name,
           avatar: avatar || DEFAULT_AVATAR,
-          ...(fid > 0 ? { fid, fcUrl } : {}),
+          ...(fid > 0 ? { fid, fcUrl: `https://warpcast.com/~/profiles/${fid}` } : {}),
         })
       }
 
@@ -139,8 +138,6 @@ export async function getProfileSnaps(ids: number[]): Promise<Snap[]> {
  */
 export async function refreshProfileSnaps(ids: number[]): Promise<Snap[]> {
   if (!ids?.length) return []
-  // Purposely skip KV and go straight to chain, then write KV.
-  // Reuse the chain section from above for consistency.
   if (!PROFILE_REGISTRY) {
     console.warn("[profileCache] REGISTRY address missing (refresh)")
     return []
@@ -162,12 +159,12 @@ export async function refreshProfileSnaps(ids: number[]): Promise<Snap[]> {
       bigint[]           // createdAts
     ]
 
-    const outIds     = res?.[0] ?? []
-    const owners     = res?.[1] ?? []
-    const handles    = res?.[2] ?? []
-    const names      = res?.[3] ?? []
-    const avatars    = res?.[4] ?? []
-    const fidsArr    = res?.[6] ?? []
+    const outIds  = res?.[0] ?? []
+    const owners  = res?.[1] ?? []
+    const handles = res?.[2] ?? []
+    const names   = res?.[3] ?? []
+    const avatars = res?.[4] ?? []
+    const fidsArr = res?.[6] ?? []
 
     const len = Math.min(
       outIds.length,
@@ -180,15 +177,14 @@ export async function refreshProfileSnaps(ids: number[]): Promise<Snap[]> {
 
     const fresh: Snap[] = []
     for (let i = 0; i < len; i++) {
-      const bid = outIds[i]
-      const id = Number(bid)
-      const owner = owners[i] || "0x0000000000000000000000000000000000000000"
+      const bid    = outIds[i]
+      const id     = Number(bid)
+      const owner  = owners[i] || "0x0000000000000000000000000000000000000000"
       const handle = String(handles[i] ?? "")
-      const name = String(names[i] ?? (Number.isFinite(id) ? `Profile #${id}` : "Profile"))
+      const name   = String(names[i] ?? (Number.isFinite(id) ? `Profile #${id}` : "Profile"))
       const avatar = String(avatars[i] || DEFAULT_AVATAR)
-      const fidBn = fidsArr[i]
-      const fid = typeof fidBn === "bigint" ? Number(fidBn) : 0
-      const fcUrl = fid > 0 ? `https://warpcast.com/~/profiles/${fid}` : undefined
+      const fidBn  = fidsArr[i]
+      const fid    = typeof fidBn === "bigint" ? Number(fidBn) : 0
 
       fresh.push({
         id,
@@ -196,7 +192,7 @@ export async function refreshProfileSnaps(ids: number[]): Promise<Snap[]> {
         handle,
         name,
         avatar: avatar || DEFAULT_AVATAR,
-        ...(fid > 0 ? { fid, fcUrl } : {}),
+        ...(fid > 0 ? { fid, fcUrl: `https://warpcast.com/~/profiles/${fid}` } : {}),
       })
     }
 
