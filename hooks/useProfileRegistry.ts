@@ -283,6 +283,9 @@ export function useCreateProfile() {
   ) => {
     if (!REGISTRY_CS) throw new Error("Missing registry address.")
     if (!address) throw new Error("Connect your wallet to create a profile.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
     const hash = await writeContractAsync({
       abi: ProfileRegistry as any,
       address: REGISTRY_CS,
@@ -291,7 +294,7 @@ export function useCreateProfile() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -312,6 +315,9 @@ export function useUpdateProfile() {
   ) => {
     if (!REGISTRY_CS) throw new Error("Missing registry address.")
     if (!address) throw new Error("Connect your wallet to update a profile.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
     const hash = await writeContractAsync({
       abi: ProfileRegistry as any,
       address: REGISTRY_CS,
@@ -320,7 +326,7 @@ export function useUpdateProfile() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -335,6 +341,9 @@ export function useChangeHandle() {
   const change = async (id: bigint, newHandle: string) => {
     if (!REGISTRY_CS) throw new Error("Missing registry address.")
     if (!address) throw new Error("Connect your wallet to change handle.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
     const hash = await writeContractAsync({
       abi: ProfileRegistry as any,
       address: REGISTRY_CS,
@@ -343,7 +352,7 @@ export function useChangeHandle() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -358,6 +367,9 @@ export function useTransferProfile() {
   const transfer = async (id: bigint, to: `0x${string}`) => {
     if (!REGISTRY_CS) throw new Error("Missing registry address.")
     if (!address) throw new Error("Connect your wallet to transfer a profile.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
     const hash = await writeContractAsync({
       abi: ProfileRegistry as any,
       address: REGISTRY_CS,
@@ -366,7 +378,7 @@ export function useTransferProfile() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
