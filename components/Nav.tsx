@@ -11,6 +11,11 @@ import Logo from "./Logo"
 
 const AVATAR_FALLBACK = "/avatar.png"
 
+/** Narrow an array to a non-empty tuple so index [0] is safe even with noUncheckedIndexedAccess. */
+function hasAtLeastOne<T>(arr: readonly T[] | undefined | null): arr is readonly [T, ...T[]] {
+  return Array.isArray(arr) && arr.length > 0
+}
+
 function NavLink({
   href,
   children,
@@ -19,7 +24,7 @@ function NavLink({
 }: {
   href: string
   children: React.ReactNode
-  onClick?: React.MouseEventHandler<HTMLAnchorElement> // proper handler type
+  onClick?: React.MouseEventHandler<HTMLAnchorElement>
   /** If true, mark active when pathname startsWith href (good for section roots) */
   activeWhenStartsWith?: boolean
 }) {
@@ -28,7 +33,6 @@ function NavLink({
     ? pathname === href || pathname.startsWith(`${href}/`)
     : pathname === href
 
-  // Only pass onClick when it's defined (avoids passing `undefined` under exactOptionalPropertyTypes)
   const clickProp = onClick ? { onClick } : {}
 
   return (
@@ -78,16 +82,16 @@ function MiniAvatar({
 function getSiteOrigin() {
   if (typeof window !== "undefined" && window.location?.origin) return window.location.origin
   const env = (process.env.NEXT_PUBLIC_SITE_URL || "").replace(/\/$/, "")
-  return env || "https://onlystars.app" // fallback; change to your prod domain if desired
+  return env || "https://onlystars.app"
 }
 
-// Optional: light tuple type for profile so [3]/[5] index is TS-safe
+// Optional: tuple type so index access is explicit/safe.
 type MaybeProfileTuple =
   | readonly [
       unknown,             // [0]
       unknown,             // [1]
       unknown,             // [2]
-      string | undefined,  // [3] avatar URI (by your contract layout)
+      string | undefined,  // [3] avatar URI
       unknown,             // [4]
       bigint | undefined   // [5] fid
     ]
@@ -103,10 +107,10 @@ export default function Nav() {
     isConnected && address ? (address as `0x${string}`) : undefined
   )
 
-  // First owned profile id (if any) — force the memo's type to bigint
+  // First owned profile id (if any) — guaranteed bigint (no undefined)
   const myId = useMemo<bigint>(() => {
-    const list = ownedIds as bigint[] | undefined
-    return (list && list.length > 0 ? list[0] : 0n) // always returns a bigint
+    const list = ownedIds as readonly bigint[] | undefined
+    return hasAtLeastOne(list) ? list[0] : 0n
   }, [ownedIds])
 
   // Read profile only when id exists (avoids unnecessary hook calls)
@@ -126,8 +130,7 @@ export default function Nav() {
 
   // Build the target for "My profile"
   const myProfileHref = useMemo(() => {
-    if (myId > 0n) return `/creator/${myId.toString()}`
-    return "/creator" // onboarding / become a creator
+    return myId > 0n ? `/creator/${myId.toString()}` : "/creator"
   }, [myId])
 
   // Close mobile menu on route change
