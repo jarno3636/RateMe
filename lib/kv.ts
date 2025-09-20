@@ -4,7 +4,8 @@ import { Redis } from "@upstash/redis"
 
 /* ────────────────────────────── Env & Namespacing ───────────────────────────── */
 
-const URL =
+// Rename to avoid shadowing the global URL constructor
+const KV_URL =
   process.env.KV_REST_API_URL ||
   process.env.KV_REST_API_KV_REST_API_URL ||
   process.env.UPSTASH_REDIS_REST_URL ||
@@ -38,7 +39,7 @@ export function withNs(key: string) {
 
 /* ─────────────────────────────── Client Selection ───────────────────────────── */
 
-export const KV_ENABLED = Boolean(URL && TOKEN)
+export const KV_ENABLED = Boolean(KV_URL && TOKEN)
 
 /** Minimal interface we rely on */
 type KVLike = {
@@ -47,7 +48,7 @@ type KVLike = {
     key: string,
     val: string,
     opts?: { ex?: number }
-  ): Promise<any> // Upstash returns "OK"; keep it loose
+  ): Promise<any>
   del(...keys: string[]): Promise<number>
   hset?(key: string, map: Record<string, string>): Promise<any>
   hgetall?<T = Record<string, string>>(key: string): Promise<T | null>
@@ -74,7 +75,6 @@ const shim: KVLike = {
   },
   async hset(key: string, map: Record<string, string>) {
     const ns = withNs(key)
-    // Store as a JSON string of a flat object to keep the shim simple
     const prev = SHIM.get(ns)
     const next = { ...(prev ? JSON.parse(prev) : {}), ...map }
     SHIM.set(ns, JSON.stringify(next))
@@ -86,7 +86,7 @@ const shim: KVLike = {
   },
 }
 
-const real: KVLike = new Redis({ url: URL, token: TOKEN }) as unknown as KVLike
+const real: KVLike = new Redis({ url: KV_URL, token: TOKEN }) as unknown as KVLike
 
 export const kv: KVLike = KV_ENABLED ? real : shim
 
@@ -140,7 +140,6 @@ export async function kvDel(...keys: string[]) {
   }
 }
 
-/* Hash helpers for compact structured storage (supported by real KV, shim emulates) */
 export async function kvHSetJSON(key: string, map: Record<string, unknown>) {
   try {
     const enc: Record<string, string> = {}
@@ -173,7 +172,6 @@ export async function kvHGetJSON<T extends Record<string, unknown> = Record<stri
 
 /* ─────────────────────────── Retry & Memo Helpers ─────────────────────────── */
 
-/** Tiny linear backoff (2 tries total by default) */
 async function withRetry<T>(fn: () => Promise<T>, tries = 2, delayMs = 120) {
   let last: any
   for (let i = 0; i < tries; i++) {
@@ -187,26 +185,17 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 2, delayMs = 120) {
   throw last
 }
 
-/** Coalesce concurrent getOrCompute(key) calls in the same runtime */
 const inflight = new Map<string, Promise<any>>()
 
-/**
- * Read-through memoizer:
- * - Try KV
- * - If miss, compute(), store with optional TTL, return
- * - Concurrent calls for the same key are coalesced
- */
 export async function kvGetOrCompute<T>(
   key: string,
   compute: () => Promise<T>,
   ttlSec?: number
 ): Promise<T> {
   const nsKey = withNs(key)
-  // 1) Try KV
   const cached = await kvGetJSON<T>(nsKey)
   if (cached !== null) return cached
 
-  // 2) Coalesce concurrent producers
   if (inflight.has(nsKey)) return inflight.get(nsKey) as Promise<T>
 
   const p = (async () => {
