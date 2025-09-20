@@ -185,7 +185,7 @@ export default function PayButton(props: Props) {
     return (
       <PricePill
         value={priceInfo.amount}
-        symbol={symbol}              {/* ensure required string */}
+        symbol={symbol}
         isNative={priceInfo.isNative}
         emphasis
       />
