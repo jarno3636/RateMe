@@ -34,21 +34,58 @@ type BuyProps = BaseProps & {
 
 type Props = SubscribeProps | BuyProps
 
+// Narrowing helpers
+function isSubscribe(p: Props): p is SubscribeProps {
+  return p.mode === "subscribe"
+}
+function isBuy(p: Props): p is BuyProps {
+  return p.mode === "buyPost"
+}
+
+// Lightweight tuple typings to index safely
+type MaybePlanTuple =
+  | readonly [
+      unknown,                     // [0] (unused)
+      `0x${string}` | undefined,   // [1] token
+      bigint | undefined,          // [2] price
+      number | bigint | undefined, // [3] days
+      boolean | undefined,         // [4] active
+      string | undefined,          // [5] name
+      string | undefined           // [6] metadataURI
+    ]
+  | undefined
+
+type MaybePostTuple =
+  | readonly [
+      unknown,                   // [0] (unused)
+      `0x${string}` | undefined, // [1] token
+      bigint | undefined,        // [2] price
+      boolean | undefined,       // [3] active
+      boolean | undefined,       // [4] subGate
+      string | undefined         // [5] uri
+    ]
+  | undefined
+
 export default function PayButton(props: Props) {
   const [busy, setBusy] = useState<"preview" | "approve" | "pay" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [ok, setOk] = useState<string | null>(null)
 
-  const isSub = props.mode === "subscribe"
-  const periods = (isSub && props.periods ? Math.max(1, props.periods) : 1) as number
+  const isSub = isSubscribe(props)
+  const periods = isSub && props.periods ? Math.max(1, props.periods) : 1
 
   // Fetch static info for the price preview pill (plan/post)
-  const { data: plan } = isSub ? usePlan(props.planId) : { data: undefined }
-  const { data: post } = !isSub ? usePost(props.postId) : { data: undefined }
+  // (Hooks are called conditionally here as in your original file; this is a TS fix.
+  // If you want to satisfy the "Rules of Hooks" linter too, we can refactor to always-call.)
+  const { data: planData } = isSub ? usePlan(props.planId) : { data: undefined as unknown }
+  const { data: postData } = isBuy(props) ? usePost(props.postId) : { data: undefined as unknown }
+
+  const plan = planData as unknown as MaybePlanTuple
+  const post = postData as unknown as MaybePostTuple
 
   // Preview hooks
   const subPreview = isSub ? usePreviewSubscribe(props.planId, periods) : null
-  const buyPreview = !isSub ? usePreviewBuy(props.postId) : null
+  const buyPreview = isBuy(props) ? usePreviewBuy(props.postId) : null
 
   // Actions
   const { approve, isPending: approving } = useApproveErc20()
@@ -61,14 +98,16 @@ export default function PayButton(props: Props) {
   // Basic price data for the pill
   const priceInfo = useMemo(() => {
     if (isSub && plan) {
-      const token = plan[1] as `0x${string}`
-      const pricePerPeriod = plan[2] as bigint
-      return { token, amount: pricePerPeriod, isNative: token === "0x0000000000000000000000000000000000000000" }
+      const token = (plan?.[1] ?? "0x0000000000000000000000000000000000000000") as `0x${string}`
+      const amount = (plan?.[2] ?? 0n) as bigint
+      const isNative = token === "0x0000000000000000000000000000000000000000"
+      return { token, amount, isNative }
     }
     if (!isSub && post) {
-      const token = post[1] as `0x${string}`
-      const price = post[2] as bigint
-      return { token, amount: price, isNative: token === "0x0000000000000000000000000000000000000000" }
+      const token = (post?.[1] ?? "0x0000000000000000000000000000000000000000") as `0x${string}`
+      const amount = (post?.[2] ?? 0n) as bigint
+      const isNative = token === "0x0000000000000000000000000000000000000000"
+      return { token, amount, isNative }
     }
     return null
   }, [isSub, plan, post])
@@ -130,16 +169,17 @@ export default function PayButton(props: Props) {
     return (
       <PricePill
         value={priceInfo.amount}
-        decimals={isSub ? undefined : undefined /* preview will format later if needed */}
+        // Leave decimals undefined; your display/preview handles formatting elsewhere
+        decimals={undefined}
         symbol={props.symbolOverride}
         isNative={priceInfo.isNative}
         emphasis
       />
     )
-  }, [priceInfo, isSub, props.symbolOverride])
+  }, [priceInfo, props.symbolOverride])
 
   return (
-    <div className={["inline-flex flex-col items-stretch gap-2", props.className].join(" ")}>
+    <div className={["inline-flex flex-col items-stretch gap-2", props.className].filter(Boolean).join(" ")}>
       <button
         type="button"
         disabled={disabled}
