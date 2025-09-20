@@ -2,15 +2,25 @@
 "use client"
 
 import * as React from "react"
-import { Sparkles, BadgeCheck, Crown, DollarSign, Star, Power, Pause, Plus } from "lucide-react"
+import {
+  Sparkles,
+  BadgeCheck,
+  Crown,
+  DollarSign,
+  Star,
+  Power,
+  Pause,
+  Plus,
+  type LucideIcon,        // <-- add this
+} from "lucide-react"
 
 type Kind =
-  | "pro"          // top creators / verified / premium
-  | "subscriber"   // user has an active subscription / sub-gated content
-  | "free"         // free content
-  | "paid"         // one-off paid post
-  | "inactive"     // plan/post not active
-  | "new"          // recently created
+  | "pro"
+  | "subscriber"
+  | "free"
+  | "paid"
+  | "inactive"
+  | "new"
 
 type Size = "xs" | "sm" | "md"
 
@@ -38,7 +48,8 @@ const SIZE_STYLES: Record<Size, string> = {
   md: "text-[11px] px-2.5 py-0.5 gap-1.5",
 }
 
-const ICONS: Record<Kind, React.ComponentType<{ className?: string }>> = {
+// ✅ Use LucideIcon here
+const ICONS: Record<Kind, LucideIcon> = {
   pro: Crown,
   subscriber: BadgeCheck,
   free: Star,
@@ -53,44 +64,18 @@ function cx(...classes: (string | false | null | undefined)[]) {
 
 export type PremiumBadgeProps = {
   kind: Kind
-  /**
-   * Override the default label (e.g., "VIP")
-   */
   labelOverride?: string
-  /**
-   * Size variant
-   */
   size?: Size
-  /**
-   * Add subtle animated shimmer for attention (nice for "new" or "pro")
-   */
   pulse?: boolean
-  /**
-   * If true, hide the icon
-   */
   hideIcon?: boolean
-  /**
-   * Optional custom icon component
-   */
-  iconOverride?: React.ComponentType<{ className?: string }>
-  /**
-   * Title for native tooltip / a11y
-   */
+  // ✅ And here
+  iconOverride?: LucideIcon
   title?: string
-  /**
-   * Extra class names
-   */
   className?: string
-  /**
-   * Render as interactive element. If `as="a"`, provide href.
-   */
   as?: "span" | "button" | "a"
   href?: string
   onClick?: React.MouseEventHandler<HTMLElement>
   disabled?: boolean
-  /**
-   * Data attributes for analytics/testing
-   */
   "data-attr"?: string
 } & React.HTMLAttributes<HTMLElement>
 
@@ -113,7 +98,6 @@ const PremiumBadge = React.forwardRef<HTMLElement, PremiumBadgeProps>(function P
   },
   ref
 ) {
-  // Choose icon
   const Icon = iconOverride ?? ICONS[kind] ?? Plus
   const label = labelOverride ?? DEFAULT_LABELS[kind]
 
@@ -121,14 +105,12 @@ const PremiumBadge = React.forwardRef<HTMLElement, PremiumBadgeProps>(function P
     "inline-flex select-none items-center rounded-full uppercase tracking-wide ring-1",
     KIND_STYLES[kind],
     SIZE_STYLES[size],
-    // Elevation + hover affordance for interactive versions
     as !== "span" && !disabled && "transition-shadow hover:shadow-[0_0_20px_rgba(255,255,255,.12)] focus:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
     disabled && "opacity-60 cursor-not-allowed",
     pulse && "relative overflow-hidden",
     className
   )
 
-  // Optional shimmer overlay (non-distracting)
   const shimmer = pulse ? (
     <span
       aria-hidden
