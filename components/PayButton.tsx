@@ -42,6 +42,20 @@ function isBuy(p: Props): p is BuyProps {
   return p.mode === "buyPost"
 }
 
+// Preview type guards (soft; rely on property existence)
+function hasTotal(p: unknown): p is { total: bigint } {
+  return !!p && typeof p === "object" && "total" in (p as any)
+}
+function hasPrice(p: unknown): p is { price: bigint } {
+  return !!p && typeof p === "object" && "price" in (p as any)
+}
+function hasOkAllowance(p: unknown): p is { okAllowance?: boolean } {
+  return !!p && typeof p === "object" && "okAllowance" in (p as any)
+}
+function hasToken(p: unknown): p is { token: `0x${string}` } {
+  return !!p && typeof p === "object" && "token" in (p as any)
+}
+
 // Lightweight tuple typings to index safely
 type MaybePlanTuple =
   | readonly [
@@ -75,8 +89,6 @@ export default function PayButton(props: Props) {
   const periods = isSub && props.periods ? Math.max(1, props.periods) : 1
 
   // Fetch static info for the price preview pill (plan/post)
-  // (Hooks are called conditionally here as in your original file; this is a TS fix.
-  // If you want to satisfy the "Rules of Hooks" linter too, we can refactor to always-call.)
   const { data: planData } = isSub ? usePlan(props.planId) : { data: undefined as unknown }
   const { data: postData } = isBuy(props) ? usePost(props.postId) : { data: undefined as unknown }
 
@@ -123,8 +135,8 @@ export default function PayButton(props: Props) {
 
       if (!preview) throw new Error("Unable to calculate payment preview.")
 
-      if (preview.isNative) {
-        // Direct pay
+      // Native path: no approvals
+      if ((preview as any).isNative) {
         setBusy("pay")
         const hash = isSub
           ? await subscribe((props as SubscribeProps).planId, periods)
@@ -135,11 +147,16 @@ export default function PayButton(props: Props) {
         return
       }
 
-      // ERC20 path — check allowance
-      if (!preview.okAllowance) {
+      // ERC20 path — check allowance (treat missing okAllowance as false)
+      const needsApproval = hasOkAllowance(preview) ? !preview.okAllowance : true
+      if (needsApproval) {
         setBusy("approve")
-        const amount = isSub ? preview.total : preview.price
-        await approve(preview.token as `0x${string}`, amount)
+        const amount =
+          isSub
+            ? (hasTotal(preview) ? preview.total : hasPrice(preview) ? preview.price : 0n)
+            : (hasPrice(preview) ? preview.price : 0n)
+        const token = hasToken(preview) ? preview.token : ("0x0000000000000000000000000000000000000000" as `0x${string}`)
+        await approve(token, amount)
         setBusy(null)
       }
 
@@ -169,8 +186,7 @@ export default function PayButton(props: Props) {
     return (
       <PricePill
         value={priceInfo.amount}
-        // Leave decimals undefined; your display/preview handles formatting elsewhere
-        decimals={undefined}
+        decimals={undefined} // defaults inside PricePill: 18 for native, 6 for ERC20
         symbol={props.symbolOverride}
         isNative={priceInfo.isNative}
         emphasis
