@@ -13,8 +13,8 @@ import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 import * as ADDR from "@/lib/addresses"
 import { assertAddresses } from "@/lib/addresses"
-import type { Address } from "viem"           // ✅ type-only
-import { isAddressEqual } from "viem"         // ✅ value import
+import type { Address } from "viem"           // type-only
+import { isAddressEqual } from "viem"         // value import
 
 /* ─────────────────────────── Types & utils ─────────────────────────── */
 
@@ -136,9 +136,11 @@ export function useSubscribe() {
   const subscribe = async (planId: bigint, periods: number) => {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     // Read plan to determine token & price
-    const plan = await client.readContract({
+    const plan = await c.readContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "plans",
@@ -158,7 +160,7 @@ export function useSubscribe() {
     const total = pricePerPeriod * BigInt(periods)
 
     // Preflight simulate (with or without value)
-    await client.simulateContract({
+    await c.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "subscribe",
@@ -178,7 +180,7 @@ export function useSubscribe() {
       ...(isZeroAddr(token) ? { value: total } : {}),
     })
 
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -199,8 +201,10 @@ export function useBuyPost() {
   const buy = async (postId: bigint) => {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
-    const post = await client.readContract({
+    const post = await c.readContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "posts",
@@ -218,7 +222,7 @@ export function useBuyPost() {
     const price = post?.[2] as bigint
 
     // Preflight simulate (value only for native)
-    await client.simulateContract({
+    await c.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "buyPost",
@@ -237,7 +241,7 @@ export function useBuyPost() {
       chain: base,
       ...(isZeroAddr(token) ? { value: price } : {}),
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -261,8 +265,10 @@ export function useCreatePlan() {
   ) => {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
-    await client.simulateContract({
+    await c.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "createPlan",
@@ -279,7 +285,7 @@ export function useCreatePlan() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -302,8 +308,10 @@ export function useCreatePost() {
   ) => {
     assertAddresses("HUB")
     if (!address) throw new Error("Connect wallet")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
-    await client.simulateContract({
+    await c.simulateContract({
       abi: CreatorHub as any,
       address: ADDR.HUB as `0x${string}`,
       functionName: "createPost",
@@ -320,7 +328,7 @@ export function useCreatePost() {
       account: address,
       chain: base,
     })
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
