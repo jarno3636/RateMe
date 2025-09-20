@@ -53,9 +53,10 @@ export async function getProfileSnaps(ids: number[]): Promise<Snap[]> {
   const snaps: Snap[] = []
   const misses: number[] = []
 
+  // Option 1: non-null assertion since cached derives from ids.map(...)
   cached.forEach((snap, i) => {
     if (snap) snaps.push(snap)
-    else misses.push(ids[i])
+    else misses.push(ids[i]!)
   })
 
   // 2) Chain read for cache misses (batched call to getProfilesFlat)
