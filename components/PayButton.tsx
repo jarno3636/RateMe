@@ -34,7 +34,6 @@ type BuyProps = BaseProps & {
 
 type Props = SubscribeProps | BuyProps
 
-// Narrowing helpers
 function isSubscribe(p: Props): p is SubscribeProps {
   return p.mode === "subscribe"
 }
@@ -56,27 +55,27 @@ function hasToken(p: unknown): p is { token: `0x${string}` } {
   return !!p && typeof p === "object" && "token" in (p as any)
 }
 
-// Lightweight tuple typings
+// Tuple typings for safe indexing
 type MaybePlanTuple =
   | readonly [
       unknown,
-      `0x${string}` | undefined,
-      bigint | undefined,
-      number | bigint | undefined,
-      boolean | undefined,
-      string | undefined,
-      string | undefined
+      `0x${string}` | undefined,   // [1] token
+      bigint | undefined,          // [2] price
+      number | bigint | undefined, // [3] days
+      boolean | undefined,         // [4] active
+      string | undefined,          // [5] name
+      string | undefined           // [6] metadataURI
     ]
   | undefined
 
 type MaybePostTuple =
   | readonly [
       unknown,
-      `0x${string}` | undefined,
-      bigint | undefined,
-      boolean | undefined,
-      boolean | undefined,
-      string | undefined
+      `0x${string}` | undefined, // [1] token
+      bigint | undefined,        // [2] price
+      boolean | undefined,       // [3] active
+      boolean | undefined,       // [4] subGate
+      string | undefined         // [5] uri
     ]
   | undefined
 
@@ -88,14 +87,14 @@ export default function PayButton(props: Props) {
   const isSub = isSubscribe(props)
   const periods = isSub && props.periods ? Math.max(1, props.periods) : 1
 
-  // Fetch static info for the price preview pill (plan/post)
+  // Price source
   const { data: planData } = isSub ? usePlan(props.planId) : { data: undefined as unknown }
   const { data: postData } = isBuy(props) ? usePost(props.postId) : { data: undefined as unknown }
 
   const plan = planData as unknown as MaybePlanTuple
   const post = postData as unknown as MaybePostTuple
 
-  // Preview hooks
+  // Previews
   const subPreview = isSub ? usePreviewSubscribe(props.planId, periods) : null
   const buyPreview = isBuy(props) ? usePreviewBuy(props.postId) : null
 
@@ -107,7 +106,7 @@ export default function PayButton(props: Props) {
   const paying = payingSub || payingBuy
   const disabled = !!busy || approving || paying
 
-  // Basic price data for the pill
+  // Price pill info
   const priceInfo = useMemo(() => {
     if (isSub && plan) {
       const token = (plan?.[1] ?? "0x0000000000000000000000000000000000000000") as `0x${string}`
@@ -132,7 +131,6 @@ export default function PayButton(props: Props) {
       setBusy("preview")
       const preview = isSub ? await subPreview!.run() : await buyPreview!.run()
       setBusy(null)
-
       if (!preview) throw new Error("Unable to calculate payment preview.")
 
       // Native path: no approvals
@@ -147,7 +145,7 @@ export default function PayButton(props: Props) {
         return
       }
 
-      // ERC20 path — check allowance (treat missing okAllowance as false)
+      // ERC20 path — allow if needed
       const needsApproval = hasOkAllowance(preview) ? !preview.okAllowance : true
       if (needsApproval) {
         setBusy("approve")
@@ -160,7 +158,7 @@ export default function PayButton(props: Props) {
         setBusy(null)
       }
 
-      // Pay after allowance is sufficient
+      // Then pay
       setBusy("pay")
       const hash = isSub
         ? await subscribe((props as SubscribeProps).planId, periods)
@@ -183,11 +181,11 @@ export default function PayButton(props: Props) {
 
   const pill = useMemo(() => {
     if (!priceInfo) return null
+    const symbol = props.symbolOverride ?? (priceInfo.isNative ? "ETH" : "USDC")
     return (
       <PricePill
         value={priceInfo.amount}
-        /* removed decimals to satisfy exactOptionalPropertyTypes */
-        symbol={props.symbolOverride}
+        symbol={symbol}              {/* ensure required string */}
         isNative={priceInfo.isNative}
         emphasis
       />
