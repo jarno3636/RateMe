@@ -2,7 +2,8 @@
 "use client"
 
 import { base } from "viem/chains"
-import { Address, erc20Abi, formatUnits, maxUint256 } from "viem"
+import type { Address } from "viem"            // ✅ type-only import (verbatimModuleSyntax)
+import { erc20Abi, formatUnits, maxUint256 } from "viem"
 import {
   useAccount,
   usePublicClient,
@@ -47,7 +48,10 @@ export function usePreviewSubscribe(planId?: bigint, periods: number = 1) {
 
   async function run() {
     if (!planId || periods <= 0) return null
-    const plan = await client.readContract({
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
+    const plan = await c.readContract({
       abi: CreatorHubAbi as any,
       address: hub,
       functionName: "plans",
@@ -64,9 +68,9 @@ export function usePreviewSubscribe(planId?: bigint, periods: number = 1) {
 
     // ERC20: fetch balance + allowance
     const [balance, allowance, decimals] = await Promise.all([
-      client.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
-      client.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
-      client.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
     ])
 
     return {
@@ -102,7 +106,10 @@ export function usePreviewBuy(postId?: bigint) {
 
   async function run() {
     if (!postId) return null
-    const post = await client.readContract({
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
+
+    const post = await c.readContract({
       abi: CreatorHubAbi as any,
       address: hub,
       functionName: "posts",
@@ -118,9 +125,9 @@ export function usePreviewBuy(postId?: bigint) {
 
     // ERC20
     const [balance, allowance, decimals] = await Promise.all([
-      client.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
-      client.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
-      client.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "balanceOf", args: [address] }) as Promise<bigint>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "allowance", args: [address, hub] }) as Promise<bigint>,
+      c.readContract({ abi: erc20Abi, address: token, functionName: "decimals" }) as Promise<number>,
     ])
 
     return {
@@ -174,8 +181,10 @@ export function useApproveErc20() {
   async function approve(token: `0x${string}`, amount?: bigint) {
     if (!address) throw new Error("Connect your wallet.")
     if (!token) throw new Error("Missing token address.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
-    // Optional: simulate approve (some ERC20s revert on simulate with 0 gas; skip for safety)
+    // Optional: simulate approve (some ERC20s revert on simulate with 0 gas; often skipped)
     const hash = await writeContractAsync({
       abi: erc20Abi,
       address: token,
@@ -185,7 +194,7 @@ export function useApproveErc20() {
       account: address,
     })
 
-    await client.waitForTransactionReceipt({ hash })
+    await c.waitForTransactionReceipt({ hash })
     return hash
   }
 
@@ -215,6 +224,8 @@ export function useUpdatePost() {
     maybeUri?: string
   ) {
     if (!address) throw new Error("Connect your wallet.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     let token: `0x${string}` | undefined
     let price: bigint
@@ -238,7 +249,7 @@ export function useUpdatePost() {
     }
 
     try {
-      await client.simulateContract({
+      await c.simulateContract({
         abi: CreatorHubAbi as any,
         address: hub,
         functionName: "updatePost",
@@ -259,7 +270,7 @@ export function useUpdatePost() {
         chain: base,
         account: address,
       })
-      await client.waitForTransactionReceipt({ hash })
+      await c.waitForTransactionReceipt({ hash })
       return hash
     } catch (e) {
       throw new Error(toUserError(e))
@@ -288,9 +299,11 @@ export function useUpdatePlan() {
     active: boolean
   ) {
     if (!address) throw new Error("Connect your wallet.")
+    const c = client
+    if (!c) throw new Error("Public client not initialized")
 
     try {
-      await client.simulateContract({
+      await c.simulateContract({
         abi: CreatorHubAbi as any,
         address: hub,
         functionName: "updatePlan",
@@ -311,7 +324,7 @@ export function useUpdatePlan() {
         chain: base,
         account: address,
       })
-      await client.waitForTransactionReceipt({ hash })
+      await c.waitForTransactionReceipt({ hash })
       return hash
     } catch (e) {
       throw new Error(toUserError(e))
