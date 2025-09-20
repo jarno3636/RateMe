@@ -13,7 +13,8 @@ import { base } from "viem/chains"
 import CreatorHub from "@/abi/CreatorHub.json"
 import * as ADDR from "@/lib/addresses"
 import { assertAddresses } from "@/lib/addresses"
-import { Address, isAddressEqual } from "viem"
+import type { Address } from "viem"           // ✅ type-only
+import { isAddressEqual } from "viem"         // ✅ value import
 
 /* ─────────────────────────── Types & utils ─────────────────────────── */
 
