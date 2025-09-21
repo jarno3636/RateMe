@@ -1,18 +1,16 @@
 // /lib/wagmi.ts
-import { createConfig, http } from "wagmi"
+import { createConfig, http, type Connector } from "wagmi"
 import { base } from "viem/chains"
 import { injected, coinbaseWallet, walletConnect } from "wagmi/connectors"
 
-const connectors = [
-  injected(),
-  coinbaseWallet({ appName: "OnlyStars", preference: "smartWallet" }),
-]
-
-// Only add WalletConnect if a projectId is set (avoids build-time env issues)
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_ID
-if (wcProjectId) {
-  connectors.push(walletConnect({ projectId: wcProjectId }))
-}
+
+const connectors: Connector[] = [
+  injected(),
+  // Use 'smartWalletOnly' (or 'eoaOnly' / 'all')
+  coinbaseWallet({ appName: "OnlyStars", preference: "smartWalletOnly" }),
+  ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
+]
 
 export const wagmiConfig = createConfig({
   chains: [base],
