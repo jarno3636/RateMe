@@ -1,4 +1,4 @@
-/// /components/ClientProviders.tsx
+// /components/ClientProviders.tsx
 "use client";
 
 import "@rainbow-me/rainbowkit/styles.css";
