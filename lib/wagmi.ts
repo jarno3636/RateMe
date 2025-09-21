@@ -9,7 +9,6 @@ const projectId =
   "";
 
 if (!projectId) {
-  // Will also show in the browser console (NEXT_PUBLIC_* is inlined)
   console.warn("WalletConnect disabled: missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID");
 }
 
