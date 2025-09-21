@@ -12,6 +12,13 @@ const ProvidersNoSSR = dynamic(() => import("@/components/ClientProviders"), {
   loading: () => null,
 });
 
+// Optional: quick runtime check for connectors (remove in prod)
+// Create this file if you want logs: /components/WagmiDebug.tsx
+const WagmiDebug = dynamic(() => import("@/components/WagmiDebug"), {
+  ssr: false,
+  loading: () => null,
+});
+
 /* ────────────────────────── Metadata ────────────────────────── */
 
 const title = "OnlyStars";
@@ -24,14 +31,11 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE),
   title,
   description,
-  alternates: {
-    canonical: SITE,
-  },
+  alternates: { canonical: SITE },
   icons: [
     { rel: "icon", url: icon },
     { rel: "apple-touch-icon", url: "/apple-touch-icon.png" },
     { rel: "manifest", url: "/site.webmanifest" },
-    // Safari pinned tab (optional—add /safari-pinned-tab.svg to public/)
     { rel: "mask-icon", url: "/safari-pinned-tab.svg", color: "#ff4ecd" },
   ],
   openGraph: {
@@ -48,11 +52,7 @@ export const metadata: Metadata = {
     description,
     images: [ogImage],
   },
-  // Basic robots; adjust if you add gated pages you don’t want indexed
-  robots: {
-    index: true,
-    follow: true,
-  },
+  robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {
@@ -63,7 +63,6 @@ export const viewport: Viewport = {
 };
 
 function JsonLd() {
-  // Simple Organization schema (expand later with creator pages if desired)
   const json = {
     "@context": "https://schema.org",
     "@type": "Organization",
@@ -105,7 +104,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full bg-black text-white antialiased">
         {/* Everything that touches wagmi lives under the client-only provider */}
         <ProvidersNoSSR>
+          {/* Optional debug — comment out for production */}
+          {/* <WagmiDebug /> */}
+
           <Nav />
+
           <main id="main" className="mx-auto max-w-5xl px-4 py-8">
             {children}
           </main>
@@ -134,7 +137,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               placeItems: "center",
               background: "black",
               color: "white",
-              fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
+              fontFamily:
+                "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
             }}
           >
             This app works best with JavaScript enabled.
