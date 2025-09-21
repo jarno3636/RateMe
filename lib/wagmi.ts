@@ -1,27 +1,25 @@
 // /lib/wagmi.ts
-import { createConfig, http, createStorage, cookieStorage } from "wagmi";
+import { http, createStorage, cookieStorage } from "wagmi";
 import { base } from "viem/chains";
 import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 
 const projectId =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
-  process.env.NEXT_PUBLIC_WALLETCONNECT_ID || // backwards-compat just in case
+  process.env.NEXT_PUBLIC_WALLETCONNECT_ID || // optional fallback
   "";
 
 if (!projectId) {
-  // Will print in browser console too (NEXT_PUBLIC_* is inlined)
+  // Will also show in the browser console (NEXT_PUBLIC_* is inlined)
   console.warn("WalletConnect disabled: missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID");
 }
 
-export const wagmiConfig = createConfig(
-  getDefaultConfig({
-    appName: "OnlyStars",
-    projectId,
-    chains: [base],
-    transports: {
-      [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || undefined),
-    },
-    ssr: true,
-    storage: createStorage({ storage: cookieStorage }), // SSR-safe persistence
-  })
-);
+export const wagmiConfig = getDefaultConfig({
+  appName: "OnlyStars",
+  projectId,
+  chains: [base],
+  transports: {
+    [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || undefined),
+  },
+  ssr: true,
+  storage: createStorage({ storage: cookieStorage }), // SSR-safe persistence
+});
