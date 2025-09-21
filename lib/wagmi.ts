@@ -1,21 +1,27 @@
 // /lib/wagmi.ts
-import { createConfig, http, type CreateConnectorFn } from "wagmi";
+import { createConfig, http, createStorage, cookieStorage } from "wagmi";
 import { base } from "viem/chains";
-import { injected, coinbaseWallet, walletConnect } from "wagmi/connectors";
+import { getDefaultConfig } from "@rainbow-me/rainbowkit";
 
-const rpcUrl = process.env.NEXT_PUBLIC_BASE_RPC_URL || undefined;
-const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
+const projectId =
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ||
+  process.env.NEXT_PUBLIC_WALLETCONNECT_ID || // backwards-compat just in case
+  "";
 
-// Build connectors (wagmi v2). Note: valid coinbase preference: "all" | "wallet" | "smartWallet"
-const connectors: CreateConnectorFn[] = [
-  injected({ shimDisconnect: true }),
-  coinbaseWallet({ appName: "OnlyStars", preference: "all" }),
-  ...(wcProjectId ? [walletConnect({ projectId: wcProjectId })] : []),
-];
+if (!projectId) {
+  // Will print in browser console too (NEXT_PUBLIC_* is inlined)
+  console.warn("WalletConnect disabled: missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID");
+}
 
-export const wagmiConfig = createConfig({
-  chains: [base],
-  connectors,
-  transports: { [base.id]: http(rpcUrl) },
-  // storage is added in the client provider (cookieStorage) for SSR safety
-});
+export const wagmiConfig = createConfig(
+  getDefaultConfig({
+    appName: "OnlyStars",
+    projectId,
+    chains: [base],
+    transports: {
+      [base.id]: http(process.env.NEXT_PUBLIC_BASE_RPC_URL || undefined),
+    },
+    ssr: true,
+    storage: createStorage({ storage: cookieStorage }), // SSR-safe persistence
+  })
+);
