@@ -17,9 +17,9 @@ import {
   useCreatePost,
 } from "@/hooks/useCreatorHub"
 import { useAverage, useRatingStats } from "@/hooks/useRatings"
-import { assertAddresses } from "@/lib/addresses"
+import { assertAddresses, USDC as USDC_ADDR } from "@/lib/addresses" // ← use centralized addr
 
-const USDC = process.env.NEXT_PUBLIC_USDC as `0x${string}` | undefined
+const USDC = USDC_ADDR // ← no direct process.env
 const AVATAR_FALLBACK = "/avatar.png"
 
 /* ---------- utils ---------- */
@@ -56,7 +56,7 @@ function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] || tones.pink}`}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] || tones[pink]}`}
     >
       {label}
     </span>
@@ -86,6 +86,11 @@ function Avatar({
       onError={() => setFallback(true)}
     />
   )
+}
+
+/* ===================== Page ===================== */
+export default function CreatorDashboardPage() {
+  // ... the rest of your file stays exactly the same ...
 }
 
 /* ===================== Page ===================== */
