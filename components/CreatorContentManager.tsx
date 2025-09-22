@@ -296,7 +296,7 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
   };
 
   return (
-    <section className="card space-y-4">
+    <section className="card space-y-4 w-full max-w-2xl mx-auto px-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-lg font-semibold">Create a post</div>
       </div>
