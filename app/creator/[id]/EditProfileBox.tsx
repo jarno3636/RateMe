@@ -10,7 +10,7 @@ import { creatorShareLinks } from "@/lib/farcaster"
 const MAX_BIO_WORDS = 250
 const MAX_BIO_CHARS = 1200
 const MAX_NAME_CHARS = 48
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024 // 1 MB
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024 // 2 MB
 const FALLBACK_AVATAR = "/avatar.png"
 
 type ProfileTuple = [
@@ -143,7 +143,7 @@ export default function EditProfileBox({
   const handleAvatarPick = useCallback(async (file: File) => {
     if (!file) return
     if (!file.type.startsWith("image/")) return toast.error("Please pick an image file")
-    if (file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB")
+    if (file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 2 MB")
     try {
       setUploading(true)
       const fd = new FormData()
@@ -259,7 +259,7 @@ export default function EditProfileBox({
               if (f) void handleAvatarPick(f)
             }}
           />
-          <div className="text-[11px] opacity-70">PNG/JPG ≤ 1MB</div>
+          <div className="text-[11px] opacity-70">PNG/JPG ≤ 2MB</div>
         </div>
 
         {/* Form block */}
@@ -292,7 +292,7 @@ export default function EditProfileBox({
           <label className="block">
             <div className="mb-1 text-sm opacity-70">Bio</div>
             <textarea
-              className="min-h-[120px] w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
+              className="min-h=[120px] w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
               value={bio}
               onChange={(e)=>setBio(e.target.value)}
               maxLength={MAX_BIO_CHARS}
