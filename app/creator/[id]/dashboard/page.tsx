@@ -90,11 +90,6 @@ function Avatar({
 
 /* ===================== Page ===================== */
 export default function CreatorDashboardPage() {
-  // ... the rest of your file stays exactly the same ...
-}
-
-/* ===================== Page ===================== */
-export default function CreatorDashboardPage() {
   const params = useParams<{ id: string }>()
   const id = useMemo(() => { try { return BigInt(params.id) } catch { return 0n } }, [params.id])
 
