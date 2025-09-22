@@ -20,7 +20,8 @@ type PreviewTuple = readonly [
   okAllowance: boolean
 ];
 
-const REGISTRY = (ADDR.REGISTRY ?? ADDR.PROFILE_REGISTRY) as `0x${string}` | undefined;
+// NOTE: Profile creation USDC allowance should target the CreatorHub (spender).
+const SPENDER = (ADDR.CREATOR_HUB ?? ADDR.HUB) as `0x${string}` | undefined;
 
 export default function CreateProfileCTA({
   handle,
@@ -41,6 +42,7 @@ export default function CreateProfileCTA({
   const { data: previewData } = usePreviewCreate();
   const preview = previewData as PreviewTuple | undefined;
 
+  // Pass no override here; this hook takes (spender, amount) at call time.
   const { approve, isPending: approving } = useApproveUsdc();
   const { create, isPending: creating } = useCreateProfile();
 
@@ -56,11 +58,11 @@ export default function CreateProfileCTA({
   const onApprove = async () => {
     setErr(null);
     try {
-      if (!REGISTRY) throw new Error("Registry address not configured.");
+      if (!SPENDER) throw new Error("CreatorHub address not configured.");
       // Approve exact fee if we have it; your hook may default to max if amount is omitted.
       const amt = typeof fee === "bigint" && fee > 0n ? fee : undefined;
-      const txHash = await approve(REGISTRY, amt);
-      setOkMsg(`Approved USDC: ${txHash}`);
+      const txHash = await approve(SPENDER, amt);
+      setOkMsg(`Approved USDC for CreatorHub: ${txHash}`);
     } catch (e: any) {
       setErr(e?.message || String(e));
     }
