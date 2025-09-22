@@ -165,7 +165,7 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   } = useCreatorPlanIds(creator);
 
   const posts = (postIds as bigint[] | undefined) ?? [];
-  ￼const plans = (planIds as bigint[] | undefined) ?? [];
+  const plans = (planIds as bigint[] | undefined) ?? [];
 
   if (!isOwner) {
     return <div className="card border-red-500/40 text-red-200">Only the owner can manage content.</div>;
