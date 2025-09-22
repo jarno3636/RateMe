@@ -185,7 +185,7 @@ function PlanRow({ id }: { id: bigint }) {
   }, [active, periods, price, id, approve, hasAllowance])
 
   return (
-    <div className="card flex flex-wrap items-center gap-3">
+    <div className="card w-full max-w-2xl mx-auto flex flex-wrap items-center gap-3">
       <div className="min-w-0 flex-1">
         <div className="truncate font-medium">{name}</div>
         <div className="text-sm opacity-70">
@@ -262,7 +262,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   }, [active, price, hasAllowance, approve, buy, id])
 
   return (
-    <div className="card space-y-3">
+    <div className="card w-full max-w-md mx-auto space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="font-medium">Post #{id.toString()}</div>
         <div className="flex items-center gap-2 text-sm opacity-80">
@@ -385,8 +385,8 @@ function CreatorPublicPageImpl() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4">
-      {/* Header — responsive, no overlap */}
-      <section className="card">
+      {/* Header — centered card */}
+      <section className="card w-full max-w-2xl mx-auto">
         {profLoading ? (
           <div className="flex items-center gap-4">
             <Skeleton className="h-16 w-16 rounded-full" />
@@ -428,10 +428,10 @@ function CreatorPublicPageImpl() {
         )}
       </section>
 
-      {badId && <div className="card border-red-500/40 text-red-200">Invalid profile id.</div>}
-      {profError && !profLoading && <div className="card border-red-500/40 text-red-200">Failed to load profile.</div>}
+      {badId && <div className="card w-full max-w-2xl mx-auto border-red-500/40 text-red-200">Invalid profile id.</div>}
+      {profError && !profLoading && <div className="card w-full max-w-2xl mx-auto border-red-500/40 text-red-200">Failed to load profile.</div>}
       {!profLoading && !prof && id > 0n && (
-        <div className="card">
+        <div className="card w-full max-w-2xl mx-auto">
           Profile not found.{" "}
           <Link className="text-primary underline" href="/creator">
             Become a creator
@@ -441,13 +441,13 @@ function CreatorPublicPageImpl() {
 
       {/* Rating widget (public view) */}
       {!isOwner && creator !== "0x0000000000000000000000000000000000000000" && (
-        <section className="card">
+        <section className="card w-full max-w-2xl mx-auto">
           <RatingWidget creator={creator} owner={creator} />
         </section>
       )}
 
       {isOwner && editing && id > 0n && (
-        <section className="card">
+        <section className="card w-full max-w-2xl mx-auto">
           <EditProfileBox
             creatorId={id.toString()}
             currentAvatar={avatar || FALLBACK_AVATAR}
@@ -458,26 +458,28 @@ function CreatorPublicPageImpl() {
       )}
 
       {/* Bio */}
-      {bio && <section className="card whitespace-pre-wrap">{bio}</section>}
+      {bio && <section className="card w-full max-w-2xl mx-auto whitespace-pre-wrap">{bio}</section>}
 
       {/* Stats for creator */}
-      <StatsSection creator={creator} profileId={id} />
+      <section className="w-full max-w-2xl mx-auto">
+        <StatsSection creator={creator} profileId={id} />
+      </section>
 
       {/* Owner-only content manager */}
       {isOwner && (
-        <section className="card">
+        <section className="card w-full max-w-2xl mx-auto">
           <CreatorContentManager creator={creator} />
         </section>
       )}
 
       {/* Posts */}
-      <section className="space-y-3">
+      <section className="w-full max-w-2xl mx-auto space-y-3">
         <h2 className="text-xl font-semibold">Posts</h2>
-        {postsLoading && <div className="card">Loading posts…</div>}
+        {postsLoading && <div className="card w-full">Loading posts…</div>}
         {!postsLoading && posts.length === 0 && (
-          <div className="card opacity-70">No posts yet.</div>
+          <div className="card w-full opacity-70">No posts yet.</div>
         )}
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(280px,1fr))] justify-items-center">
           {posts.map((pid) => (
             <PostCard key={`${pid}`} id={pid} creator={creator} />
           ))}
@@ -485,11 +487,11 @@ function CreatorPublicPageImpl() {
       </section>
 
       {/* Plans */}
-      <section id="plans" className="space-y-3">
+      <section id="plans" className="w-full max-w-2xl mx-auto space-y-3">
         <h2 className="text-xl font-semibold">Subscription plans</h2>
-        {plansLoading && <div className="card">Loading plans…</div>}
+        {plansLoading && <div className="card w-full">Loading plans…</div>}
         {!plansLoading && plans.length === 0 && (
-          <div className="card opacity-70">No plans yet.</div>
+          <div className="card w-full opacity-70">No plans yet.</div>
         )}
         <div className="grid gap-4">
           {plans.map((plid) => (
