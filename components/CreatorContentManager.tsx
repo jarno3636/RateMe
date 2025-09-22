@@ -15,8 +15,8 @@ import {
 import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras";
 import * as ADDR from "@/lib/addresses";
 
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024; // 1MB
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2MB
+const MAX_VIDEO_BYTES = 5 * 1024 * 1024; // 5MB
 
 const isImg = (u: string) =>
   !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname);
@@ -71,7 +71,7 @@ function PriceInput({
 
 function DropUploader({
   label = "Choose file",
-  tips = ["Image ≤ 1 MB", "Video ≤ 2 MB", "USDC, non-custodial"],
+  tips = ["Image ≤ 2 MB", "Video ≤ 5 MB", "USDC, non-custodial"],
   onFile,
   busy,
 }: {
@@ -165,14 +165,14 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   } = useCreatorPlanIds(creator);
 
   const posts = (postIds as bigint[] | undefined) ?? [];
-  const plans = (planIds as bigint[] | undefined) ?? [];
+  ￼const plans = (planIds as bigint[] | undefined) ?? [];
 
   if (!isOwner) {
     return <div className="card border-red-500/40 text-red-200">Only the owner can manage content.</div>;
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 w-full max-w-3xl mx-auto">
       <PostCreator onCreated={refetchPosts} />
       <PostList ids={posts} loading={postsLoading} onChanged={refetchPosts} />
       <PlanCreator onCreated={refetchPlans} />
@@ -201,11 +201,11 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
       return false;
     }
     if (isImage && file.size > MAX_IMAGE_BYTES) {
-      toast.error("Image exceeds 1 MB");
+      toast.error("Image exceeds 2 MB");
       return false;
     }
     if (isVideoType && file.size > MAX_VIDEO_BYTES) {
-      toast.error("Video exceeds 2 MB");
+      toast.error("Video exceeds 5 MB");
       return false;
     }
     return true;
@@ -416,8 +416,8 @@ function PostRow({
     const isImage = file.type.startsWith("image/");
     const isVideoType = file.type.startsWith("video/");
     if (!isImage && !isVideoType) return toast.error("Pick an image or video");
-    if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 1 MB");
-    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 2 MB");
+    if (isImage && file.size > MAX_IMAGE_BYTES) return toast.error("Image exceeds 2 MB");
+    if (isVideoType && file.size > MAX_VIDEO_BYTES) return toast.error("Video exceeds 5 MB");
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -555,7 +555,7 @@ function PostRow({
                 e.currentTarget.value = "";
               }}
             />
-            <span className="text-xs opacity-60">Image ≤ 1 MB · Video ≤ 2 MB</span>
+            <span className="text-xs opacity-60">Image ≤ 2 MB · Video ≤ 5 MB</span>
           </div>
           <label className="flex items-center gap-2">
             <span className="w-28 text-sm opacity-80">Price (USDC)</span>
