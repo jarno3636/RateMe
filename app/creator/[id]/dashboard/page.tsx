@@ -56,7 +56,7 @@ function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] || tones[pink]}`}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] ${tones[tone] ?? tones.pink}`}
     >
       {label}
     </span>
