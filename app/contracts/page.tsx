@@ -8,8 +8,8 @@ type AddressLike = `0x${string}`;
 
 type RowProps = {
   label: string;
-  // Component accepts either an address or undefined; caller may omit it.
-  addr?: AddressLike;
+  // ✅ optional, and ALSO explicitly allows undefined when provided
+  addr?: AddressLike | undefined;
   help?: string;
 };
 
@@ -44,33 +44,14 @@ function Row({ label, addr, help }: RowProps) {
   );
 }
 
-// NOTE: With exactOptionalPropertyTypes, if you explicitly provide a property,
-// it cannot be typed as just AddressLike while holding `undefined`.
-// So the data model below uses `addr: AddressLike | undefined` (non-optional).
 type Entry = { label: string; addr: AddressLike | undefined; help?: string };
 
 export default function ContractsPage() {
   const entries: Entry[] = [
-    {
-      label: "Creator Hub",
-      addr: ADDR.HUB as AddressLike | undefined,
-      help: "Main contract for posts, plans, and checks",
-    },
-    {
-      label: "USDC",
-      addr: ADDR.USDC as AddressLike | undefined,
-      help: "Payment token (6 decimals)",
-    },
-    {
-      label: "Profile Registry",
-      addr: ADDR.REGISTRY as AddressLike | undefined,
-      help: "On-chain profile & handle directory",
-    },
-    {
-      label: "Ratings",
-      addr: ADDR.RATINGS as AddressLike | undefined,
-      help: "On-chain ratings & reviews",
-    },
+    { label: "Creator Hub",       addr: ADDR.HUB as AddressLike | undefined,      help: "Main contract for posts, plans, and checks" },
+    { label: "USDC",              addr: ADDR.USDC as AddressLike | undefined,     help: "Payment token (6 decimals)" },
+    { label: "Profile Registry",  addr: ADDR.REGISTRY as AddressLike | undefined, help: "On-chain profile & handle directory" },
+    { label: "Ratings",           addr: ADDR.RATINGS as AddressLike | undefined,  help: "On-chain ratings & reviews" },
   ];
 
   return (
@@ -99,9 +80,7 @@ export default function ContractsPage() {
       </div>
 
       <div className="pt-6">
-        <Link className="btn" href="/">
-          Back home
-        </Link>
+        <Link className="btn" href="/">Back home</Link>
       </div>
     </div>
   );
