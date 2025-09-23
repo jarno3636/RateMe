@@ -45,7 +45,8 @@ export default function AboutPage() {
 
         <p className="text-white/80">
           Offer <b className="text-pink-300">subscriptions</b>, sell{" "}
-          <b className="text-pink-300">paid posts</b>, and build trust with{" "}
+          <b className="text-pink-300">paid posts</b>,{" "}
+          <b className="text-pink-300">link unlocks</b> to any URL, and build trust with{" "}
           <b className="text-pink-300">on-chain ratings</b>. Fast, low-fee payments in{" "}
           <b className="text-pink-300">USDC</b> on <b className="text-pink-300">Base</b>.
         </p>
@@ -53,6 +54,9 @@ export default function AboutPage() {
         <div className="flex flex-wrap gap-2 pt-2">
           <a href="#how-it-works" className="btn">
             How it works
+          </a>
+          <a href="#link-unlocks" className="btn-secondary hover:border-pink-400 hover:text-pink-300">
+            Link unlocks
           </a>
           <a href="#for-creators" className="btn-secondary hover:border-pink-400 hover:text-pink-300">
             For creators
@@ -73,13 +77,37 @@ export default function AboutPage() {
       <Section id="how-it-works" title="How it works">
         <ol className="list-decimal pl-5 space-y-2 marker:text-pink-400">
           <li>Create your profile and set a subscription plan.</li>
-          <li>Upload posts (image/video). Mark as free, paid, or subscriber-only.</li>
-          <li>Fans pay per post or subscribe — non-custodial USDC on Base.</li>
+          <li>
+            Upload posts (image/video){" "}
+            <span className="text-white/60">or create a paid link unlock to any external URL (Drive, Dropbox, personal site, gallery, etc.).</span>
+          </li>
+          <li>Fans pay per post/link or subscribe — non-custodial USDC on Base.</li>
           <li>Ratings are on-chain: portable, transparent, Sybil-resistant.</li>
         </ol>
         <p className="pt-2 text-xs text-white/60">
           Pro tip: short clips and crisp images convert best. ✨
         </p>
+      </Section>
+
+      {/* Link unlocks */}
+      <Section id="link-unlocks" title="Link unlocks (sell access to any URL)">
+        <p>
+          Want to sell access to a whole photo album, private page, or a downloadable pack hosted elsewhere?
+          Use <b className="text-pink-300">Link Unlocks</b> to gate any <code>http(s)</code> URL. Add an optional cover
+          image and short description — we’ll store a tiny JSON file with your{" "}
+          <code>url</code>, <code>description</code>, and <code>coverUrl</code>, and the on-chain{" "}
+          <code>uri</code> points to that JSON.
+        </p>
+        <ul className="mt-3 list-disc pl-5 space-y-1">
+          <li>Price it in USDC like a normal paid post.</li>
+          <li>Optionally gate by active subscription instead of one-off purchase.</li>
+          <li>Perfect for external galleries, cloud folders, hidden pages, or bundles.</li>
+        </ul>
+        <div className="pt-4">
+          <Link href="/creator" className="btn hover:border-pink-400 hover:text-pink-300">
+            Create a link unlock
+          </Link>
+        </div>
       </Section>
 
       {/* For creators */}
@@ -89,7 +117,8 @@ export default function AboutPage() {
             <span className="text-pink-300">Own your audience.</span> We never custody funds.
           </li>
           <li className="rounded-lg border border-white/10 bg-black/30 p-3">
-            Mix free previews, single-post sales, or subs.
+            Mix free previews, single-post sales,{" "}
+            <span className="text-pink-300">link unlocks</span>, or subs.
           </li>
           <li className="rounded-lg border border-white/10 bg-black/30 p-3">
             One-click share to Farcaster.
@@ -109,7 +138,8 @@ export default function AboutPage() {
       <Section id="for-fans" title="For fans">
         <ul className="grid gap-2 sm:grid-cols-2">
           <li className="rounded-lg border border-white/10 bg-black/30 p-3">
-            Pay exactly what you want: single posts or all-access.
+            Pay exactly what you want: single posts,{" "}
+            <span className="text-pink-300">paid links</span>, or all-access subs.
           </li>
           <li className="rounded-lg border border-white/10 bg-black/30 p-3">
             USDC on Base = fast, low fees, no surprises.
@@ -136,14 +166,6 @@ export default function AboutPage() {
             rel="noopener noreferrer"
           >
             X (Twitter)
-          </a>
-          <a
-            className="link text-pink-300 hover:text-pink-200"
-            href="https://farcaster.xyz/onlystars"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Farcaster
           </a>
         </div>
         <div className="pt-3">
