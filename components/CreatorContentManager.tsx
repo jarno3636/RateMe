@@ -15,8 +15,11 @@ import {
 import { useUpdatePost, useUpdatePlan } from "@/hooks/useCreatorHubExtras";
 import * as ADDR from "@/lib/addresses";
 
-const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 2MB
-const MAX_VIDEO_BYTES = 15 * 1024 * 1024; // 5MB
+// NEW: link-unlock creator (JSON metadata)
+import LinkUnlockCreator from "@/components/LinkUnlockCreator";
+
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;  // 4 MB
+const MAX_VIDEO_BYTES = 15 * 1024 * 1024; // 15 MB
 
 const isImg = (u: string) =>
   !!u && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(new URL(u, "http://x").pathname);
@@ -172,9 +175,16 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
 
   return (
     <div className="space-y-8">
+      {/* Posts */}
       <PostCreator onCreated={refetchPosts} />
       <PostList ids={posts} loading={postsLoading} onChanged={refetchPosts} />
+
+      {/* Subscriptions */}
       <PlanCreator onCreated={refetchPlans} />
+
+      {/* NEW: Link unlock composer (right under the subscription card) */}
+      <LinkUnlockCreator />
+
       <PlanList ids={plans} loading={plansLoading} onChanged={refetchPlans} />
     </div>
   );
