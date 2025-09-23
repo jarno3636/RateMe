@@ -3,6 +3,7 @@ import "./globals.css";
 import dynamic from "next/dynamic";
 import type { Metadata, Viewport } from "next";
 import Nav from "@/components/Nav";
+import Footer from "@/components/Footer"; // ⬅️ added
 import { Toaster } from "react-hot-toast";
 import { SITE } from "@/lib/farcaster";
 
@@ -13,7 +14,6 @@ const ProvidersNoSSR = dynamic(() => import("@/components/ClientProviders"), {
 });
 
 // Optional: quick runtime check for connectors (remove in prod)
-// Create this file if you want logs: /components/WagmiDebug.tsx
 const WagmiDebug = dynamic(() => import("@/components/WagmiDebug"), {
   ssr: false,
   loading: () => null,
@@ -91,7 +91,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   }
 
   return (
-    <html lang="en" className="h-full" suppressHydrationWarning>
+    <html lang="en" className="h-full scroll-smooth" suppressHydrationWarning>
       <head>
         {/* Preload fallback avatar so all avatars swap instantly */}
         <link rel="preload" as="image" href="/avatar.png" />
@@ -101,7 +101,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <JsonLd />
       </head>
-      <body className="min-h-full bg-black text-white antialiased">
+      {/* Make the page a flex column so the footer sticks to bottom */}
+      <body className="min-h-screen bg-black text-white antialiased flex flex-col">
         {/* Everything that touches wagmi lives under the client-only provider */}
         <ProvidersNoSSR>
           {/* Optional debug — comment out for production */}
@@ -109,9 +110,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <Nav />
 
-          <main id="main" className="mx-auto max-w-5xl px-4 py-8">
+          <main id="main" className="flex-1 mx-auto w-full max-w-5xl px-4 py-8">
             {children}
           </main>
+
+          {/* ⬇️ New Footer */}
+          <Footer />
 
           {/* Premium toast styling (subtle, non-blocking) */}
           <Toaster
