@@ -1,16 +1,18 @@
 {
-  "version": 1,
-  "name": "OnlyStars",
-  "homepageUrl": "https://yourdomain.com",
-  "iconUrl": "https://yourdomain.com/icon.png",
-  "contactEmail": "hello@yourdomain.com",
-  "frames": [
-    {
-      "name": "Launch",
-      "url": "https://yourdomain.com/frames/launch",
-      "image": "https://yourdomain.com/frames/launch.png",
-      "postUrl": "https://yourdomain.com/api/frames/launch",
-      "description": "Launch OnlyStars from Warpcast."
-    }
-  ]
+  "accountAssociation": {
+    "header": "eyJmaWQiOjEzNTA4MzEsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHgyMkMxQTgwZTc2RDdFMDZBOGExMGQyNDg2MzYyRThCNjM1NzZGQzU4In0",
+    "payload": "eyJkb21haW4iOiJvbmx5LXN0YXJzLnZlcmNlbC5hcHAifQ",
+    "signature": "MHg3NjViZDc0ZTkwNmRiMDI0MThkNTQ5N2ZlNWI0YWI1ZTBjZTAwMjg4Mzc4MmYzYzk0N2EwY2E5MGUzZjQ1ZWI1NDAzNjdiZTdmYTU3MDI5N2M2NjY1MTk4NDA4ZjQ5MDE0NzNkNWQyOTcwNDg1NmEyOGRlNDExZmExZTAzMTkwMTFi"
+  },
+  "frame": {
+    "version": "1",
+    "name": "Example Frame",
+    "iconUrl": "https://only-stars.vercel.app/icon.png",
+    "homeUrl": "https://only-stars.vercel.app",
+    "imageUrl": "https://only-stars.vercel.app/image.png",
+    "buttonTitle": "Check this out",
+    "splashImageUrl": "https://only-stars.vercel.app/splash.png",
+    "splashBackgroundColor": "#eeccff",
+    "webhookUrl": "https://only-stars.vercel.app/api/webhook"
+  }
 }
