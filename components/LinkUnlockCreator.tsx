@@ -48,7 +48,8 @@ export default function LinkUnlockCreator() {
   const [desc, setDesc] = useState("");
   const [price, setPrice] = useState("0.00");
   const [subGate, setSubGate] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(false); // creating state
+  const [uploadingCover, setUploadingCover] = useState(false); // cover upload state
 
   const { createPost } = useCreatePostOnchain();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -62,7 +63,7 @@ export default function LinkUnlockCreator() {
     if (!file.type.startsWith("image/")) return toast.error("Cover must be an image");
     if (file.size > MAX_IMAGE_BYTES) return toast.error("Cover image exceeds 4 MB");
     try {
-      setBusy(true);
+      setUploadingCover(true);
       const fd = new FormData();
       fd.append("file", file);
       const res = await fetch("/api/upload", { method: "POST", body: fd });
@@ -73,7 +74,7 @@ export default function LinkUnlockCreator() {
     } catch (e: any) {
       toast.error(e?.message || "Upload failed");
     } finally {
-      setBusy(false);
+      setUploadingCover(false);
     }
   }, []);
 
@@ -108,7 +109,7 @@ export default function LinkUnlockCreator() {
       await toast.promise(
         createPost(ADDR.USDC, priceUnits, subGate, jsonUri),
         {
-          loading: "Creating unlock…",
+          loading: "Creating…",
           success: "Unlock created",
           error: (e: any) => e?.shortMessage || e?.message || "Create failed",
         }
@@ -120,7 +121,7 @@ export default function LinkUnlockCreator() {
     } finally {
       setBusy(false);
     }
-  }, [externalUrl, coverUrl, desc, price, subGate]);
+  }, [externalUrl, coverUrl, desc, price, subGate, createPost]);
 
   return (
     <section className="card space-y-4 w-full max-w-2xl mx-auto px-4">
@@ -129,14 +130,14 @@ export default function LinkUnlockCreator() {
         <span className="text-xs rounded-full border border-pink-500/40 px-2 py-0.5 text-pink-200">New</span>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2">
         <label className="block">
           <div className="mb-1 text-sm opacity-70">External URL</div>
           <input
             className="w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 outline-none ring-pink-500/40 focus:ring"
             placeholder="https://drive.google.com/..., https://mydomain.com/album"
             value={externalUrl}
-            onChange={(e) => setExternalUrl(e.target.value.trim())}
+            onChange={(e) => setExternalUrl(e.target.value)}
           />
         </label>
 
@@ -159,11 +160,17 @@ export default function LinkUnlockCreator() {
           />
         </label>
 
-        <div className="space-y-2">
+        {/* Cover row – fixed button width + truncating URL prevents shifts */}
+        <div className="md:col-span-2 space-y-2">
           <div className="text-sm opacity-70">Cover (optional, ≤ 4 MB)</div>
-          <div className="flex items-center gap-2">
-            <button className="btn" type="button" onClick={() => fileInputRef.current?.click()} disabled={busy}>
-              {busy ? "Uploading…" : "Upload cover"}
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              className="btn w-36 justify-center"
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingCover}
+            >
+              {uploadingCover ? "Uploading…" : "Upload cover"}
             </button>
             <input
               ref={fileInputRef}
@@ -176,7 +183,14 @@ export default function LinkUnlockCreator() {
                 e.currentTarget.value = "";
               }}
             />
-            {coverUrl && <span className="text-xs opacity-70 truncate max-w-[220px]">{coverUrl}</span>}
+            {uploadingCover && (
+              <span className="text-[11px] rounded-full border border-white/15 px-2 py-0.5 opacity-80 shrink-0">
+                working…
+              </span>
+            )}
+            {coverUrl && (
+              <span className="text-xs opacity-70 truncate min-w-0">{coverUrl}</span>
+            )}
           </div>
         </div>
 
@@ -190,14 +204,15 @@ export default function LinkUnlockCreator() {
         We store a small JSON file with <b>url</b>, <b>description</b>, and <b>coverUrl</b>. The post’s on-chain <code>uri</code> points to that JSON.
       </div>
 
+      {/* Actions – fixed widths keep row aligned while labels change */}
       <div className="flex gap-2">
-        <button className="btn" onClick={onCreate} disabled={busy || !canCreate}>
+        <button className="btn w-44 justify-center" onClick={onCreate} disabled={busy || !canCreate || uploadingCover}>
           {busy ? "Creating…" : "Create link unlock"}
         </button>
         <button
-          className="btn-secondary"
+          className="btn-secondary w-24 justify-center"
           onClick={() => { setExternalUrl(""); setPrice("0.00"); setSubGate(false); setDesc(""); setCoverUrl(""); }}
-          disabled={busy}
+          disabled={busy || uploadingCover}
         >
           Reset
         </button>
