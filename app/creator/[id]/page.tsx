@@ -467,7 +467,7 @@ function CreatorPublicPageImpl() {
 
       {/* Owner-only content manager */}
       {isOwner && (
-        <section className="card w-full max-w-2xl mx-auto">
+        <section className="w-full max-w-2xl mx-auto">
           <CreatorContentManager creator={creator} />
         </section>
       )}
