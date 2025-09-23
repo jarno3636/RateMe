@@ -8,7 +8,8 @@ type AddressLike = `0x${string}`;
 
 type RowProps = {
   label: string;
-  addr?: AddressLike; // optional on purpose
+  // Component accepts either an address or undefined; caller may omit it.
+  addr?: AddressLike;
   help?: string;
 };
 
@@ -43,26 +44,31 @@ function Row({ label, addr, help }: RowProps) {
   );
 }
 
+// NOTE: With exactOptionalPropertyTypes, if you explicitly provide a property,
+// it cannot be typed as just AddressLike while holding `undefined`.
+// So the data model below uses `addr: AddressLike | undefined` (non-optional).
+type Entry = { label: string; addr: AddressLike | undefined; help?: string };
+
 export default function ContractsPage() {
-  const entries: Array<{ label: string; addr?: AddressLike; help?: string }> = [
+  const entries: Entry[] = [
     {
       label: "Creator Hub",
-      addr: ADDR.HUB,
+      addr: ADDR.HUB as AddressLike | undefined,
       help: "Main contract for posts, plans, and checks",
     },
     {
       label: "USDC",
-      addr: ADDR.USDC,
+      addr: ADDR.USDC as AddressLike | undefined,
       help: "Payment token (6 decimals)",
     },
     {
       label: "Profile Registry",
-      addr: ADDR.REGISTRY,
+      addr: ADDR.REGISTRY as AddressLike | undefined,
       help: "On-chain profile & handle directory",
     },
     {
       label: "Ratings",
-      addr: ADDR.RATINGS, // ✅ Ratings included
+      addr: ADDR.RATINGS as AddressLike | undefined,
       help: "On-chain ratings & reviews",
     },
   ];
