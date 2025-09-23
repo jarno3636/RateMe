@@ -45,21 +45,34 @@ function PriceInput({
     <input
       type="text"
       inputMode="decimal"
-      pattern="^\\d+(\\.\\d{0,2})?$"
+      // pattern is only enforced on form submit; it's fine to keep it
+      pattern="^\d+(\.\d{0,2})?$"
       placeholder="0.00"
       value={value}
       onChange={(e) => {
-        const raw = e.target.value.replace(/[^\d.]/g, "");
-        const parts = raw.split(".");
-        const intPart = (parts[0] ?? "").slice(0, 12);
-        const fracPart = (parts[1] ?? "").slice(0, 2);
-        const safe = fracPart ? `${intPart}.${fracPart}` : intPart;
+        // Normalize: allow digits + dot, convert comma to dot for some mobile keyboards
+        const normalized = e.target.value.replace(",", ".").replace(/[^\d.]/g, "");
+
+        // Split on the FIRST dot only; ignore additional dots
+        const [i = "", f = ""] = normalized.split(".", 2);
+        const hadDot = normalized.includes(".");
+
+        // Limit lengths
+        let intPart = i.replace(/^0+(?=\d)/, "").slice(0, 12); // trim leading zeros but keep a single 0
+        if (intPart === "" && hadDot) intPart = "0"; // allow ".5" -> "0.5" UX
+        const fracPart = f.slice(0, 2);
+
+        // Preserve the trailing dot while user is still typing decimals
+        const safe = hadDot ? `${intPart}.${fracPart}` : intPart;
+
         onChange(safe);
       }}
       onBlur={(e) => {
-        const val = e.currentTarget.value;
-        if (!val) return onChange("0.00");
-        const n = Number.parseFloat(val);
+        const raw = e.currentTarget.value.replace(",", ".").replace(/[^\d.]/g, "");
+        if (!raw) return onChange("0.00");
+
+        // If user ends on a dot like "1.", treat as "1.00"
+        const n = Number.parseFloat(raw.endsWith(".") ? raw.slice(0, -1) : raw);
         onChange(Number.isFinite(n) ? n.toFixed(2) : "0.00");
       }}
       disabled={disabled}
