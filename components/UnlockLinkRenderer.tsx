@@ -5,13 +5,26 @@ import { useEffect, useState } from "react";
 import type { LinkUnlockV1 } from "@/types/linkUnlock";
 
 function isProbablyJson(u: string) {
-  try { const { pathname } = new URL(u, "http://x"); return /\.json$/i.test(pathname); }
-  catch { return false; }
+  try {
+    const { pathname } = new URL(u, "http://x");
+    return /\.json$/i.test(pathname);
+  } catch {
+    return false;
+  }
 }
 
+/** Inline card for convenience; matches "Option A" typing */
 function UnlockLinkCard({
-  url, unlocked, description, coverUrl,
-}: { url: string; unlocked: boolean; description?: string; coverUrl?: string }) {
+  url,
+  unlocked,
+  description,
+  coverUrl,
+}: {
+  url: string;
+  unlocked: boolean;
+  description?: string | undefined;
+  coverUrl?: string | undefined;
+}) {
   return (
     <div className="rounded-xl border border-white/10 bg-black/40 overflow-hidden">
       {coverUrl ? (
@@ -26,7 +39,9 @@ function UnlockLinkCard({
         <div className="text-xs opacity-60 mt-1 truncate">{url}</div>
         <div className="mt-3">
           {unlocked ? (
-            <a href={url} target="_blank" rel="noopener noreferrer" className="btn">Open link</a>
+            <a href={url} target="_blank" rel="noopener noreferrer" className="btn">
+              Open link
+            </a>
           ) : (
             <div className="text-sm opacity-70">Purchase to unlock this link.</div>
           )}
@@ -37,15 +52,20 @@ function UnlockLinkCard({
 }
 
 export default function UnlockLinkRenderer({
-  uri, unlocked,
-}: { uri: string; unlocked: boolean }) {
+  uri,
+  unlocked,
+}: {
+  uri: string;
+  unlocked: boolean;
+}) {
   const [meta, setMeta] = useState<LinkUnlockV1 | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setMeta(null); setErr(null);
+      setMeta(null);
+      setErr(null);
       if (!isProbablyJson(uri)) return; // non-JSON -> fall back directly
       try {
         const r = await fetch(uri, { cache: "no-store" });
@@ -58,7 +78,9 @@ export default function UnlockLinkRenderer({
         if (!cancelled) setErr(e?.message || "Failed to load metadata");
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [uri]);
 
   // If no JSON or failed to parse, treat uri as the external link itself.
@@ -66,5 +88,12 @@ export default function UnlockLinkRenderer({
   const description = meta?.description;
   const coverUrl = meta?.coverUrl;
 
-  return <UnlockLinkCard url={url} description={description} coverUrl={coverUrl} unlocked={unlocked} />;
+  return (
+    <UnlockLinkCard
+      url={url}
+      description={description}
+      coverUrl={coverUrl}
+      unlocked={unlocked}
+    />
+  );
 }
