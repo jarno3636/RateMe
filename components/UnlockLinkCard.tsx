@@ -7,10 +7,10 @@ export default function UnlockLinkCard({
   description,
   coverUrl,
 }: {
-  url: string;             // the external link stored on-chain
-  unlocked: boolean;       // caller decides if viewer has access
-  description?: string;    // optional (MVP: not persisted on-chain)
-  coverUrl?: string;       // optional (MVP: cosmetic only)
+  url: string;                   // the external link stored on-chain
+  unlocked: boolean;             // caller decides if viewer has access
+  description?: string | undefined; // optional
+  coverUrl?: string | undefined;    // optional
 }) {
   return (
     <div className="rounded-xl border border-white/10 bg-black/40 overflow-hidden">
@@ -23,7 +23,9 @@ export default function UnlockLinkCard({
 
       <div className="p-4">
         <div className="text-lg font-semibold">External Link Unlock</div>
-        {description && <div className="text-sm opacity-80 mt-1">{description}</div>}
+        {description && (
+          <div className="text-sm opacity-80 mt-1">{description}</div>
+        )}
         <div className="text-xs opacity-60 mt-1 truncate">{url}</div>
 
         <div className="mt-3">
