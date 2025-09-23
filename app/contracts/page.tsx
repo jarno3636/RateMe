@@ -4,14 +4,16 @@
 import Link from "next/link";
 import * as ADDR from "@/lib/addresses";
 
+type AddressLike = `0x${string}`;
+
 type RowProps = {
   label: string;
-  addr?: string;
+  addr?: AddressLike;      // ✅ on-chain address type, still optional
   help?: string;
 };
 
 function Row({ label, addr, help }: RowProps) {
-  const url = addr ? ADDR.basescanAddressUrl(addr as `0x${string}`) : undefined;
+  const url = ADDR.basescanAddressUrl(addr);
   return (
     <div className="card flex items-center justify-between gap-3">
       <div className="min-w-0">
@@ -42,7 +44,7 @@ function Row({ label, addr, help }: RowProps) {
 }
 
 export default function ContractsPage() {
-  const entries: Array<{ label: string; addr?: string; help?: string }> = [
+  const entries: Array<{ label: string; addr?: AddressLike; help?: string }> = [
     {
       label: "Creator Hub",
       addr: ADDR.ADDR.HUB,
@@ -59,9 +61,9 @@ export default function ContractsPage() {
       help: "Handles profile data on-chain",
     },
     {
-      label: "Ratings",
-      addr: ADDR.ADDR.RATINGS, // ✅ NEW
-      help: "On-chain ratings/reviews contract",
+      label: "Ratings", // ✅ NEW
+      addr: ADDR.ADDR.RATINGS,
+      help: "On-chain ratings / reviews",
     },
   ];
 
@@ -70,34 +72,23 @@ export default function ContractsPage() {
       <h1 className="text-2xl font-semibold">Contract Addresses</h1>
 
       <div className="rounded-xl border border-white/10 bg-black/40 p-4 text-sm opacity-80">
-        Environment-driven. Configure via{" "}
-        <code className="rounded bg-white/5 px-1">NEXT_PUBLIC_*</code> vars in
-        your deployment settings.
+        These addresses are sourced from your environment variables. Set them in
+        your hosting provider and redeploy.
       </div>
 
       <section className="space-y-3">
         {entries.map(({ label, addr, help }) => (
-          // ✅ Only pass `addr` prop if it’s defined (fixes the TS error)
-          <Row key={label} label={label} help={help} {...(addr ? { addr } : {})} />
+          <Row key={label} label={label} addr={addr} help={help} />
         ))}
       </section>
 
       <div className="pt-4 text-sm opacity-70">
-        Don’t see an address? Make sure you set the corresponding environment
-        variable in your hosting provider and redeploy:
+        Ensure these vars are configured:
         <ul className="mt-2 list-inside list-disc space-y-1">
-          <li>
-            <code>NEXT_PUBLIC_CREATOR_HUB</code>
-          </li>
-          <li>
-            <code>NEXT_PUBLIC_USDC</code>
-          </li>
-          <li>
-            <code>NEXT_PUBLIC_PROFILE_REGISTRY</code>
-          </li>
-          <li>
-            <code>NEXT_PUBLIC_RATINGS</code> {/* ✅ NEW */}
-          </li>
+          <li><code>NEXT_PUBLIC_CREATOR_HUB</code></li>
+          <li><code>NEXT_PUBLIC_USDC</code></li>
+          <li><code>NEXT_PUBLIC_PROFILE_REGISTRY</code></li>
+          <li><code>NEXT_PUBLIC_RATINGS</code></li>
         </ul>
       </div>
 
