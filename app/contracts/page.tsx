@@ -1,4 +1,3 @@
-// /app/contracts/page.tsx
 "use client";
 
 import * as ADDR from "@/lib/addresses";
@@ -36,17 +35,21 @@ function Row({
   };
 
   return (
-    <div className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
+    <div className="rounded-xl border border-white/10 p-4 flex items-center justify-between gap-3 bg-black/40 hover:border-pink-500/50 transition-colors">
       <div className="min-w-0">
-        <div className="font-medium">{label}</div>
-        {help ? <div className="text-xs opacity-70">{help}</div> : null}
+        <div className="font-medium text-pink-400">{label}</div>
+        {help ? <div className="text-xs text-white/70">{help}</div> : null}
         <div className="mt-1 text-sm truncate tabular-nums">
-          {has ? addr : <span className="opacity-60">Not configured</span>}
+          {has ? (
+            <span className="text-white/90">{addr}</span>
+          ) : (
+            <span className="opacity-60">Not configured</span>
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <button
-          className="btn-secondary"
+          className="btn-secondary hover:border-pink-400 hover:text-pink-400"
           onClick={copy}
           disabled={!has}
           title={has ? "Copy address" : "Missing address"}
@@ -54,7 +57,7 @@ function Row({
           Copy
         </button>
         <a
-          className="btn"
+          className="btn hover:border-pink-400 hover:text-pink-400"
           href={has ? basescan(addr) : "#"}
           target={has ? "_blank" : undefined}
           rel={has ? "noopener noreferrer" : undefined}
@@ -69,17 +72,18 @@ function Row({
 
 export default function ContractsPage() {
   return (
-    <div className="mx-auto max-w-3xl space-y-6 px-4">
-      <header className="card w-full max-w-2xl mx-auto">
-        <h1 className="text-2xl font-semibold">Contracts</h1>
+    <div className="mx-auto max-w-3xl space-y-8 px-4">
+      <header className="text-center space-y-2">
+        <h1 className="text-3xl font-bold">
+          <span className="text-pink-400">Contracts</span>
+        </h1>
         <p className="text-white/80">
-          Verified addresses used by OnlyStars on <b>Base</b>. These are read from{" "}
-          <code className="rounded bg-white/10 px-1 py-0.5">/lib/addresses.ts</code>.
+          Verified addresses used by OnlyStars on{" "}
+          <b className="text-pink-400">Base</b>.
         </p>
       </header>
 
-      {/* Centered list, constrained width */}
-      <section className="space-y-3 w-full max-w-2xl mx-auto">
+      <section className="space-y-4 w-full max-w-2xl mx-auto">
         {ENTRIES.map(({ label, key, help }) => {
           const addr = (ADDR as any)[key] as string | undefined;
           return (
@@ -87,14 +91,19 @@ export default function ContractsPage() {
               key={key}
               label={label}
               {...(help ? { help } : {})}
-              {...(addr ? { addr } : {})} // <- avoid passing undefined props
+              {...(addr ? { addr } : {})}
             />
           );
         })}
       </section>
 
-      <div className="w-full max-w-2xl mx-auto">
-        <a href="/about" className="btn-secondary">Back to About</a>
+      <div className="w-full max-w-2xl mx-auto text-center">
+        <a
+          href="/about"
+          className="btn-secondary hover:border-pink-400 hover:text-pink-400"
+        >
+          Back to About
+        </a>
       </div>
     </div>
   );
