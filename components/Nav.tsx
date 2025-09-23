@@ -102,18 +102,15 @@ export default function Nav() {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const { address, isConnected } = useAccount()
 
-  // Only query owned profiles when connected
   const { data: ownedIds } = useProfilesByOwner(
     isConnected && address ? (address as `0x${string}`) : undefined
   )
 
-  // First owned profile id (if any) — guaranteed bigint (no undefined)
   const myId = useMemo<bigint>(() => {
     const list = ownedIds as readonly bigint[] | undefined
     return hasAtLeastOne(list) ? list[0] : 0n
   }, [ownedIds])
 
-  // Read profile only when id exists (avoids unnecessary hook calls)
   const { data: profRaw } = useGetProfile(myId > 0n ? myId : undefined)
   const prof = profRaw as unknown as MaybeProfileTuple
 
@@ -122,24 +119,20 @@ export default function Nav() {
     return uri || AVATAR_FALLBACK
   }, [prof])
 
-  // Also determine if we have a Farcaster fid
   const myFid = useMemo(() => {
     const fid = prof?.[5]
     return typeof fid === "bigint" ? fid : 0n
   }, [prof])
 
-  // Build the target for "My profile"
   const myProfileHref = useMemo(() => {
     return myId > 0n ? `/creator/${myId.toString()}` : "/creator"
   }, [myId])
 
-  // Close mobile menu on route change
   const pathname = usePathname()
   useEffect(() => {
     setOpen(false)
   }, [pathname])
 
-  // Click-outside & Esc-to-close for mobile panel
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false)
@@ -155,7 +148,6 @@ export default function Nav() {
     }
   }, [open])
 
-  // Farcaster compose (Warpcast) helper
   const onCast = useCallback(() => {
     const origin = getSiteOrigin()
     const url = `${origin}${myProfileHref}`
@@ -174,7 +166,6 @@ export default function Nav() {
         Skip to content
       </a>
 
-      {/* Three-zone layout to prevent overlap: Left logo, center nav, right actions */}
       <div className="mx-auto grid h-16 max-w-5xl grid-cols-[auto,1fr,auto] items-center gap-3 px-4">
         {/* Left: logo */}
         <Link href="/" className="flex min-w-0 items-center gap-2" aria-label="OnlyStars home">
@@ -197,12 +188,13 @@ export default function Nav() {
               )}
               {myId === 0n && "My profile"}
             </NavLink>
+            {/* ✅ Added About */}
+            <NavLink href="/about" activeWhenStartsWith>About</NavLink>
           </div>
         </nav>
 
-        {/* Right: Connect + (optional) Farcaster cast */}
+        {/* Right actions */}
         <div className="flex items-center gap-2">
-          {/* Cast button (desktop) shows when fid exists */}
           {myFid > 0n && (
             <button
               type="button"
@@ -221,9 +213,7 @@ export default function Nav() {
           <div className="hidden md:block">
             <Connect />
           </div>
-          {/* Mobile: connect + menu */}
           <div className="md:hidden flex items-center gap-2">
-            {/* Mobile cast button (icon-only) */}
             {myFid > 0n && (
               <button
                 type="button"
@@ -252,46 +242,18 @@ export default function Nav() {
         </div>
       </div>
 
-      {/* Mobile menu panel */}
+      {/* Mobile menu */}
       {open && (
         <div className="mx-auto max-w-5xl px-4 pb-3 md:hidden" ref={panelRef}>
-          <div
-            className="mt-2 rounded-2xl border border-white/10 bg-black/70 p-3 shadow-lg"
-            role="dialog"
-            aria-label="Mobile navigation"
-          >
-            {/* 2-column compact pill grid */}
+          <div className="mt-2 rounded-2xl border border-white/10 bg-black/70 p-3 shadow-lg" role="dialog" aria-label="Mobile navigation">
             <div className="grid grid-cols-2 gap-2">
-              <Link
-                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
-                href="/"
-                onClick={() => setOpen(false)}
-              >
-                Home
-              </Link>
-              <Link
-                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
-                href="/discover"
-                onClick={() => setOpen(false)}
-              >
-                Discover
-              </Link>
-              <Link
-                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
-                href="/creator"
-                onClick={() => setOpen(false)}
-              >
-                Become a creator
-              </Link>
-              <Link
-                className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10"
-                href={myProfileHref}
-                onClick={() => setOpen(false)}
-              >
-                My profile
-              </Link>
+              <Link className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10" href="/" onClick={() => setOpen(false)}>Home</Link>
+              <Link className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10" href="/discover" onClick={() => setOpen(false)}>Discover</Link>
+              <Link className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10" href="/creator" onClick={() => setOpen(false)}>Become a creator</Link>
+              <Link className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10" href={myProfileHref} onClick={() => setOpen(false)}>My profile</Link>
+              {/* ✅ Added About to mobile */}
+              <Link className="truncate rounded-full border border-pink-500/40 px-3 py-1.5 text-center text-xs hover:bg-pink-500/10" href="/about" onClick={() => setOpen(false)}>About</Link>
 
-              {/* Cast quick action in the grid (shows only when fid) */}
               {myFid > 0n && (
                 <button
                   type="button"
