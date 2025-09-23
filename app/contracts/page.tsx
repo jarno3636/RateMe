@@ -5,16 +5,15 @@ import * as ADDR from "@/lib/addresses";
 
 type Entry = {
   label: string;
-  // Limit keys to the address exports you actually use here
   key: "HUB" | "REGISTRY" | "USDC" | "RATINGS";
   help?: string;
 };
 
 const ENTRIES: Entry[] = [
-  { label: "CreatorHub",       key: "HUB",      help: "Main app contract" },
-  { label: "ProfileRegistry",  key: "REGISTRY", help: "Handle → profile mapping" },
-  { label: "USDC",             key: "USDC",     help: "Payment token (Base)" },
-  { label: "Ratings",          key: "RATINGS",  help: "On-chain ratings & reviews" }, // ✅ added
+  { label: "CreatorHub",      key: "HUB",      help: "Main app contract" },
+  { label: "ProfileRegistry", key: "REGISTRY", help: "Handle → profile mapping" },
+  { label: "USDC",            key: "USDC",     help: "Payment token (Base)" },
+  { label: "Ratings",         key: "RATINGS",  help: "On-chain ratings & reviews" },
 ];
 
 const basescan = (addr?: `0x${string}` | string) =>
@@ -81,15 +80,17 @@ export default function ContractsPage() {
 
       {/* Centered list, constrained width */}
       <section className="space-y-3 w-full max-w-2xl mx-auto">
-        {ENTRIES.map(({ label, key, help }) => (
-          <Row
-            key={key}
-            label={label}
-            help={help}
-            // pull named export directly from the module namespace (HUB, REGISTRY, USDC, RATINGS)
-            addr={(ADDR as any)[key] as string | undefined}
-          />
-        ))}
+        {ENTRIES.map(({ label, key, help }) => {
+          const addr = (ADDR as any)[key] as string | undefined;
+          return (
+            <Row
+              key={key}
+              label={label}
+              {...(help ? { help } : {})}
+              {...(addr ? { addr } : {})} // <- avoid passing undefined props
+            />
+          );
+        })}
       </section>
 
       <div className="w-full max-w-2xl mx-auto">
