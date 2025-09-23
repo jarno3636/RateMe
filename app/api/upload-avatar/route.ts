@@ -5,7 +5,9 @@ import { createHash, randomUUID } from "crypto";
 
 export const runtime = "nodejs";
 
-const MAX_BYTES = 1_000_000; // 1MB cap
+// ⬆️ bumped from 1 MB → 2 MB
+const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
+
 const IMAGE_TYPES = new Set([
   "image/png",
   "image/jpeg",
@@ -76,14 +78,14 @@ export async function POST(req: Request) {
     }
 
     const form = (await req.formData()) as unknown as { get?: (k: string) => unknown };
-    const file = (form.get ? form.get("file") : null) as File | null;
+    const file = (form.get ? (form.get("file") as File | null) : null);
     if (!file) return bad(400, "No file");
 
     const type = (file as any).type as string | undefined;
     const size = Number((file as any).size ?? 0);
     if (!type || !IMAGE_TYPES.has(type)) return bad(400, "Only PNG, JPEG, WEBP, GIF, or AVIF allowed");
     if (!Number.isFinite(size) || size <= 0) return bad(400, "Empty upload");
-    if (size > MAX_BYTES) return bad(400, "Image must be ≤ 1MB");
+    if (size > MAX_BYTES) return bad(400, "Image must be ≤ 2 MB");
 
     // Read bytes
     const arrayBuf = await (file as any).arrayBuffer();
