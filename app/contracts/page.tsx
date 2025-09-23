@@ -1,86 +1,99 @@
 // /app/contracts/page.tsx
 "use client";
 
-import Link from "next/link";
-import { basescanAddressUrl, ADDR } from "@/lib/addresses";
+import * as ADDR from "@/lib/addresses";
 
-type AddressLike = `0x${string}`;
-
-type RowProps = {
+type Entry = {
   label: string;
-  // ✅ optional, and ALSO explicitly allows undefined when provided
-  addr?: AddressLike | undefined;
+  // Limit keys to the address exports you actually use here
+  key: "HUB" | "REGISTRY" | "USDC" | "RATINGS";
   help?: string;
 };
 
-function Row({ label, addr, help }: RowProps) {
-  const url = addr ? basescanAddressUrl(addr) : undefined;
+const ENTRIES: Entry[] = [
+  { label: "CreatorHub",       key: "HUB",      help: "Main app contract" },
+  { label: "ProfileRegistry",  key: "REGISTRY", help: "Handle → profile mapping" },
+  { label: "USDC",             key: "USDC",     help: "Payment token (Base)" },
+  { label: "Ratings",          key: "RATINGS",  help: "On-chain ratings & reviews" }, // ✅ added
+];
+
+const basescan = (addr?: `0x${string}` | string) =>
+  addr ? `https://basescan.org/address/${addr}` : "";
+
+function Row({
+  label,
+  addr,
+  help,
+}: {
+  label: string;
+  addr?: string;
+  help?: string;
+}) {
+  const has = !!addr;
+
+  const copy = async () => {
+    if (!has) return;
+    await navigator.clipboard.writeText(addr!);
+  };
 
   return (
-    <div className="card flex items-center justify-between gap-3">
+    <div className="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3">
       <div className="min-w-0">
         <div className="font-medium">{label}</div>
-        {help && <div className="text-xs opacity-70">{help}</div>}
+        {help ? <div className="text-xs opacity-70">{help}</div> : null}
+        <div className="mt-1 text-sm truncate tabular-nums">
+          {has ? addr : <span className="opacity-60">Not configured</span>}
+        </div>
       </div>
-
-      <div className="flex items-center gap-2">
-        {addr ? (
-          <>
-            <code className="rounded bg-white/5 px-2 py-1 text-xs">{addr}</code>
-            <a
-              className="btn-secondary"
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              BaseScan
-            </a>
-          </>
-        ) : (
-          <span className="text-xs opacity-60">Not configured</span>
-        )}
+      <div className="flex shrink-0 items-center gap-2">
+        <button
+          className="btn-secondary"
+          onClick={copy}
+          disabled={!has}
+          title={has ? "Copy address" : "Missing address"}
+        >
+          Copy
+        </button>
+        <a
+          className="btn"
+          href={has ? basescan(addr) : "#"}
+          target={has ? "_blank" : undefined}
+          rel={has ? "noopener noreferrer" : undefined}
+          aria-disabled={!has}
+        >
+          View
+        </a>
       </div>
     </div>
   );
 }
 
-type Entry = { label: string; addr: AddressLike | undefined; help?: string };
-
 export default function ContractsPage() {
-  const entries: Entry[] = [
-    { label: "Creator Hub",       addr: ADDR.HUB as AddressLike | undefined,      help: "Main contract for posts, plans, and checks" },
-    { label: "USDC",              addr: ADDR.USDC as AddressLike | undefined,     help: "Payment token (6 decimals)" },
-    { label: "Profile Registry",  addr: ADDR.REGISTRY as AddressLike | undefined, help: "On-chain profile & handle directory" },
-    { label: "Ratings",           addr: ADDR.RATINGS as AddressLike | undefined,  help: "On-chain ratings & reviews" },
-  ];
-
   return (
-    <div className="mx-auto max-w-2xl space-y-6 px-4">
-      <h1 className="text-2xl font-semibold">Contract Addresses</h1>
+    <div className="mx-auto max-w-3xl space-y-6 px-4">
+      <header className="card w-full max-w-2xl mx-auto">
+        <h1 className="text-2xl font-semibold">Contracts</h1>
+        <p className="text-white/80">
+          Verified addresses used by OnlyStars on <b>Base</b>. These are read from{" "}
+          <code className="rounded bg-white/10 px-1 py-0.5">/lib/addresses.ts</code>.
+        </p>
+      </header>
 
-      <div className="rounded-xl border border-white/10 bg-black/40 p-4 text-sm opacity-80">
-        These are pulled from <code>NEXT_PUBLIC_*</code> environment variables.
-        Update them in your hosting provider and redeploy.
-      </div>
-
-      <section className="space-y-3">
-        {entries.map(({ label, addr, help }) => (
-          <Row key={label} label={label} addr={addr} help={help} />
+      {/* Centered list, constrained width */}
+      <section className="space-y-3 w-full max-w-2xl mx-auto">
+        {ENTRIES.map(({ label, key, help }) => (
+          <Row
+            key={key}
+            label={label}
+            help={help}
+            // pull named export directly from the module namespace (HUB, REGISTRY, USDC, RATINGS)
+            addr={(ADDR as any)[key] as string | undefined}
+          />
         ))}
       </section>
 
-      <div className="pt-4 text-sm opacity-70">
-        Ensure these env vars are set:
-        <ul className="mt-2 list-inside list-disc space-y-1">
-          <li><code>NEXT_PUBLIC_CREATOR_HUB</code></li>
-          <li><code>NEXT_PUBLIC_USDC</code></li>
-          <li><code>NEXT_PUBLIC_PROFILE_REGISTRY</code></li>
-          <li><code>NEXT_PUBLIC_RATINGS</code></li>
-        </ul>
-      </div>
-
-      <div className="pt-6">
-        <Link className="btn" href="/">Back home</Link>
+      <div className="w-full max-w-2xl mx-auto">
+        <a href="/about" className="btn-secondary">Back to About</a>
       </div>
     </div>
   );
