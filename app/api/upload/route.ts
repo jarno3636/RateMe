@@ -19,8 +19,8 @@ const IMAGE_TYPES = new Set([
 const VIDEO_TYPES = new Set(["video/mp4", "video/webm"]);
 
 // ⬆️ bumped limits
-const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB
-const MAX_VIDEO_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 2 MB
+const MAX_VIDEO_BYTES = 15 * 1024 * 1024; // 5 MB
 
 const EXT_FROM_MIME: Record<string, string> = {
   "image/png": "png",
