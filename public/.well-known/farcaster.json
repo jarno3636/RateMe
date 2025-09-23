@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "name": "OnlyStars",
+  "homepageUrl": "https://yourdomain.com",
+  "iconUrl": "https://yourdomain.com/icon.png",
+  "contactEmail": "hello@yourdomain.com",
+  "frames": [
+    {
+      "name": "Launch",
+      "url": "https://yourdomain.com/frames/launch",
+      "image": "https://yourdomain.com/frames/launch.png",
+      "postUrl": "https://yourdomain.com/api/frames/launch",
+      "description": "Launch OnlyStars from Warpcast."
+    }
+  ]
+}
