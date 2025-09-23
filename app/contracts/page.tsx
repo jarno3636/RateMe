@@ -47,22 +47,22 @@ export default function ContractsPage() {
   const entries: Array<{ label: string; addr?: AddressLike; help?: string }> = [
     {
       label: "Creator Hub",
-      addr: ADDR.ADDR.HUB,
+      addr: ADDR.HUB,
       help: "Main contract for posts, plans, and checks",
     },
     {
       label: "USDC",
-      addr: ADDR.ADDR.USDC,
+      addr: ADDR.USDC,
       help: "Payment token (6 decimals)",
     },
     {
       label: "Profile Registry",
-      addr: ADDR.ADDR.REGISTRY,
+      addr: ADDR.REGISTRY,
       help: "On-chain profile & handle directory",
     },
     {
       label: "Ratings",
-      addr: ADDR.ADDR.RATINGS, // ✅ Ratings included
+      addr: ADDR.RATINGS, // ✅ Ratings included
       help: "On-chain ratings & reviews",
     },
   ];
