@@ -18,8 +18,9 @@ const IMAGE_TYPES = new Set([
 
 const VIDEO_TYPES = new Set(["video/mp4", "video/webm"]);
 
-const MAX_IMAGE_BYTES = 1 * 1024 * 1024; // 1MB
-const MAX_VIDEO_BYTES = 2 * 1024 * 1024; // 2MB
+// ⬆️ bumped limits
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024; // 2 MB
+const MAX_VIDEO_BYTES = 5 * 1024 * 1024; // 5 MB
 
 const EXT_FROM_MIME: Record<string, string> = {
   "image/png": "png",
@@ -122,7 +123,10 @@ export async function POST(req: Request) {
 
     const sizeCap = isImage ? MAX_IMAGE_BYTES : MAX_VIDEO_BYTES;
     if (size > sizeCap) {
-      return bad(413, `${isImage ? "Image" : "Video"} exceeds ${(sizeCap / 1024 / 1024).toFixed(0)} MB`);
+      return bad(
+        413,
+        `${isImage ? "Image" : "Video"} exceeds ${(sizeCap / 1024 / 1024).toFixed(0)} MB`
+      );
     }
 
     // Read bytes and double-check against cap (defense-in-depth)
@@ -130,7 +134,10 @@ export async function POST(req: Request) {
     const arrayBuf: ArrayBuffer = await (file as any).arrayBuffer();
     const buf = Buffer.from(arrayBuf);
     if (buf.byteLength > sizeCap) {
-      return bad(413, `${isImage ? "Image" : "Video"} exceeds ${(sizeCap / 1024 / 1024).toFixed(0)} MB`);
+      return bad(
+        413,
+        `${isImage ? "Image" : "Video"} exceeds ${(sizeCap / 1024 / 1024).toFixed(0)} MB`
+      );
     }
 
     // Best-effort content sniffing to reduce spoofed content-type uploads
