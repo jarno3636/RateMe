@@ -163,6 +163,7 @@ function PlanRow({ id }: { id: bigint }) {
       if (!hasAllowance) {
         const t = toast.loading("Approving USDC…")
         try {
+          // exact approval for subs (periods can vary)
           await approve(HUB, totalCost)
           toast.success("Approval confirmed")
         } catch (e: any) {
@@ -242,15 +243,27 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
   const { approve, isPending: approving } = useUSDCApprove()
   const hasAllowance = (allowance ?? 0n) >= price
 
+  // --- One-time infinite approval toggle (to reduce future tx count) ---
+  const APPROVE_MAX_KEY = "onlystars_approve_max"
+  const [approveMax, setApproveMax] = useState<boolean>(() => {
+    try { return localStorage.getItem(APPROVE_MAX_KEY) !== "false" } catch { return true }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(APPROVE_MAX_KEY, String(approveMax)) } catch {}
+  }, [approveMax])
+
+  // Max uint256 (viem BigInt)
+  const MAX_UINT256 = (1n << 256n) - 1n
+
   const buyFlow = useCallback(async () => {
     if (!active || price === 0n) return
     if (!HUB) return toast.error("Missing HUB contract address")
     try {
       if (!hasAllowance) {
-        const t = toast.loading("Approving USDC…")
-        await approve(HUB, price)
+        const t = toast.loading(approveMax ? "Approving USDC for future purchases…" : "Approving USDC…")
+        await approve(HUB, approveMax ? MAX_UINT256 : price)
         toast.dismiss(t)
-        toast.success("Approval confirmed")
+        toast.success(approveMax ? "Approval set (one-time)" : "Approval confirmed")
       }
       const t2 = toast.loading("Buying post…")
       await buy(id)
@@ -259,7 +272,9 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
     } catch (e: any) {
       toast.error(e?.shortMessage || e?.message || "Purchase failed")
     }
-  }, [active, price, hasAllowance, approve, buy, id])
+  }, [active, price, hasAllowance, approve, buy, id, approveMax])
+
+  const BLUR_LOCKED = "blur-lg" // stronger blur for locked content
 
   return (
     <div className="card w-full max-w-md mx-auto space-y-3">
@@ -279,7 +294,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
           <img
             src={uri}
             alt=""
-            className={`h-auto w-full ${canView ? "" : "blur-sm"}`}
+            className={`h-auto w-full ${canView ? "" : BLUR_LOCKED}`}
             loading="lazy"
             decoding="async"
             onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none" }}
@@ -287,13 +302,13 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
         ) : isVideo(uri) ? (
           <video
             src={uri}
-            className={`h-auto w-full ${canView ? "" : "blur-sm"}`}
+            className={`h-auto w-full ${canView ? "" : BLUR_LOCKED}`}
             controls={canView}
             playsInline
             preload={canView ? "metadata" : "none"}
           />
         ) : (
-          <div className={`block bg-black/40 p-4 ${canView ? "" : "blur-sm"}`}>Post content</div>
+          <div className={`block bg-black/40 p-4 ${canView ? "" : BLUR_LOCKED}`}>Post content</div>
         )}
 
         {!canView && (
@@ -304,7 +319,7 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
       </div>
 
       {!canView && price > 0n && !subGate && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-col gap-2">
           <button
             className="btn"
             onClick={buyFlow}
@@ -313,8 +328,20 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
           >
             {hasAllowance
               ? (buying ? "Buying…" : `Buy post (${fmt6(price)} USDC)`)
-              : (approving ? "Approving…" : `Approve & Buy (${fmt6(price)} USDC)`)}
+              : (approving ? "Approving…" : (approveMax ? `Approve once & buy (${fmt6(price)} USDC)` : `Approve & buy (${fmt6(price)} USDC)`))}
           </button>
+
+          {/* one-time approval toggle */}
+          {!hasAllowance && (
+            <label className="flex items-center gap-2 text-xs opacity-80">
+              <input
+                type="checkbox"
+                checked={approveMax}
+                onChange={(e) => setApproveMax(e.target.checked)}
+              />
+              <span>Save approval for future purchases</span>
+            </label>
+          )}
         </div>
       )}
 
