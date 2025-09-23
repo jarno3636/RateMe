@@ -46,7 +46,6 @@ function PriceInput({
       placeholder="0.00"
       value={value}
       onChange={(e) => {
-        // Allow only digits and up to 2 decimals; strip other chars gracefully
         const raw = e.target.value.replace(/[^\d.]/g, "");
         const parts = raw.split(".");
         const intPart = (parts[0] ?? "").slice(0, 12);
@@ -172,7 +171,7 @@ export default function CreatorContentManager({ creator }: { creator: `0x${strin
   }
 
   return (
-    <div className="space-y-8 w-full max-w-3xl mx-auto">
+    <div className="space-y-8">
       <PostCreator onCreated={refetchPosts} />
       <PostList ids={posts} loading={postsLoading} onChanged={refetchPosts} />
       <PlanCreator onCreated={refetchPlans} />
@@ -260,7 +259,6 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
 
       await promise;
 
-      // Optional Farcaster share (best-effort; doesn’t block)
       if (shareFarcaster) {
         void (async () => {
           try {
@@ -282,7 +280,6 @@ function PostCreator({ onCreated }: { onCreated?: () => void }) {
         })();
       }
 
-      // reset
       setUri("");
       setPriceUsd("0.00");
       setSubGate(false);
@@ -379,19 +376,18 @@ function PostRow({
   onChanged,
 }: {
   id: bigint;
-  onChanged?: (() => void) | undefined; // allow explicit undefined (exactOptionalPropertyTypes)
+  onChanged?: (() => void) | undefined;
 }) {
   const { data: postData } = usePost(id);
 
-  // Tell TS what indices we read without over-constraining the hook.
   type MaybePost =
     | readonly [
-        unknown, // [0] unused
-        `0x${string}` | undefined, // [1] token
-        bigint | undefined, // [2] price (USDC 6dp)
-        boolean | undefined, // [3] active
-        boolean | undefined, // [4] subGate
-        string | undefined // [5] uri
+        unknown,
+        `0x${string}` | undefined,
+        bigint | undefined,
+        boolean | undefined,
+        boolean | undefined,
+        string | undefined
       ]
     | undefined;
 
@@ -707,16 +703,15 @@ function PlanRow({
 }) {
   const { data: planData } = usePlan(id);
 
-  // Describe the tuple that your contract returns.
   type MaybePlan =
     | readonly [
-        unknown,                 // [0] unused / id / creator etc. (not used here)
-        `0x${string}` | undefined, // [1] token
-        bigint | undefined,        // [2] price (USDC 6dp)
-        number | bigint | undefined, // [3] period days
-        boolean | undefined,        // [4] active
-        string | undefined,         // [5] name
-        string | undefined          // [6] metadataURI
+        unknown,
+        `0x${string}` | undefined,
+        bigint | undefined,
+        number | bigint | undefined,
+        boolean | undefined,
+        string | undefined,
+        string | undefined
       ]
     | undefined;
 
