@@ -30,6 +30,7 @@ import ShareBar from "@/components/ShareBar"
 import EditProfileBox from "./EditProfileBox"
 import RatingWidget from "@/components/RatingWidget"
 import toast from "react-hot-toast"
+import UnlockLinkRenderer from "@/components/UnlockLinkRenderer" // ← NEW
 
 const FALLBACK_AVATAR = "/avatar.png"
 const HUB = ADDR.HUB
@@ -49,6 +50,10 @@ function isImg(u: string) {
 function isVideo(u: string) {
   const p = safeUrlPathname(u)
   return /\.(mp4|webm|ogg)$/i.test(p)
+}
+// Heuristic: our link-unlock posts point to a JSON metadata blob
+function isProbablyJson(u: string) {
+  try { return /\.json$/i.test(new URL(u, "http://x").pathname) } catch { return false }
 }
 const fmt6 = (v: bigint) => (Number(v) / 1e6).toFixed(2)
 const isNumericId = (s: string) => /^[0-9]+$/.test(s)
@@ -276,19 +281,16 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
 
   const BLUR_LOCKED = "blur-lg" // stronger blur for locked content
 
-  return (
-    <div className="card w-full max-w-md mx-auto space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="font-medium">Post #{id.toString()}</div>
-        <div className="flex items-center gap-2 text-sm opacity-80">
-          {subGate ? <Badge label="Subscriber" tone="green" /> : price === 0n ? <Badge label="Free" tone="slate" /> : <Badge label="Paid" tone="amber" />}
-          {!active && <Badge label="Inactive" tone="slate" />}
-          <span className="opacity-70">· {fmt6(price)} USDC</span>
-        </div>
-      </div>
+  // Decide how to render content
+  const renderContent = () => {
+    if (isProbablyJson(uri)) {
+      // Render the new Link Unlock card (it will fetch & parse JSON; falls back if invalid)
+      return <UnlockLinkRenderer uri={uri} unlocked={canView} />
+    }
 
-      {/* Content */}
-      <div className="relative overflow-hidden rounded-xl border border-white/10">
+    // Standard media
+    return (
+      <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {isImg(uri) ? (
           <img
@@ -316,6 +318,24 @@ function PostCard({ id, creator }: { id: bigint; creator: `0x${string}` }) {
             <div className="rounded-full border border-white/20 px-3 py-1 text-xs">Locked</div>
           </div>
         )}
+      </>
+    )
+  }
+
+  return (
+    <div className="card w-full max-w-md mx-auto space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="font-medium">Post #{id.toString()}</div>
+        <div className="flex items-center gap-2 text-sm opacity-80">
+          {subGate ? <Badge label="Subscriber" tone="green" /> : price === 0n ? <Badge label="Free" tone="slate" /> : <Badge label="Paid" tone="amber" />}
+          {!active && <Badge label="Inactive" tone="slate" />}
+          <span className="opacity-70">· {fmt6(price)} USDC</span>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="relative overflow-hidden rounded-xl border border-white/10">
+        {renderContent()}
       </div>
 
       {!canView && price > 0n && !subGate && (
